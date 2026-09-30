@@ -2,33 +2,41 @@
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
+from .formula import (
+    CIRCULAR_ERROR,
+    REF_ERROR,
+    VALUE_ERROR,
+    CellError,
+    FormulaError,
+    evaluate,
+    format_number,
+    is_formula,
+    parse,
+    parse_number,
+    references,
+)
+from .references import column_name
+
 DEFAULT_ROWS = 1000
 DEFAULT_COLS = 52
 
 
-def column_name(col: int) -> str:
-    """Convert a zero-based column index to a spreadsheet letter name (0 -> A, 26 -> AA)."""
-    name = ""
-    col += 1
-    while col:
-        col, rem = divmod(col - 1, 26)
-        name = chr(ord("A") + rem) + name
-    return name
-
-
-def cell_name(row: int, col: int) -> str:
-    """Zero-based (row, col) to an A1-style reference."""
-    return f"{column_name(col)}{row + 1}"
-
-
 class SheetModel(QAbstractTableModel):
-    """Holds the raw text of each non-empty cell, keyed by (row, col)."""
+    """Holds the raw text of each non-empty cell, keyed by (row, col).
+
+    Qt's EditRole is the raw text (e.g. "=A1+2"); DisplayRole is the computed value.
+    """
 
     def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
         super().__init__(parent)
         self._rows = rows
         self._cols = cols
         self._cells: dict[tuple[int, int], str] = {}
+        self._formula_keys: set[tuple[int, int]] = set()
+        # Parsed formulas, as (ast or CellError, referenced cells).
+        self._parsed: dict[tuple[int, int], tuple] = {}
+        # Computed values: float, str, or CellError. Cleared on every edit.
+        self._values: dict[tuple[int, int], object] = {}
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else self._rows
@@ -39,8 +47,15 @@ class SheetModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return None
-        if role in (Qt.DisplayRole, Qt.EditRole):
-            return self._cells.get((index.row(), index.column()), "")
+        row, col = index.row(), index.column()
+        if role == Qt.EditRole:
+            return self.get_cell(row, col)
+        if role == Qt.DisplayRole:
+            return self.display_text(row, col)
+        if role == Qt.TextAlignmentRole:
+            if isinstance(self.value(row, col), float):
+                return Qt.AlignRight | Qt.AlignVCenter
+            return Qt.AlignLeft | Qt.AlignVCenter
         return None
 
     def setData(self, index, value, role=Qt.EditRole):
@@ -62,6 +77,7 @@ class SheetModel(QAbstractTableModel):
         return str(section + 1)
 
     def get_cell(self, row: int, col: int) -> str:
+        """The raw text as entered."""
         return self._cells.get((row, col), "")
 
     def set_cell(self, row: int, col: int, value) -> None:
@@ -75,9 +91,99 @@ class SheetModel(QAbstractTableModel):
             del self._cells[key]
         else:
             return
-        index = self.index(row, col)
-        self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.EditRole])
+        if is_formula(text):
+            self._formula_keys.add(key)
+        else:
+            self._formula_keys.discard(key)
+        self._parsed.pop(key, None)
+        self._values.clear()
+        if self._formula_keys:
+            # Any formula might depend on this cell, so refresh the whole sheet.
+            self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
+        else:
+            index = self.index(row, col)
+            self.dataChanged.emit(index, index)
 
     def clear_cells(self, indexes) -> None:
         for index in indexes:
             self.set_cell(index.row(), index.column(), "")
+
+    def display_text(self, row: int, col: int) -> str:
+        raw = self.get_cell(row, col)
+        if not is_formula(raw):
+            return raw
+        value = self.value(row, col)
+        return format_number(value) if isinstance(value, float) else str(value)
+
+    def value(self, row: int, col: int):
+        """The computed value: None (empty), float, str, or CellError."""
+        key = (row, col)
+        if key in self._values:
+            return self._values[key]
+        raw = self._cells.get(key)
+        if raw is None:
+            return None
+        if key in self._formula_keys:
+            self._compute(key)
+        else:
+            number = parse_number(raw)
+            self._values[key] = raw if number is None else number
+        return self._values[key]
+
+    def _parse(self, key):
+        if key not in self._parsed:
+            try:
+                ast = parse(self._cells[key][1:])
+                self._parsed[key] = (ast, references(ast))
+            except FormulaError as e:
+                self._parsed[key] = (CellError(e.code), set())
+        return self._parsed[key]
+
+    def _compute(self, root) -> None:
+        """Evaluate a formula cell, first evaluating the formulas it depends on.
+
+        Uses an explicit stack rather than recursion so long dependency chains
+        can't overflow Python's recursion limit. A dependency that is already
+        being evaluated further up the stack means a circular reference.
+        """
+        stack = [root]
+        in_progress = set()
+        while stack:
+            key = stack[-1]
+            if key in self._values:
+                stack.pop()
+                in_progress.discard(key)
+                continue
+            _, refs = self._parse(key)
+            pending = [r for r in refs if r in self._formula_keys and r not in self._values]
+            if any(r in in_progress for r in pending):
+                self._values[key] = CellError(CIRCULAR_ERROR)
+            elif pending and key not in in_progress:
+                in_progress.add(key)
+                stack.extend(pending)
+                continue
+            else:
+                self._values[key] = self._evaluate(key)
+            stack.pop()
+            in_progress.discard(key)
+
+    def _evaluate(self, key):
+        ast, _ = self._parse(key)
+        if isinstance(ast, CellError):
+            return ast
+        try:
+            return evaluate(ast, self._lookup)
+        except FormulaError as e:
+            return CellError(e.code)
+
+    def _lookup(self, row: int, col: int) -> float:
+        if not (0 <= row < self._rows and 0 <= col < self._cols):
+            raise FormulaError(REF_ERROR)
+        value = self.value(row, col)
+        if value is None:
+            return 0.0
+        if isinstance(value, float):
+            return value
+        if isinstance(value, CellError):
+            raise FormulaError(value.code)
+        raise FormulaError(VALUE_ERROR)

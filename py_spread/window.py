@@ -1,23 +1,88 @@
 """Main window: a cell-reference label and edit bar above the grid."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemDelegate,
     QAbstractItemView,
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QStyledItemDelegate,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
-from .model import SheetModel, cell_name
+from .model import SheetModel
+from .references import cell_name
+
+# A clicked cell reference can be inserted after any of these characters.
+REFERENCE_TRIGGERS = "=+-*/^("
+
+
+class ReferenceInserter:
+    """Inserts clicked cell references into a formula being typed in a line edit.
+
+    A reference is accepted right after '=', an operator, or '('. Clicking again
+    straight after an insertion replaces that reference, as in other spreadsheets.
+    """
+
+    def __init__(self, edit: QLineEdit):
+        self.edit = edit
+        self._last = None  # (start, end, text) of the most recent insertion
+
+    def reset(self) -> None:
+        self._last = None
+
+    def _replacing(self) -> bool:
+        return self._last is not None and self._last[1:] == (self.edit.cursorPosition(), self.edit.text())
+
+    def accepts(self) -> bool:
+        text = self.edit.text()
+        if not text.startswith("="):
+            return False
+        if self._replacing():
+            return True
+        before = text[: self.edit.cursorPosition()].rstrip()
+        return bool(before) and before[-1] in REFERENCE_TRIGGERS
+
+    def insert(self, ref: str) -> None:
+        text = self.edit.text()
+        pos = self.edit.cursorPosition()
+        start = self._last[0] if self._replacing() else pos
+        new_text = text[:start] + ref + text[pos:]
+        end = start + len(ref)
+        # Record first: setText notifies listeners, which call accepts().
+        self._last = (start, end, new_text)
+        self.edit.setText(new_text)
+        self.edit.setCursorPosition(end)
+
+
+class CellDelegate(QStyledItemDelegate):
+    """Cell editor delegate that reports new editors and Return presses."""
+
+    editor_created = Signal(QLineEdit)
+    return_pressed = Signal()
+
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        self.editor_created.emit(editor)
+        return editor
+
+    def eventFilter(self, editor, event):
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.commitData.emit(editor)
+            self.closeEditor.emit(editor, QStyledItemDelegate.NoHint)
+            self.return_pressed.emit()
+            return True
+        return super().eventFilter(editor, event)
 
 
 class SheetView(QTableView):
-    """Table view with spreadsheet-style keyboard behavior."""
+    """Table view with spreadsheet-style keyboard and mouse behavior."""
+
+    editor_closed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,6 +96,14 @@ class SheetView(QTableView):
         self.horizontalHeader().setDefaultSectionSize(100)
         self.verticalHeader().setDefaultSectionSize(24)
 
+        self.cell_delegate = CellDelegate(self)
+        self.cell_delegate.return_pressed.connect(lambda: self.move_current(1, 0))
+        self.setItemDelegate(self.cell_delegate)
+
+        # Returns the ReferenceInserter for the formula being edited, if any.
+        self.reference_target = lambda: None
+        self._swallow_mouse = False
+
     def keyPressEvent(self, event):
         if self.state() != QAbstractItemView.EditingState:
             key = event.key()
@@ -42,13 +115,40 @@ class SheetView(QTableView):
                 return
         super().keyPressEvent(event)
 
-    def closeEditor(self, editor, hint):
-        # Committing with Return/Enter moves down a row, like most spreadsheets.
-        if hint == QAbstractItemDelegate.SubmitModelCache:
-            super().closeEditor(editor, QAbstractItemDelegate.NoHint)
-            self.move_current(1, 0)
+    def mousePressEvent(self, event):
+        if not self._insert_reference(event):
+            super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if not self._insert_reference(event):
+            super().mouseDoubleClickEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not self._swallow_mouse:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._swallow_mouse:
+            self._swallow_mouse = False
             return
+        super().mouseReleaseEvent(event)
+
+    def _insert_reference(self, event) -> bool:
+        """If a formula is waiting for a reference, insert the clicked cell's name."""
+        target = self.reference_target()
+        index = self.indexAt(event.position().toPoint())
+        if event.button() != Qt.LeftButton or target is None or not index.isValid() or not target.accepts():
+            return False
+        target.insert(cell_name(index.row(), index.column()))
+        target.edit.setFocus()
+        self._swallow_mouse = True
+        return True
+
+    def closeEditor(self, editor, hint):
+        # Reference mode turns off click focus; restore it so the view can take focus back.
+        self.setFocusPolicy(Qt.StrongFocus)
         super().closeEditor(editor, hint)
+        self.editor_closed.emit()
 
     def move_current(self, d_row: int, d_col: int) -> None:
         current = self.currentIndex()
@@ -86,24 +186,64 @@ class MainWindow(QMainWindow):
         central.setLayout(layout)
         self.setCentralWidget(central)
 
+        self._bar_refs = ReferenceInserter(self.edit_bar)
+        self._grid_refs = None  # ReferenceInserter for the open in-cell editor
+        self.view.reference_target = self._reference_target
+
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
+        self.view.cell_delegate.editor_created.connect(self._on_editor_created)
+        self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
         self.edit_bar.returnPressed.connect(self._commit_edit_bar)
+        self.edit_bar.textChanged.connect(self._update_reference_mode)
+        self.edit_bar.cursorPositionChanged.connect(self._update_reference_mode)
         self.edit_bar.installEventFilter(self)
+        QApplication.instance().focusChanged.connect(self._update_reference_mode)
 
         self.view.setCurrentIndex(self.model.index(0, 0))
         self.view.setFocus()
+
+    def _reference_target(self):
+        if self._grid_refs is not None:
+            return self._grid_refs
+        if self.edit_bar.hasFocus():
+            return self._bar_refs
+        return None
+
+    def _update_reference_mode(self, *_args):
+        # While a formula is waiting for a reference, clicking the grid must not
+        # take focus away from the editor, which would commit the formula early.
+        target = self._reference_target()
+        accepting = target is not None and target.accepts()
+        self.view.setFocusPolicy(Qt.NoFocus if accepting else Qt.StrongFocus)
+
+    def _on_editor_created(self, editor):
+        self._grid_refs = ReferenceInserter(editor)
+        editor.textChanged.connect(self._on_grid_editor_text)
+        editor.cursorPositionChanged.connect(self._update_reference_mode)
+
+    def _on_grid_editor_text(self, text):
+        self.edit_bar.setText(text)
+        self._update_reference_mode()
+
+    def _on_editor_closed(self):
+        self._grid_refs = None
+        self._refresh_bar(self.view.currentIndex())
+        self._update_reference_mode()
 
     def _on_current_changed(self, current, _previous):
         self._refresh_bar(current)
 
     def _on_data_changed(self, top_left, bottom_right, _roles=()):
+        if self.edit_bar.hasFocus():
+            return  # don't clobber text being typed in the bar
         current = self.view.currentIndex()
         if (top_left.row() <= current.row() <= bottom_right.row()
                 and top_left.column() <= current.column() <= bottom_right.column()):
             self._refresh_bar(current)
 
     def _refresh_bar(self, index):
+        self._bar_refs.reset()
         if not index.isValid():
             self.cell_label.setText("")
             self.edit_bar.setText("")
@@ -111,17 +251,25 @@ class MainWindow(QMainWindow):
         self.cell_label.setText(cell_name(index.row(), index.column()))
         self.edit_bar.setText(self.model.get_cell(index.row(), index.column()))
 
-    def _commit_edit_bar(self):
+    def _store_edit_bar(self):
         index = self.view.currentIndex()
         if index.isValid():
             self.model.set_cell(index.row(), index.column(), self.edit_bar.text())
-            self.view.move_current(1, 0)
+
+    def _commit_edit_bar(self):
+        self._store_edit_bar()
+        self.view.move_current(1, 0)
         self.view.setFocus()
 
     def eventFilter(self, obj, event):
-        # Escape in the edit bar discards changes and returns to the grid.
-        if obj is self.edit_bar and event.type() == event.Type.KeyPress and event.key() == Qt.Key_Escape:
-            self._refresh_bar(self.view.currentIndex())
-            self.view.setFocus()
-            return True
+        if obj is self.edit_bar:
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+                # Discard changes and return to the grid.
+                self._refresh_bar(self.view.currentIndex())
+                self.view.setFocus()
+                return True
+            if event.type() == QEvent.FocusOut and event.reason() not in (
+                    Qt.ActiveWindowFocusReason, Qt.PopupFocusReason):
+                # Leaving the bar commits what was typed, like leaving a cell.
+                self._store_edit_bar()
         return super().eventFilter(obj, event)
