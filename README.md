@@ -157,9 +157,11 @@ both bounds are lowercase the letters are lowercase, otherwise uppercase.
   range runs out), and over two cells `A, B`. `C, A` counts down. `AY, BB`
   gives `AY, AZ, BA, BB`.
 - **Random** with two letter strings picks strings between them: `A, D` gives
-  letters A to D. A letter string alone gives random strings of its length:
-  `BCD` gives random three-letter strings. As with numbers, the starting
-  values are replaced too.
+  letters A to D. A letter string alone is a pattern: each position gets a
+  random vowel (A, E, I, O, U) where it has a vowel and a random consonant
+  (Y included) where it has a consonant, in the same case. `Bob` gives
+  strings like `Kav` or `Tez`. As with numbers, the starting values are
+  replaced too.
 
 Numbers typed in floating point form (`1.0`, `2.50`, `1e3`) count as floating
 point even when they're whole: `1.0, 2.0` continues `3.0, 4.0, …`, and
@@ -172,7 +174,11 @@ last:
 - **Random:** lower and upper bounds, and integers or floating point.
   Integers can be either bound itself. Integer bounds must be whole numbers;
   floating point bounds can be anything, such as 0.25 to 0.75. Letter bounds
-  (such as `A` to `D`, or `BCD` to `DCB`) give random letter strings.
+  (such as `A` to `D`, or `BCD` to `DCB`) give random letter strings. Letters
+  in the lower bound with the upper bound left blank are a pattern, as above;
+  unchecking **Keep consonants and vowels in place** picks any letter in each
+  position instead. That choice is remembered, and also applies to patterns
+  taken from the cells.
 - **Sequence:** lower and upper bounds, a step, ascending or descending, and
   the fill order (down columns first, or across rows first). Leave the step
   blank to spread the values evenly over the selected cells. Whole-number

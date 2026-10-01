@@ -18,7 +18,9 @@ the selection are checked for a value to work from:
 - Sequence continues from the first two numbers (their difference is the step).
   Two letter strings are instead the range: A, C over four cells gives A, B, C, A.
 - Random picks numbers or letter strings between the first two values,
-  replacing them too. A letter string alone gives random strings of its length.
+  replacing them too. A letter string alone is a pattern: each position gets a
+  random vowel where it has a vowel and a random consonant where it has a
+  consonant (or any letter, if that's turned off in the dialog).
 Numbers typed as floating point (1.0, 2.50, 1e3) make the fill floating point,
 even when their values are whole.
 """
@@ -33,6 +35,10 @@ from .formula import format_number, is_formula, parse_number, shift_references
 from .references import column_index, column_name
 
 MAX_LETTERS = 10  # longest letter string; keeps random picks within NumPy's int64
+MAX_PATTERN = 100  # longest pattern for random letter strings
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+VOWELS = "AEIOU"  # Y counts as a consonant
+CONSONANTS = "".join(c for c in ALPHABET if c not in VOWELS)
 
 
 @dataclass(frozen=True)
@@ -69,6 +75,14 @@ class SequenceFill:
 class RandomLetters:
     lower: str
     upper: str
+
+
+@dataclass(frozen=True)
+class RandomPattern:
+    """Random letter strings shaped like `template`, position by position."""
+
+    template: str
+    keep_vowels: bool = True  # vowels stay vowels and consonants stay consonants
 
 
 @dataclass(frozen=True)
@@ -148,6 +162,29 @@ def random_letters(params: RandomLetters, count: int, rng: np.random.Generator) 
     return [letter_text(int(i), lowercase) for i in picks]
 
 
+def check_pattern(template: str) -> str | None:
+    if not is_letters(template):
+        return "A pattern can contain only the letters A to Z."
+    if len(template) > MAX_PATTERN:
+        return f"A pattern can be at most {MAX_PATTERN} letters long."
+    return None
+
+
+def random_pattern(params: RandomPattern, count: int, rng: np.random.Generator) -> list[str]:
+    """Each position picks from the vowels or consonants (or, without
+    keep_vowels, the whole alphabet), in that position's case."""
+    columns = []
+    for char in params.template:
+        if not params.keep_vowels:
+            pool = ALPHABET
+        else:
+            pool = VOWELS if char.upper() in VOWELS else CONSONANTS
+        if char.islower():
+            pool = pool.lower()
+        columns.append([pool[i] for i in rng.integers(0, len(pool), size=count)])
+    return ["".join(chars) for chars in zip(*columns)]
+
+
 def letter_cycle(params: LetterSequence) -> int:
     """How many letter strings the sequence has before it starts over."""
     return (letter_index(params.upper) - letter_index(params.lower)) // params.step + 1
@@ -210,13 +247,15 @@ def sequence_values(params: SequenceFill, count: int) -> list[str]:
     return [write(n) for n in sequence_numbers(params, count)]
 
 
-def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int):
+def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int,
+          keep_vowels: bool = True):
     """Fill settings implied by the first one or two cells of the selection
-    (their raw text and computed values), or None if they don't imply any."""
+    (their raw text and computed values), or None if they don't imply any.
+    `keep_vowels` is used for a random letter pattern."""
     if mode.key == "uniform":
         return UniformFill(first_raw[0]) if first_raw and first_raw[0] else None
     if first_raw and _letter_bound(first_raw[0]):
-        return _infer_letters(mode, first_raw)
+        return _infer_letters(mode, first_raw, keep_vowels)
     if len(first_values) < 2 or not all(isinstance(v, float) for v in first_values):
         return None
     a, b = first_values
@@ -235,13 +274,11 @@ def _letter_bound(text: str) -> bool:
     return is_letters(text) and len(text) <= MAX_LETTERS
 
 
-def _infer_letters(mode: FillMode, first_raw: list[str]):
+def _infer_letters(mode: FillMode, first_raw: list[str], keep_vowels: bool):
     first = first_raw[0]
     second = first_raw[1] if len(first_raw) > 1 else ""
     if mode.key == "random" and not second:
-        # One letter string: random strings of the same length.
-        a, z = ("a", "z") if first.islower() else ("A", "Z")
-        return RandomLetters(a * len(first), z * len(first))
+        return RandomPattern(first, keep_vowels)
     if not _letter_bound(second):
         return None
     if letter_index(first) == letter_index(second):
@@ -263,6 +300,9 @@ class FillController(QObject):
         self.rng = rng if rng is not None else np.random.default_rng()
         self.mode = next(m for m in FILL_MODES if m.key == "sequence")
         self._last = {}  # settings last entered in each dialog, offered next time
+        # Whether random letter patterns keep vowels and consonants in place;
+        # on by default, and changed by the checkbox in the Random dialog.
+        self.keep_vowels = True
 
     def run(self, mode: FillMode | None = None) -> None:
         if mode is not None:
@@ -278,6 +318,7 @@ class FillController(QObject):
             [self.model.get_cell(*c) for c in first],
             [self.model.value(*c) for c in first],
             len(cells),
+            self.keep_vowels,
         )
         if params is None:
             params = self._ask(len(cells))
@@ -289,7 +330,9 @@ class FillController(QObject):
         key = self.mode.key
         initial = self._last.get(key)
         if key == "random":
-            params = self.dialogs.random(initial)
+            params = self.dialogs.random(initial, self.keep_vowels)
+            if isinstance(params, RandomPattern):
+                self.keep_vowels = params.keep_vowels
         elif key == "sequence":
             params = self.dialogs.sequence(initial, count)
         else:
@@ -313,6 +356,14 @@ class FillController(QObject):
                     writes[cell] = text
             self.model.set_cells(writes)
             return f"Filled {len(cells)} cells with {text}."
+
+        if isinstance(params, RandomPattern):
+            ordered = order_cells(cells)
+            self.model.set_cells(dict(zip(ordered, random_pattern(params, len(ordered), self.rng))))
+            if params.keep_vowels:
+                return (f"Filled {len(cells)} cells with random letters shaped like {params.template} "
+                        "(vowels and consonants kept in place).")
+            return f"Filled {len(cells)} cells with random {len(params.template)}-letter strings."
 
         if isinstance(params, RandomLetters):
             ordered = order_cells(cells)

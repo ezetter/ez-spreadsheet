@@ -2,6 +2,7 @@
 
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -17,10 +18,12 @@ from .fill import (
     LetterSequence,
     RandomFill,
     RandomLetters,
+    RandomPattern,
     SequenceFill,
     UniformFill,
     check_letter_sequence,
     check_letters,
+    check_pattern,
     check_random,
     check_sequence,
     is_letters,
@@ -114,18 +117,36 @@ def _preview(values: list[str]) -> str:
 
 
 class RandomDialog(_FillDialog):
-    def __init__(self, parent=None, initial: RandomFill | RandomLetters | None = None):
+    def __init__(self, parent=None, initial: RandomFill | RandomLetters | RandomPattern | None = None,
+                 keep_vowels: bool = True):
         super().__init__(parent, "Fill with Random Values")
         initial = initial or RandomFill(1, 100, integers=True)
-        self.lower = self.number_field("Lower bound:", initial.lower, BOUND_HINT)
-        self.upper = self.number_field("Upper bound:", initial.upper, BOUND_HINT)
+        if isinstance(initial, RandomPattern):
+            lower, upper, keep_vowels = initial.template, None, initial.keep_vowels
+        else:
+            lower, upper = initial.lower, initial.upper
+        self.lower = self.number_field("Lower bound:", lower, BOUND_HINT)
+        self.upper = self.number_field(
+            "Upper bound:", upper, "Leave blank to use letters above as a pattern")
         integers = initial.integers if isinstance(initial, RandomFill) else True
         self.integers, self.floats = self.choice(
             "Numbers:", ["Integers", "Floating point"], 0 if integers else 1)
+        self.keep_vowels = QCheckBox("Keep consonants and vowels in place")
+        self.keep_vowels.setChecked(keep_vowels)
+        self.keep_vowels.toggled.connect(self.update_state)
+        self.form.addRow("Letters:", self.keep_vowels)
         self.update_state()
 
-    def _read(self) -> RandomFill | RandomLetters | str:
+    def _is_pattern(self) -> bool:
+        """Letters in the lower bound and nothing in the upper: random strings
+        shaped like the lower bound."""
+        return is_letters(self.lower.text().strip()) and not self.upper.text().strip()
+
+    def _read(self) -> RandomFill | RandomLetters | RandomPattern | str:
         """The settings, or a message saying what's wrong with them."""
+        if self._is_pattern():
+            template = self.lower.text().strip()
+            return check_pattern(template) or RandomPattern(template, self.keep_vowels.isChecked())
         bounds = _read_bounds(self.lower, self.upper)
         if isinstance(bounds, str):
             return bounds
@@ -135,17 +156,26 @@ class RandomDialog(_FillDialog):
         params = RandomFill(lower, upper, self.integers.isChecked())
         return check_random(params) or params
 
-    def params(self) -> RandomFill | RandomLetters | None:
+    def params(self) -> RandomFill | RandomLetters | RandomPattern | None:
         result = self._read()
         return None if isinstance(result, str) else result
 
     def update_state(self, *_args) -> None:
-        letters = all(isinstance(_bound(f.text()), str) for f in (self.lower, self.upper))
+        pattern = self._is_pattern()
+        letters = pattern or all(isinstance(_bound(f.text()), str) for f in (self.lower, self.upper))
         self.integers.setEnabled(not letters)
         self.floats.setEnabled(not letters)
+        self.keep_vowels.setEnabled(pattern)
         result = self._read()
         if isinstance(result, str):
             self.show_note(result, error=True)
+        elif isinstance(result, RandomPattern):
+            if result.keep_vowels:
+                self.show_note(f"Random strings shaped like {result.template}: a random vowel "
+                               "for each vowel and a random consonant for each consonant.", error=False)
+            else:
+                self.show_note(f"Random {len(result.template)}-letter strings, any letter "
+                               "in each position.", error=False)
         elif isinstance(result, RandomLetters):
             self.show_note(f"Random letter strings from {result.lower} to {result.upper}, "
                            "both included.", error=False)
@@ -245,8 +275,8 @@ class FillDialogs:
     def _run(self, dialog):
         return dialog.params() if dialog.exec() == QDialog.Accepted else None
 
-    def random(self, initial):
-        return self._run(RandomDialog(self.parent, initial))
+    def random(self, initial, keep_vowels=True):
+        return self._run(RandomDialog(self.parent, initial, keep_vowels))
 
     def sequence(self, initial, cell_count):
         return self._run(SequenceDialog(self.parent, initial, cell_count))

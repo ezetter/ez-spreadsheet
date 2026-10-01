@@ -7,9 +7,11 @@ from py_spread.fill import (
     FILL_MODES,
     LetterSequence,
     RandomLetters,
+    RandomPattern,
     letter_index,
     letter_sequence_values,
     random_letters,
+    random_pattern,
     RandomFill,
     SequenceFill,
     UniformFill,
@@ -134,8 +136,9 @@ class StubDialogs:
         self.answer = None
         self.asked = []
 
-    def random(self, initial):
+    def random(self, initial, keep_vowels=True):
         self.asked.append(("random", initial))
+        self.keep_vowels = keep_vowels
         return self.answer
 
     def sequence(self, initial, cell_count):
@@ -445,8 +448,8 @@ def test_random_letter_strings_stay_between_bounds():
     ("sequence", ["B", "B"], UniformFill("B")),
     ("sequence", ["A", ""], None),
     ("sequence", ["A", "3"], None),
-    ("random", ["BCD", ""], RandomLetters("AAA", "ZZZ")),
-    ("random", ["xy", ""], RandomLetters("aa", "zz")),
+    ("random", ["BCD", ""], RandomPattern("BCD")),
+    ("random", ["xy", ""], RandomPattern("xy")),
     ("random", ["D", "A"], RandomLetters("A", "D")),
     ("random", ["BCD", "DCB"], RandomLetters("BCD", "DCB")),
     ("random", ["A", "7"], None),
@@ -474,12 +477,14 @@ def test_letter_sequence_fewer_cells(window):
 
 
 def test_random_letters_from_one_cell(window):
-    window.model.set_cell(0, 0, "BCD")
-    select(window, 0, 0, 19, 0)
+    window.model.set_cell(0, 0, "BAD")
+    select(window, 0, 0, 39, 0)
     fill(window, "random")
-    values = column(window, 0, range(20))
-    assert all(len(v) == 3 and v.isalpha() and v.isupper() for v in values)
-    assert len(set(values)) > 10
+    assert window.fill.dialogs.asked == []
+    values = column(window, 0, range(40))
+    assert all(is_shaped_like(v, "BAD") for v in values)
+    assert len(set(values)) > 20
+    assert "shaped like BAD" in window.statusBar().currentMessage()
 
 
 def test_random_letters_between_two_cells(window):
@@ -541,3 +546,90 @@ def test_letter_dialog_answer_fills_cells(window):
     fill(window, "sequence")
     assert [window.model.get_cell(0, c) for c in range(2)] == ["X", "Y"]
     assert [window.model.get_cell(1, c) for c in range(2)] == ["Z", "AA"]
+
+
+
+VOWELS = set("AEIOUaeiou")
+
+
+def is_shaped_like(value, template):
+    return len(value) == len(template) and all(
+        (v in VOWELS) == (t in VOWELS) and v.isupper() == t.isupper() and v.isalpha()
+        for v, t in zip(value, template)
+    )
+
+
+def test_random_pattern_keeps_vowels_and_consonants():
+    rng = np.random.default_rng(0)
+    values = random_pattern(RandomPattern("BCDA"), 1000, rng)
+    assert all(is_shaped_like(v, "BCDA") for v in values)
+    assert {v[3] for v in values} == set("AEIOU")
+    assert len({v[0] for v in values}) == 21  # every consonant, Y included
+    assert "Y" in {v[0] for v in values}
+
+
+def test_random_pattern_keeps_each_positions_case():
+    rng = np.random.default_rng(0)
+    values = random_pattern(RandomPattern("Bob"), 200, rng)
+    assert all(is_shaped_like(v, "Bob") for v in values)
+    assert all(v[0].isupper() and v[1:].islower() for v in values)
+
+
+def test_random_pattern_without_keeping_uses_whole_alphabet():
+    rng = np.random.default_rng(0)
+    values = random_pattern(RandomPattern("BB", keep_vowels=False), 2000, rng)
+    assert {v[0] for v in values} == set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def test_random_letter_range_is_not_a_pattern(window):
+    window.model.set_cell(0, 0, "A")
+    window.model.set_cell(1, 0, "D")
+    select(window, 0, 0, 59, 0)
+    fill(window, "random")
+    assert set(column(window, 0, range(60))) == {"A", "B", "C", "D"}  # consonants too
+
+
+def test_random_dialog_pattern(app):
+    dialog = RandomDialog()
+    dialog.lower.setText("Bob")
+    dialog.upper.setText("")
+    assert dialog.keep_vowels.isEnabled()
+    assert not dialog.integers.isEnabled()
+    assert dialog.params() == RandomPattern("Bob", True)
+    assert "shaped like Bob" in dialog.note.text()
+    dialog.keep_vowels.setChecked(False)
+    assert dialog.params() == RandomPattern("Bob", False)
+    assert "any letter" in dialog.note.text()
+    dialog.upper.setText("Zed")
+    assert not dialog.keep_vowels.isEnabled()  # a range isn't a pattern
+    assert dialog.params() == RandomLetters("Bob", "Zed")
+
+
+def test_random_dialog_starts_from_pattern(app):
+    dialog = RandomDialog(initial=RandomPattern("abc", keep_vowels=False))
+    assert (dialog.lower.text(), dialog.upper.text()) == ("abc", "")
+    assert not dialog.keep_vowels.isChecked()
+
+
+def test_random_dialog_checkbox_default(app):
+    assert RandomDialog().keep_vowels.isChecked()
+    assert not RandomDialog(keep_vowels=False).keep_vowels.isChecked()
+
+
+def test_turning_pattern_off_in_dialog_applies_to_cells_later(window):
+    window.fill.dialogs.answer = RandomPattern("BAD", keep_vowels=False)
+    select(window, 0, 0, 2, 0)
+    fill(window, "random")
+    assert window.fill.keep_vowels is False
+
+    window.model.set_cell(0, 2, "BB")
+    select(window, 0, 2, 299, 2)
+    fill(window, "random")
+    first_letters = {v[0] for v in column(window, 2, range(300))}
+    assert first_letters & set("AEIOU")  # vowels now appear where B was
+    assert len(window.fill.dialogs.asked) == 1  # the second fill came from the cells
+
+    window.fill.dialogs.answer = None
+    select(window, 0, 4, 2, 4)
+    fill(window, "random")
+    assert window.fill.dialogs.keep_vowels is False  # the dialog opens with it unchecked
