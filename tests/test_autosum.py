@@ -3,7 +3,7 @@ from PySide6.QtCore import QItemSelection, QItemSelectionModel, QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QToolBar, QToolButton
 
-from py_spread.autosum import aggregate_formula, cell_ranges, run_above, run_left
+from py_spread.autosum import AGGREGATES, aggregate_formula, cell_ranges, run_above, run_left
 from py_spread.model import SheetModel
 from py_spread.window import MainWindow
 
@@ -283,3 +283,68 @@ def test_choosing_while_waiting_switches_function(window):
     click_cell(window, 0, 2)
     assert model.get_cell(0, 2) == "=MEAN(A1:A3)"
     assert model.display_text(0, 2) == "3"
+
+
+def test_choosing_function_switches_current_cell(window):
+    model = window.model
+    fill(model, {(0, 0): "2", (1, 0): "4", (2, 0): "9", (3, 0): "=SUM(A1:A3)"})
+    select(window, 3, 0, 3, 0)
+    choose(window, "MEAN")
+    assert model.get_cell(3, 0) == "=MEAN(A1:A3)"
+    assert model.display_text(3, 0) == "5"
+    assert not window.autosum.pending
+    assert window.edit_bar.text() == "=MEAN(A1:A3)"
+    choose(window, "STDDEV")
+    assert model.get_cell(3, 0) == "=STDDEV(A1:A3)"
+
+
+def test_switch_keeps_all_arguments(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (0, 1): "5", (4, 4): "=sum(A1, B1, 10)"})
+    select(window, 4, 4, 4, 4)
+    choose(window, "MEDIAN")
+    assert model.get_cell(4, 4) == "=MEDIAN(A1, B1, 10)"
+    assert model.display_text(4, 4) == "5"
+
+
+def test_switch_while_editing_the_cell(window, app):
+    model = window.model
+    view = window.view
+    fill(model, {(0, 0): "3", (1, 0): "5"})
+    select(window, 2, 0, 2, 0)
+    QTest.keyClick(view, "=")
+    editor = view.viewport().findChild(QLineEdit)
+    QTest.keyClicks(editor, "SUM(A1:A2)")
+    choose(window, "MEAN")
+    app.processEvents()
+    assert model.get_cell(2, 0) == "=MEAN(A1:A2)"
+    assert model.display_text(2, 0) == "4"
+    assert not window.autosum.pending
+
+
+def test_choosing_same_function_leaves_cell_alone(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (1, 0): "=SUM(A1)"})
+    select(window, 1, 0, 1, 0)
+    choose(window, "SUM")
+    assert model.get_cell(1, 0) == "=SUM(A1)"
+    assert not window.autosum.pending
+
+
+def test_compound_formula_is_not_switched(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (1, 0): "=SUM(A1)*2"})
+    select(window, 1, 0, 1, 0)
+    choose(window, "MEAN")
+    assert model.get_cell(1, 0) == "=SUM(A1)*2"
+    assert window.autosum.pending  # a number is selected, so it waits for a click as before
+
+
+def test_main_button_does_not_switch_cell(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (1, 0): "=SUM(A1)"})
+    select(window, 1, 0, 1, 0)
+    window.autosum.set_aggregate(AGGREGATES[1])
+    press_sigma(window)
+    assert model.get_cell(1, 0) == "=SUM(A1)"
+    assert window.autosum.pending

@@ -120,6 +120,12 @@ that applies:
    putting the result in the current cell.
 3. Otherwise, it does the same with the numbers to the left.
 
+If the current cell already holds one of these functions on its own, such as
+`=SUM(A1:A9)`, choosing a different function from the menu switches that cell
+to it (`=MEAN(A1:A9)`), keeping the same arguments. This also works while
+you're still typing the formula. Formulas that do more than call one function,
+such as `=SUM(A1:A9)*2`, are left alone.
+
 For 2 and 3 it takes the nearest unbroken block of numbers, skipping blank
 cells right next to the current cell and stopping at text or a gap.
 

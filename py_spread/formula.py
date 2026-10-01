@@ -116,6 +116,23 @@ def shift_references(formula: str, d_row: int, d_col: int) -> str:
     return "=" + "".join(pieces)
 
 
+def replace_function(formula: str, names, new_name: str) -> str | None:
+    """If a formula (with its leading '=') is a single call to one of `names`,
+    such as =SUM(A1:A9), return it calling `new_name` instead, with the
+    arguments untouched. Otherwise return None.
+    """
+    body = formula[1:]
+    try:
+        ast = parse(body)
+        matches = _scan(body)
+    except FormulaError:
+        return None
+    if ast[0] != "call" or ast[1] not in names or _token_kind(matches[0]) != "name":
+        return None
+    name = matches[0]
+    return "=" + body[: name.start("name")] + new_name + body[name.end("name"):]
+
+
 def parse(text: str):
     """Parse a formula body (without the leading '=') into an AST of tuples:
     ("num", value), ("ref", row, col), ("range", top, left, bottom, right),

@@ -7,12 +7,16 @@ others). In order of priority, pressing it:
 2. Otherwise, if there are numbers above the current cell, applies the
    function to them in the current cell.
 3. Otherwise, if there are numbers to its left, does the same with those.
+
+Choosing a function from the menu while on a cell that already holds one,
+such as =SUM(A1:A9), switches that cell to the new function instead.
 """
 
 from dataclasses import dataclass
 
 from PySide6.QtCore import QItemSelectionModel, QObject, Signal
 
+from .formula import is_formula, replace_function
 from .references import cell_name
 
 
@@ -131,6 +135,23 @@ class AutoSumController(QObject):
         self.aggregate = aggregate
         if self.pending:
             self._prompt()
+
+    def switch_current_cell(self) -> bool:
+        """If the current cell's formula is a single aggregate call, make it
+        use the chosen function. Returns whether the cell held one."""
+        index = self.view.currentIndex()
+        if not index.isValid():
+            return False
+        raw = self.model.get_cell(index.row(), index.column())
+        if not is_formula(raw):
+            return False
+        names = {a.function for a in AGGREGATES}
+        switched = replace_function(raw, names, self.aggregate.function)
+        if switched is None:
+            return False
+        self.message.emit("")
+        self.model.set_cell(index.row(), index.column(), switched)
+        return True
 
     def trigger(self) -> None:
         if self.pending:

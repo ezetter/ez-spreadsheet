@@ -330,10 +330,14 @@ class MainWindow(QMainWindow):
         self.statusBar()  # create it now so the window doesn't resize on the first message
 
     def _choose_aggregate(self, aggregate: Aggregate):
-        """A function picked from the menu becomes the button's, and runs right away."""
+        """A function picked from the menu becomes the button's. It then switches
+        the current cell's function if it has one, or else runs right away."""
         self.autosum.set_aggregate(aggregate)
         self._show_aggregate()
-        if not self.autosum.pending:
+        if self.autosum.pending:
+            return
+        self._commit_pending_edit()
+        if not self.autosum.switch_current_cell():
             self._autosum()
 
     def _show_aggregate(self):

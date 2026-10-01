@@ -7,6 +7,7 @@ from py_spread.formula import (
     format_number,
     parse,
     parse_number,
+    replace_function,
     shift_references,
 )
 from py_spread.model import SheetModel
@@ -292,3 +293,20 @@ def test_empty_sum_is_zero(sheet):
 def test_function_results_are_plain_floats(sheet):
     sheet.set_cell(0, 2, "=MEAN(A1:A3)")
     assert type(sheet.value(0, 2)) is float
+
+
+@pytest.mark.parametrize("formula, expected", [
+    ("=SUM(A1:A9)", "=MEAN(A1:A9)"),
+    ("=sum(A1:A3, C1, 2*B1)", "=MEAN(A1:A3, C1, 2*B1)"),
+    ("= SUM( A1 )", "= MEAN( A1 )"),
+    ("=MEDIAN(A1:B2)", "=MEAN(A1:B2)"),
+    ("=SUM(A1)*2", None),
+    ("=(SUM(A1))", None),
+    ("=-SUM(A1)", None),
+    ("=A1+1", None),
+    ("=SUM(A1", None),
+    ("=FOO(A1)", None),
+])
+def test_replace_function(formula, expected):
+    names = {"SUM", "MEAN", "MEDIAN", "STDDEV"}
+    assert replace_function(formula, names, "MEAN") == expected
