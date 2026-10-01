@@ -2,7 +2,7 @@
 
 import os
 
-from PySide6.QtCore import QEvent, QStandardPaths, Qt, Signal
+from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QStandardPaths, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -209,6 +209,15 @@ class SheetView(QTableView):
         super().closeEditor(editor, hint)
         self.editor_closed.emit()
 
+    def select_range(self, top: int, left: int, bottom: int, right: int) -> None:
+        """Select a block of cells, make its top-left current, and scroll to it."""
+        model = self.model()
+        corner = model.index(top, left)
+        selection = self.selectionModel()
+        selection.setCurrentIndex(corner, QItemSelectionModel.NoUpdate)
+        selection.select(QItemSelection(corner, model.index(bottom, right)), QItemSelectionModel.ClearAndSelect)
+        self.scrollTo(corner)
+
     def move_current(self, d_row: int, d_col: int) -> None:
         current = self.currentIndex()
         row = min(max(current.row() + d_row, 0), self.model().rowCount() - 1)
@@ -262,6 +271,11 @@ class MainWindow(QMainWindow):
         self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
         self.model.contents_changed.connect(lambda: self.setWindowModified(True))
+        # Undoing back to the saved state makes the sheet unmodified again.
+        # (Bound methods, not lambdas: Qt disconnects them when the window is
+        # destroyed, before the undo stack's last signals during teardown.)
+        self.model.undo_stack.cleanChanged.connect(self._on_clean_changed)
+        self.model.history_applied.connect(self._show_changed_cells)
         self.edit_bar.returnPressed.connect(self._commit_edit_bar)
         self.edit_bar.textChanged.connect(self._update_reference_mode)
         self.edit_bar.cursorPositionChanged.connect(self._update_reference_mode)
@@ -286,6 +300,24 @@ class MainWindow(QMainWindow):
 
     def _build_edit_menu(self):
         menu = self.menuBar().addMenu("Edit")
+        stack = self.model.undo_stack
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcuts(QKeySequence.Undo)
+        self.undo_action.triggered.connect(lambda _checked=False: self._history_action("undo"))
+        self.undo_action.setEnabled(stack.canUndo())
+        stack.canUndoChanged.connect(self.undo_action.setEnabled)
+        stack.undoTextChanged.connect(self._on_undo_text)
+        menu.addAction(self.undo_action)
+
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcuts(QKeySequence.Redo)  # includes Cmd+Shift+Z
+        self.redo_action.triggered.connect(lambda _checked=False: self._history_action("redo"))
+        self.redo_action.setEnabled(stack.canRedo())
+        stack.canRedoChanged.connect(self.redo_action.setEnabled)
+        stack.redoTextChanged.connect(self._on_redo_text)
+        menu.addAction(self.redo_action)
+        menu.addSeparator()
+
         for name, shortcut, method in (
             ("Cut", QKeySequence.Cut, "cut"),
             ("Copy", QKeySequence.Copy, "copy"),
@@ -408,6 +440,30 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().clearMessage()
 
+    def _on_clean_changed(self, clean: bool):
+        self.setWindowModified(not clean)
+
+    def _on_undo_text(self, text: str):
+        self.undo_action.setText(f"Undo {text}".strip())
+
+    def _on_redo_text(self, text: str):
+        self.redo_action.setText(f"Redo {text}".strip())
+
+    def _history_action(self, method: str):
+        # While text is being edited (cell editor or edit bar), undo the typing.
+        # Keyboard shortcuts reach the line edit directly; this covers the menu.
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            getattr(focus, method)()
+        else:
+            getattr(self.model.undo_stack, method)()
+
+    def _show_changed_cells(self, cells):
+        """After an undo or redo, select the cells it changed."""
+        rows = [row for row, _ in cells]
+        cols = [col for _, col in cells]
+        self.view.select_range(min(rows), min(cols), max(rows), max(cols))
+
     def _clipboard_action(self, method: str):
         # While text is being edited (cell editor or edit bar), act on the text.
         # Keyboard shortcuts reach the line edit directly; this covers the menu.
@@ -470,6 +526,7 @@ class MainWindow(QMainWindow):
             self._show_error("Couldn't save the sheet.", str(e))
             return False
         self._set_file_path(path)
+        self.model.undo_stack.setClean()
         self.setWindowModified(False)
         return True
 
@@ -588,7 +645,7 @@ class MainWindow(QMainWindow):
     def _store_edit_bar(self):
         index = self.view.currentIndex()
         if index.isValid():
-            self.model.set_cell(index.row(), index.column(), self.edit_bar.text())
+            self.model.set_cell(index.row(), index.column(), self.edit_bar.text(), "Typing")
 
     def _commit_edit_bar(self):
         self._store_edit_bar()

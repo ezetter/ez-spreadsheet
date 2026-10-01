@@ -42,6 +42,18 @@ creates the file.
 - Delete/Backspace clears the selected cells.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 
+## Undo and redo
+
+Undo (Cmd+Z) and Redo (Cmd+Shift+Z) are in the Edit menu. Every change to
+cells can be undone: typing, the bar above the grid, paste, cut and paste,
+clearing, AutoSum, and Fill. Each is one step, and the menu names it (for
+example "Undo Paste" or "Undo Sequence Fill"). Undoing or redoing selects the
+cells that changed. While you're typing in a cell or the bar, Cmd+Z undoes
+the typing instead.
+
+The history goes back 1,000 steps and starts fresh when you open a sheet or
+start a new one. Undoing back to the last save counts as no unsaved changes.
+
 ## Saving and opening
 
 The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As

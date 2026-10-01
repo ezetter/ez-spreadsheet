@@ -1,6 +1,7 @@
 """Sheet data model: sparse storage of raw cell text behind a Qt table model."""
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtGui import QUndoCommand, QUndoStack
 
 from .formula import (
     CIRCULAR_ERROR,
@@ -19,6 +20,27 @@ from .storage import SheetData
 
 DEFAULT_ROWS = 1000
 DEFAULT_COLS = 52
+UNDO_LIMIT = 1000
+
+
+class _CellsCommand(QUndoCommand):
+    """One undoable change: the raw text of some cells before and after."""
+
+    def __init__(self, model, before: dict, after: dict, description: str):
+        super().__init__(description)
+        self.model = model
+        self.before = before
+        self.after = after
+        self._done = False
+
+    def redo(self):
+        # QUndoStack.push calls redo() to make the change in the first place;
+        # only later calls are redos the user asked for.
+        self.model._apply(self.after, from_history=self._done)
+        self._done = True
+
+    def undo(self):
+        self.model._apply(self.before, from_history=True)
 
 
 class SheetModel(QAbstractTableModel):
@@ -29,6 +51,8 @@ class SheetModel(QAbstractTableModel):
 
     # Emitted when cell contents are edited (not when a whole sheet is loaded).
     contents_changed = Signal()
+    # Emitted with the (row, col) cells an undo or redo changed.
+    history_applied = Signal(list)
 
     def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
         super().__init__(parent)
@@ -41,6 +65,9 @@ class SheetModel(QAbstractTableModel):
         # Computed values: float, str, or CellError. Cleared on every edit.
         self._values: dict[tuple[int, int], object] = {}
         self._formula_sheet = _FormulaSheet(self)
+        # Every edit goes through set_cells and lands here as one undo step.
+        self.undo_stack = QUndoStack(self)
+        self.undo_stack.setUndoLimit(UNDO_LIMIT)
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else self._rows
@@ -65,7 +92,7 @@ class SheetModel(QAbstractTableModel):
     def setData(self, index, value, role=Qt.EditRole):
         if not index.isValid() or role != Qt.EditRole:
             return False
-        self.set_cell(index.row(), index.column(), value)
+        self.set_cell(index.row(), index.column(), value, "Typing")
         return True
 
     def flags(self, index):
@@ -84,12 +111,24 @@ class SheetModel(QAbstractTableModel):
         """The raw text as entered."""
         return self._cells.get((row, col), "")
 
-    def set_cell(self, row: int, col: int, value) -> None:
-        self.set_cells({(row, col): value})
+    def set_cell(self, row: int, col: int, value, description: str = "Edit") -> None:
+        self.set_cells({(row, col): value}, description)
 
-    def set_cells(self, writes: dict[tuple[int, int], object]) -> None:
-        """Set many cells at once, recalculating and notifying views a single time."""
-        changed = [key for key, value in writes.items() if self._store(key, value)]
+    def set_cells(self, writes: dict[tuple[int, int], object], description: str = "Edit") -> None:
+        """Set many cells as one undoable step, recalculating and notifying
+        views a single time. `description` names the step in the Undo menu."""
+        before, after = {}, {}
+        for key, value in writes.items():
+            text = "" if value is None else str(value)
+            old = self._cells.get(key, "")
+            if text != old:
+                before[key] = old
+                after[key] = text
+        if after:
+            self.undo_stack.push(_CellsCommand(self, before, after, description))
+
+    def _apply(self, changes: dict[tuple[int, int], str], from_history: bool = False) -> None:
+        changed = [key for key, text in changes.items() if self._store(key, text)]
         if not changed:
             return
         self._values.clear()
@@ -101,6 +140,8 @@ class SheetModel(QAbstractTableModel):
             rows = [row for row, _ in changed]
             cols = [col for _, col in changed]
             self.dataChanged.emit(self.index(min(rows), min(cols)), self.index(max(rows), max(cols)))
+        if from_history:
+            self.history_applied.emit(changed)
 
     def _store(self, key, value) -> bool:
         """Store one cell's raw text; returns whether it changed."""
@@ -132,10 +173,11 @@ class SheetModel(QAbstractTableModel):
         self._formula_keys = {key for key, text in self._cells.items() if is_formula(text)}
         self._parsed.clear()
         self._values.clear()
+        self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
 
     def clear_cells(self, indexes) -> None:
-        self.set_cells({(index.row(), index.column()): "" for index in indexes})
+        self.set_cells({(index.row(), index.column()): "" for index in indexes}, "Clear")
 
     def display_text(self, row: int, col: int) -> str:
         raw = self.get_cell(row, col)

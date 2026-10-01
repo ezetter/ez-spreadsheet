@@ -8,7 +8,6 @@ what we put there, and otherwise pastes the clipboard's text as plain cells.
 
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import QItemSelection, QItemSelectionModel
 from PySide6.QtWidgets import QApplication
 
 from .formula import is_formula, shift_references
@@ -95,7 +94,7 @@ class ClipboardController:
 
         self._pasting = True
         try:
-            self.model.set_cells(writes)
+            self.model.set_cells(writes, "Move" if cut else "Paste")
         finally:
             self._pasting = False
 
@@ -103,7 +102,7 @@ class ClipboardController:
             # The moved cells can be pasted again, now as an ordinary copy from here.
             self._clip = replace(clip, top=top, left=left, cut=False)
             self.view.set_marquee(None)
-        self._select(top, left, top + height - 1, left + width - 1)
+        self.view.select_range(top, left, top + height - 1, left + width - 1)
 
     def _selection_bounds(self) -> tuple[int, int, int, int]:
         """(top, left, bottom, right) of the selection, or of the current cell."""
@@ -111,15 +110,6 @@ class ClipboardController:
         rows = [index.row() for index in indexes]
         cols = [index.column() for index in indexes]
         return min(rows), min(cols), max(rows), max(cols)
-
-    def _select(self, top, left, bottom, right) -> None:
-        model = self.model
-        selection_model = self.view.selectionModel()
-        selection_model.setCurrentIndex(model.index(top, left), QItemSelectionModel.NoUpdate)
-        selection_model.select(
-            QItemSelection(model.index(top, left), model.index(bottom, right)),
-            QItemSelectionModel.ClearAndSelect,
-        )
 
     def _on_data_changed(self, *_args) -> None:
         # Editing any cell ends the copy outline and abandons a pending cut, as in Excel.

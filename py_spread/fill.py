@@ -341,6 +341,9 @@ class FillController(QObject):
             self._last[key] = params
         return params
 
+    def _write(self, writes: dict) -> None:
+        self.model.set_cells(writes, f"{self.mode.label} Fill")
+
     def _fill(self, cells, params) -> str:
         """Write the values; returns a status message."""
         if isinstance(params, UniformFill):
@@ -354,12 +357,12 @@ class FillController(QObject):
                     writes[cell] = shift_references(text, cell[0] - source[0], cell[1] - source[1])
                 else:
                     writes[cell] = text
-            self.model.set_cells(writes)
+            self._write(writes)
             return f"Filled {len(cells)} cells with {text}."
 
         if isinstance(params, RandomPattern):
             ordered = order_cells(cells)
-            self.model.set_cells(dict(zip(ordered, random_pattern(params, len(ordered), self.rng))))
+            self._write(dict(zip(ordered, random_pattern(params, len(ordered), self.rng))))
             if params.keep_vowels:
                 return (f"Filled {len(cells)} cells with random letters shaped like {params.template} "
                         "(vowels and consonants kept in place).")
@@ -367,26 +370,26 @@ class FillController(QObject):
 
         if isinstance(params, RandomLetters):
             ordered = order_cells(cells)
-            self.model.set_cells(dict(zip(ordered, random_letters(params, len(ordered), self.rng))))
+            self._write(dict(zip(ordered, random_letters(params, len(ordered), self.rng))))
             return f"Filled {len(cells)} cells with random letters from {params.lower} to {params.upper}."
 
         if isinstance(params, LetterSequence):
             ordered = order_cells(cells, params.across_first)
             values = letter_sequence_values(params, len(ordered))
-            self.model.set_cells(dict(zip(ordered, values)))
+            self._write(dict(zip(ordered, values)))
             return f"Filled {len(cells)} cells with letters from {values[0]} to {values[-1]}."
 
         if isinstance(params, RandomFill):
             ordered = order_cells(cells)
             values = random_values(params, len(ordered), self.rng)
-            self.model.set_cells(dict(zip(ordered, values)))
+            self._write(dict(zip(ordered, values)))
             kind = "integers" if params.integers else "numbers"
             return (f"Filled {len(cells)} cells with random {kind} from "
                     f"{format_number(params.lower)} to {format_number(params.upper)}.")
 
         ordered = order_cells(cells, params.across_first)
         values = sequence_values(params, len(ordered))
-        self.model.set_cells(dict(zip(ordered, values)))
+        self._write(dict(zip(ordered, values)))
         text = f"Filled {len(values)} cells with a sequence from {values[0]} to {values[-1]}."
         if len(values) < len(ordered):
             text += f" The sequence ended, so {len(ordered) - len(values)} cells were left unchanged."

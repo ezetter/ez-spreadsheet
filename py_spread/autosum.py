@@ -150,7 +150,7 @@ class AutoSumController(QObject):
         if switched is None:
             return False
         self.message.emit("")
-        self.model.set_cell(index.row(), index.column(), switched)
+        self.model.set_cell(index.row(), index.column(), switched, "Change Function")
         return True
 
     def trigger(self) -> None:
@@ -175,7 +175,7 @@ class AutoSumController(QObject):
             )
             return
         self.message.emit("")
-        self.model.set_cell(row, col, aggregate_formula(self.aggregate.function, [run]))
+        self.model.set_cell(row, col, aggregate_formula(self.aggregate.function, [run]), self.aggregate.label)
 
     def cancel(self) -> None:
         if not self.pending:
@@ -195,6 +195,6 @@ class AutoSumController(QObject):
             return
         formula = aggregate_formula(self.aggregate.function, cell_ranges(self._cells))
         self.cancel()
-        self.model.set_cell(*target, formula)
+        self.model.set_cell(*target, formula, self.aggregate.label)
         selection = self.view.selectionModel()
         selection.setCurrentIndex(index, QItemSelectionModel.ClearAndSelect)
