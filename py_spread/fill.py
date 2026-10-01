@@ -1,16 +1,24 @@
 """Filling the selected cells: the toolbar's Fill button.
 
 Three modes:
-- Random: random numbers between a lower and upper bound, integers or floats.
-- Sequence: evenly stepped numbers from lower to upper (or upper to lower).
+- Random: random numbers between a lower and upper bound, integers or floats,
+  or random letter strings between two letter strings.
+- Sequence: evenly stepped numbers from lower to upper (or upper to lower), or
+  letter strings from one to another, starting over when they run out.
 - Uniform: the same value in every cell.
+
+Letter strings are ordered like column names, with the rightmost letter
+changing fastest: A … Z, AA, AB … AZ, BA … ZZ, AAA …. So BCD to DCB includes
+CAD and DAA, but not DCE or ABC.
 
 Cells are filled down each column, then across the columns (or optionally
 across each row, then down). Before asking with a dialog, the first cells of
 the selection are checked for a value to work from:
 - Uniform uses the first cell's value.
 - Sequence continues from the first two numbers (their difference is the step).
-- Random picks numbers between the first two numbers, replacing them too.
+  Two letter strings are instead the range: A, C over four cells gives A, B, C, A.
+- Random picks numbers or letter strings between the first two values,
+  replacing them too. A letter string alone gives random strings of its length.
 Numbers typed as floating point (1.0, 2.50, 1e3) make the fill floating point,
 even when their values are whole.
 """
@@ -22,6 +30,9 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from .formula import format_number, is_formula, parse_number, shift_references
+from .references import column_index, column_name
+
+MAX_LETTERS = 10  # longest letter string; keeps random picks within NumPy's int64
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,21 @@ class SequenceFill:
 
 
 @dataclass(frozen=True)
+class RandomLetters:
+    lower: str
+    upper: str
+
+
+@dataclass(frozen=True)
+class LetterSequence:
+    lower: str
+    upper: str
+    step: int = 1
+    descending: bool = False
+    across_first: bool = False
+
+
+@dataclass(frozen=True)
 class UniformFill:
     value: str
 
@@ -79,6 +105,62 @@ def format_float(value: float) -> str:
     """Like format_number, but whole values keep a decimal point: 3.0, not 3."""
     text = format_number(value)
     return text if any(c in text for c in ".e") else text + ".0"
+
+
+def is_letters(text: str) -> bool:
+    return text.isascii() and text.isalpha()
+
+
+def letter_index(text: str) -> int:
+    """Position in the order A … Z, AA, AB, … (A is 0)."""
+    return column_index(text)
+
+
+def letter_text(index: int, lowercase: bool) -> str:
+    text = column_name(index)
+    return text.lower() if lowercase else text
+
+
+def lowercase_letters(*texts: str) -> bool:
+    """Output is lowercase only if every bound is; otherwise uppercase."""
+    return all(t.islower() for t in texts)
+
+
+def check_letters(lower: str, upper: str) -> str | None:
+    if not (is_letters(lower) and is_letters(upper)):
+        return "Letter bounds can contain only the letters A to Z."
+    if max(len(lower), len(upper)) > MAX_LETTERS:
+        return f"Letter bounds can be at most {MAX_LETTERS} letters long."
+    if letter_index(lower) >= letter_index(upper):
+        return "The lower bound must come before the upper bound (A … Z, AA, AB …)."
+    return None
+
+
+def check_letter_sequence(params: LetterSequence) -> str | None:
+    if params.step < 1:
+        return "The step must be a whole number of at least 1."
+    return check_letters(params.lower, params.upper)
+
+
+def random_letters(params: RandomLetters, count: int, rng: np.random.Generator) -> list[str]:
+    lowercase = lowercase_letters(params.lower, params.upper)
+    picks = rng.integers(letter_index(params.lower), letter_index(params.upper), size=count, endpoint=True)
+    return [letter_text(int(i), lowercase) for i in picks]
+
+
+def letter_cycle(params: LetterSequence) -> int:
+    """How many letter strings the sequence has before it starts over."""
+    return (letter_index(params.upper) - letter_index(params.lower)) // params.step + 1
+
+
+def letter_sequence_values(params: LetterSequence, count: int) -> list[str]:
+    """Letter strings from one bound toward the other, starting over when they
+    run out before the cells do."""
+    low, high = letter_index(params.lower), letter_index(params.upper)
+    cycle = letter_cycle(params)
+    start, sign = (high, -1) if params.descending else (low, 1)
+    lowercase = lowercase_letters(params.lower, params.upper)
+    return [letter_text(start + sign * (i % cycle) * params.step, lowercase) for i in range(count)]
 
 
 def check_random(params: RandomFill) -> str | None:
@@ -133,6 +215,8 @@ def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int):
     (their raw text and computed values), or None if they don't imply any."""
     if mode.key == "uniform":
         return UniformFill(first_raw[0]) if first_raw and first_raw[0] else None
+    if first_raw and _letter_bound(first_raw[0]):
+        return _infer_letters(mode, first_raw)
     if len(first_values) < 2 or not all(isinstance(v, float) for v in first_values):
         return None
     a, b = first_values
@@ -145,6 +229,27 @@ def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int):
         return UniformFill(first_raw[0])
     last = a + (count - 1) * step
     return SequenceFill(min(a, last), max(a, last), abs(step), descending=step < 0, floats=floats)
+
+
+def _letter_bound(text: str) -> bool:
+    return is_letters(text) and len(text) <= MAX_LETTERS
+
+
+def _infer_letters(mode: FillMode, first_raw: list[str]):
+    first = first_raw[0]
+    second = first_raw[1] if len(first_raw) > 1 else ""
+    if mode.key == "random" and not second:
+        # One letter string: random strings of the same length.
+        a, z = ("a", "z") if first.islower() else ("A", "Z")
+        return RandomLetters(a * len(first), z * len(first))
+    if not _letter_bound(second):
+        return None
+    if letter_index(first) == letter_index(second):
+        return UniformFill(first)
+    lower, upper = sorted((first, second), key=letter_index)
+    if mode.key == "random":
+        return RandomLetters(lower, upper)
+    return LetterSequence(lower, upper, descending=letter_index(first) > letter_index(second))
 
 
 class FillController(QObject):
@@ -208,6 +313,17 @@ class FillController(QObject):
                     writes[cell] = text
             self.model.set_cells(writes)
             return f"Filled {len(cells)} cells with {text}."
+
+        if isinstance(params, RandomLetters):
+            ordered = order_cells(cells)
+            self.model.set_cells(dict(zip(ordered, random_letters(params, len(ordered), self.rng))))
+            return f"Filled {len(cells)} cells with random letters from {params.lower} to {params.upper}."
+
+        if isinstance(params, LetterSequence):
+            ordered = order_cells(cells, params.across_first)
+            values = letter_sequence_values(params, len(ordered))
+            self.model.set_cells(dict(zip(ordered, values)))
+            return f"Filled {len(cells)} cells with letters from {values[0]} to {values[-1]}."
 
         if isinstance(params, RandomFill):
             ordered = order_cells(cells)

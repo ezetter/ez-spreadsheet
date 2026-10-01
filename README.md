@@ -147,6 +147,20 @@ them without asking:
   numbers between the first two numbers. They're integers if both numbers are
   whole, floating point otherwise.
 
+Fill also works with letters (strings of A–Z only), which are ordered like
+column names, with the rightmost letter changing fastest: A … Z, AA, AB … AZ,
+BA … ZZ, AAA …. So BCD to DCB includes CAD and DAA, but not DCE or ABC. If
+both bounds are lowercase the letters are lowercase, otherwise uppercase.
+
+- **Sequence** treats two letter strings as the range, stepping one letter at a
+  time: `A, C` over four cells gives `A, B, C, A` (starting over when the
+  range runs out), and over two cells `A, B`. `C, A` counts down. `AY, BB`
+  gives `AY, AZ, BA, BB`.
+- **Random** with two letter strings picks strings between them: `A, D` gives
+  letters A to D. A letter string alone gives random strings of its length:
+  `BCD` gives random three-letter strings. As with numbers, the starting
+  values are replaced too.
+
 Numbers typed in floating point form (`1.0`, `2.50`, `1e3`) count as floating
 point even when they're whole: `1.0, 2.0` continues `3.0, 4.0, …`, and
 Random between `1.0` and `6.0` picks floating point numbers. The same goes
@@ -157,12 +171,14 @@ last:
 
 - **Random:** lower and upper bounds, and integers or floating point.
   Integers can be either bound itself. Integer bounds must be whole numbers;
-  floating point bounds can be anything, such as 0.25 to 0.75.
+  floating point bounds can be anything, such as 0.25 to 0.75. Letter bounds
+  (such as `A` to `D`, or `BCD` to `DCB`) give random letter strings.
 - **Sequence:** lower and upper bounds, a step, ascending or descending, and
   the fill order (down columns first, or across rows first). Leave the step
   blank to spread the values evenly over the selected cells. Whole-number
   values are written as integers, unless a bound or step was typed as
-  floating point. If the step reaches the far bound before
+  floating point. With letter bounds the step is a whole number (blank means
+  1), and the sequence starts over when it runs out instead of stopping. If the step reaches the far bound before
   the cells run out, the remaining cells are left as they are. The dialog
   previews the values.
 - **Uniform:** the value to use: a number, text, or formula.

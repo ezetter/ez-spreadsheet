@@ -5,6 +5,11 @@ from PySide6.QtWidgets import QDialogButtonBox, QToolBar, QToolButton
 
 from py_spread.fill import (
     FILL_MODES,
+    LetterSequence,
+    RandomLetters,
+    letter_index,
+    letter_sequence_values,
+    random_letters,
     RandomFill,
     SequenceFill,
     UniformFill,
@@ -286,12 +291,12 @@ def test_random_from_dialog(window):
 
 
 def test_cancelled_dialog_changes_nothing(window):
-    window.model.set_cell(0, 0, "keep")
+    window.model.set_cell(0, 0, "keep me")  # not a pure letter string, so the dialog is asked
     window.setWindowModified(False)
     window.fill.dialogs.answer = None
     select(window, 0, 0, 2, 0)
     fill(window, "random")
-    assert column(window, 0, range(3)) == ["keep", "", ""]
+    assert column(window, 0, range(3)) == ["keep me", "", ""]
     assert not window.isWindowModified()
 
 
@@ -399,3 +404,140 @@ def test_sequence_dialog_floats_from_typed_bounds(app):
     dialog.lower.setText("1")
     assert not dialog.params().floats
     assert "1, 2, 3" in dialog.note.text()
+
+
+
+# --- Letters ---
+
+@pytest.mark.parametrize("params, count, expected", [
+    (LetterSequence("A", "C"), 4, ["A", "B", "C", "A"]),               # starts over
+    (LetterSequence("A", "C"), 2, ["A", "B"]),                         # as far as the cells go
+    (LetterSequence("A", "C", descending=True), 4, ["C", "B", "A", "C"]),
+    (LetterSequence("AY", "BB"), 4, ["AY", "AZ", "BA", "BB"]),         # rightmost letter fastest
+    (LetterSequence("Y", "AB"), 4, ["Y", "Z", "AA", "AB"]),
+    (LetterSequence("a", "e", step=2), 4, ["a", "c", "e", "a"]),
+    (LetterSequence("a", "C"), 3, ["A", "B", "C"]),                    # mixed case: uppercase
+])
+def test_letter_sequence_values(params, count, expected):
+    assert letter_sequence_values(params, count) == expected
+
+
+def test_random_letters_inclusive():
+    rng = np.random.default_rng(0)
+    assert set(random_letters(RandomLetters("A", "D"), 300, rng)) == {"A", "B", "C", "D"}
+
+
+def test_random_letter_strings_stay_between_bounds():
+    rng = np.random.default_rng(0)
+    values = random_letters(RandomLetters("BCD", "DCB"), 2000, rng)
+    low, high = letter_index("BCD"), letter_index("DCB")
+    assert all(low <= letter_index(v) <= high for v in values)
+    assert "DCE" not in values and "ABC" not in values
+    assert all(len(v) == 3 for v in values)
+    assert len(set(values)) > 500
+
+
+@pytest.mark.parametrize("mode, raw, expected", [
+    ("uniform", ["Q", ""], UniformFill("Q")),
+    ("sequence", ["A", "C"], LetterSequence("A", "C")),
+    ("sequence", ["C", "A"], LetterSequence("A", "C", descending=True)),
+    ("sequence", ["aa", "ad"], LetterSequence("aa", "ad")),
+    ("sequence", ["B", "B"], UniformFill("B")),
+    ("sequence", ["A", ""], None),
+    ("sequence", ["A", "3"], None),
+    ("random", ["BCD", ""], RandomLetters("AAA", "ZZZ")),
+    ("random", ["xy", ""], RandomLetters("aa", "zz")),
+    ("random", ["D", "A"], RandomLetters("A", "D")),
+    ("random", ["BCD", "DCB"], RandomLetters("BCD", "DCB")),
+    ("random", ["A", "7"], None),
+    ("random", ["ABCDEFGHIJK", ""], None),  # too long to be a letter bound
+])
+def test_infer_letters(mode, raw, expected):
+    assert infer(MODES[mode], raw, raw, 4) == expected
+
+
+def test_letter_sequence_example_from_cells(window):
+    window.model.set_cell(0, 0, "A")
+    window.model.set_cell(1, 0, "C")
+    select(window, 0, 0, 3, 0)
+    fill(window, "sequence")
+    assert window.fill.dialogs.asked == []
+    assert column(window, 0, range(4)) == ["A", "B", "C", "A"]
+
+
+def test_letter_sequence_fewer_cells(window):
+    window.model.set_cell(0, 0, "A")
+    window.model.set_cell(0, 1, "C")
+    select(window, 0, 0, 0, 1)
+    fill(window, "sequence")
+    assert [window.model.get_cell(0, c) for c in range(2)] == ["A", "B"]
+
+
+def test_random_letters_from_one_cell(window):
+    window.model.set_cell(0, 0, "BCD")
+    select(window, 0, 0, 19, 0)
+    fill(window, "random")
+    values = column(window, 0, range(20))
+    assert all(len(v) == 3 and v.isalpha() and v.isupper() for v in values)
+    assert len(set(values)) > 10
+
+
+def test_random_letters_between_two_cells(window):
+    window.model.set_cell(0, 0, "A")
+    window.model.set_cell(1, 0, "D")
+    select(window, 0, 0, 59, 0)
+    fill(window, "random")
+    assert set(column(window, 0, range(60))) == {"A", "B", "C", "D"}
+
+
+def test_uniform_letters(window):
+    window.model.set_cell(0, 0, "Total")
+    select(window, 0, 0, 2, 0)
+    fill(window, "uniform")
+    assert column(window, 0, range(3)) == ["Total"] * 3
+
+
+def test_random_dialog_letters(app):
+    dialog = RandomDialog()
+    dialog.lower.setText("BCD")
+    dialog.upper.setText("DCB")
+    assert dialog.params() == RandomLetters("BCD", "DCB")
+    assert not dialog.integers.isEnabled()
+    assert "letter strings from BCD to DCB" in dialog.note.text()
+    dialog.upper.setText("7")
+    assert dialog.params() is None
+    assert "must both be numbers, or both letters" in dialog.note.text()
+    dialog.lower.setText("D")
+    dialog.upper.setText("A")
+    assert dialog.params() is None
+    assert "come before" in dialog.note.text()
+
+
+def test_random_dialog_starts_from_letters(app):
+    dialog = RandomDialog(initial=RandomLetters("A", "D"))
+    assert (dialog.lower.text(), dialog.upper.text()) == ("A", "D")
+    assert not dialog.floats.isEnabled()
+
+
+def test_sequence_dialog_letters(app):
+    dialog = SequenceDialog(cell_count=4)
+    dialog.lower.setText("A")
+    dialog.upper.setText("C")
+    dialog.step.setText("")
+    assert dialog.params() == LetterSequence("A", "C")
+    assert dialog.note.text() == "Fills 4 cells: A, B, C, A. Starts over after C."
+    dialog.step.setText("1.5")
+    assert dialog.params() is None
+    assert "whole number" in dialog.note.text()
+    dialog.step.setText("2")
+    dialog.descending.setChecked(True)
+    assert dialog.params() == LetterSequence("A", "C", step=2, descending=True)
+    assert "C, A, C, A" in dialog.note.text()
+
+
+def test_letter_dialog_answer_fills_cells(window):
+    window.fill.dialogs.answer = LetterSequence("X", "AA", across_first=True)
+    select(window, 0, 0, 1, 1)
+    fill(window, "sequence")
+    assert [window.model.get_cell(0, c) for c in range(2)] == ["X", "Y"]
+    assert [window.model.get_cell(1, c) for c in range(2)] == ["Z", "AA"]

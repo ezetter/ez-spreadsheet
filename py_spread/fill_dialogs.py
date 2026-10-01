@@ -14,11 +14,19 @@ from PySide6.QtWidgets import (
 )
 
 from .fill import (
+    LetterSequence,
     RandomFill,
+    RandomLetters,
     SequenceFill,
     UniformFill,
+    check_letter_sequence,
+    check_letters,
     check_random,
     check_sequence,
+    is_letters,
+    is_whole,
+    letter_cycle,
+    letter_sequence_values,
     sequence_values,
     written_as_float,
 )
@@ -43,8 +51,14 @@ class _FillDialog(QDialog):
         layout.addWidget(self.note)
         layout.addWidget(self.buttons)
 
-    def number_field(self, label: str, value: float | None = None, placeholder: str = "") -> QLineEdit:
-        field = QLineEdit("" if value is None else format_number(value))
+    def number_field(self, label: str, value: float | str | None = None, placeholder: str = "") -> QLineEdit:
+        if value is None:
+            text = ""
+        elif isinstance(value, str):
+            text = value
+        else:
+            text = format_number(value)
+        field = QLineEdit(text)
         field.setPlaceholderText(placeholder)
         field.textChanged.connect(self.update_state)
         self.form.addRow(label, field)
@@ -75,50 +89,81 @@ class _FillDialog(QDialog):
         raise NotImplementedError
 
 
-def _numbers(fields) -> list[float | None]:
-    return [parse_number(field.text()) for field in fields]
+BOUND_HINT = "A number, or letters such as A or BCD"
+
+
+def _bound(text: str) -> float | str | None:
+    """A bound typed in a field: a number, a letter string, or None."""
+    text = text.strip()
+    return text if is_letters(text) else parse_number(text)
+
+
+def _read_bounds(lower_field: QLineEdit, upper_field: QLineEdit):
+    """(lower, upper), both numbers or both letter strings, or a message
+    saying what's wrong."""
+    lower, upper = _bound(lower_field.text()), _bound(upper_field.text())
+    if lower is None or upper is None:
+        return "Enter a number or letters (such as A or BCD) for each bound."
+    if isinstance(lower, str) != isinstance(upper, str):
+        return "The bounds must both be numbers, or both letters."
+    return lower, upper
+
+
+def _preview(values: list[str]) -> str:
+    return ", ".join(values) if len(values) <= 4 else f"{values[0]}, {values[1]}, … {values[-1]}"
 
 
 class RandomDialog(_FillDialog):
-    def __init__(self, parent=None, initial: RandomFill | None = None):
-        super().__init__(parent, "Fill with Random Numbers")
+    def __init__(self, parent=None, initial: RandomFill | RandomLetters | None = None):
+        super().__init__(parent, "Fill with Random Values")
         initial = initial or RandomFill(1, 100, integers=True)
-        self.lower = self.number_field("Lower bound:", initial.lower)
-        self.upper = self.number_field("Upper bound:", initial.upper)
+        self.lower = self.number_field("Lower bound:", initial.lower, BOUND_HINT)
+        self.upper = self.number_field("Upper bound:", initial.upper, BOUND_HINT)
+        integers = initial.integers if isinstance(initial, RandomFill) else True
         self.integers, self.floats = self.choice(
-            "Values:", ["Integers", "Floating point"], 0 if initial.integers else 1)
+            "Numbers:", ["Integers", "Floating point"], 0 if integers else 1)
         self.update_state()
 
-    def params(self) -> RandomFill | None:
-        lower, upper = _numbers([self.lower, self.upper])
-        if lower is None or upper is None:
-            return None
+    def _read(self) -> RandomFill | RandomLetters | str:
+        """The settings, or a message saying what's wrong with them."""
+        bounds = _read_bounds(self.lower, self.upper)
+        if isinstance(bounds, str):
+            return bounds
+        lower, upper = bounds
+        if isinstance(lower, str):
+            return check_letters(lower, upper) or RandomLetters(lower, upper)
         params = RandomFill(lower, upper, self.integers.isChecked())
-        return None if check_random(params) else params
+        return check_random(params) or params
+
+    def params(self) -> RandomFill | RandomLetters | None:
+        result = self._read()
+        return None if isinstance(result, str) else result
 
     def update_state(self, *_args) -> None:
-        lower, upper = _numbers([self.lower, self.upper])
-        if lower is None or upper is None:
-            self.show_note("Enter a number for each bound.", error=True)
-            return
-        problem = check_random(RandomFill(lower, upper, self.integers.isChecked()))
-        if problem:
-            self.show_note(problem, error=True)
-        elif self.integers.isChecked():
+        letters = all(isinstance(_bound(f.text()), str) for f in (self.lower, self.upper))
+        self.integers.setEnabled(not letters)
+        self.floats.setEnabled(not letters)
+        result = self._read()
+        if isinstance(result, str):
+            self.show_note(result, error=True)
+        elif isinstance(result, RandomLetters):
+            self.show_note(f"Random letter strings from {result.lower} to {result.upper}, "
+                           "both included.", error=False)
+        elif result.integers:
             self.show_note("Each bound can itself be picked.", error=False)
         else:
             self.show_note("", error=False)
 
 
 class SequenceDialog(_FillDialog):
-    def __init__(self, parent=None, initial: SequenceFill | None = None, cell_count: int = 1):
+    def __init__(self, parent=None, initial: SequenceFill | LetterSequence | None = None, cell_count: int = 1):
         super().__init__(parent, "Fill with a Sequence")
         self.cell_count = cell_count
         initial = initial or SequenceFill(1, max(cell_count, 2))
-        self.lower = self.number_field("Lower bound:", initial.lower)
-        self.upper = self.number_field("Upper bound:", initial.upper)
+        self.lower = self.number_field("Lower bound:", initial.lower, BOUND_HINT)
+        self.upper = self.number_field("Upper bound:", initial.upper, BOUND_HINT)
         self.step = self.number_field(
-            "Step:", initial.step, placeholder=f"Blank: spread over the {cell_count} cells")
+            "Step:", initial.step, placeholder=f"Blank: spread over the {cell_count} cells (1 for letters)")
         self.ascending, self.descending = self.choice(
             "Direction:", ["Ascending", "Descending"], 1 if initial.descending else 0)
         self.down_first, self.across_first = self.choice(
@@ -126,34 +171,47 @@ class SequenceDialog(_FillDialog):
             1 if initial.across_first else 0)
         self.update_state()
 
-    def _read(self) -> SequenceFill | str:
+    def _read(self) -> SequenceFill | LetterSequence | str:
         """The settings, or a message saying what's wrong with them."""
-        lower, upper = _numbers([self.lower, self.upper])
-        if lower is None or upper is None:
-            return "Enter a number for each bound."
+        bounds = _read_bounds(self.lower, self.upper)
+        if isinstance(bounds, str):
+            return bounds
+        lower, upper = bounds
         step = None
         if self.step.text().strip():
             step = parse_number(self.step.text())
             if step is None:
                 return "The step must be a number, or blank."
+        descending, across_first = self.descending.isChecked(), self.across_first.isChecked()
+        if isinstance(lower, str):
+            if step is not None and not is_whole(step):
+                return "For letters, the step must be a whole number."
+            params = LetterSequence(lower, upper, 1 if step is None else int(step), descending, across_first)
+            return check_letter_sequence(params) or params
         # As with numbers in cells, typing 1.0 rather than 1 asks for floats.
         floats = any(written_as_float(f.text()) for f in (self.lower, self.upper, self.step))
-        params = SequenceFill(lower, upper, step, self.descending.isChecked(),
-                              self.across_first.isChecked(), floats)
+        params = SequenceFill(lower, upper, step, descending, across_first, floats)
         return check_sequence(params) or params
 
-    def params(self) -> SequenceFill | None:
+    def params(self) -> SequenceFill | LetterSequence | None:
         result = self._read()
-        return result if isinstance(result, SequenceFill) else None
+        return None if isinstance(result, str) else result
 
     def update_state(self, *_args) -> None:
         result = self._read()
         if isinstance(result, str):
             self.show_note(result, error=True)
             return
+        if isinstance(result, LetterSequence):
+            values = letter_sequence_values(result, self.cell_count)
+            text = f"Fills {self.cell_count} cells: {_preview(values)}"
+            cycle = letter_cycle(result)
+            if cycle < self.cell_count:
+                text += f". Starts over after {values[cycle - 1]}."
+            self.show_note(text, error=False)
+            return
         values = sequence_values(result, self.cell_count)
-        shown = ", ".join(values) if len(values) <= 4 else f"{values[0]}, {values[1]}, … {values[-1]}"
-        text = f"Fills {len(values)} of {self.cell_count} cells: {shown}"
+        text = f"Fills {len(values)} of {self.cell_count} cells: {_preview(values)}"
         if len(values) < self.cell_count:
             text += f". The sequence ends there; {self.cell_count - len(values)} cells stay unchanged."
         self.show_note(text, error=False)
