@@ -17,6 +17,9 @@ To open a saved sheet directly:
 python3 -m py_spread budget.pysheet
 ```
 
+If the file doesn't exist yet, you get an empty sheet with that name, and Save
+creates the file.
+
 ## Using the grid
 
 - Click a cell and start typing to replace its contents.
@@ -45,7 +48,8 @@ Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
 ```
 
 Saves go to a temporary file that then replaces the original, so a failed save
-never leaves a half-written file.
+never leaves a half-written file. New files get your normal default
+permissions; saving over a file keeps its existing permissions.
 
 ## Cut, copy, and paste
 

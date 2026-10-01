@@ -308,6 +308,15 @@ class MainWindow(QMainWindow):
         self._load(sheet, path)
         return True
 
+    def open_or_create(self, path: str) -> bool:
+        """Open a file, or if there's nothing there yet, start an empty sheet
+        that Save will write to that path."""
+        path = os.path.abspath(path)
+        if os.path.exists(path) or not os.path.isdir(os.path.dirname(path)):
+            return self.open_path(path)  # reports a bad folder as an error
+        self._load(SheetData(DEFAULT_ROWS, DEFAULT_COLS), path)
+        return True
+
     def save(self) -> bool:
         if self.file_path is None:
             return self.save_as()

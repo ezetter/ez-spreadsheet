@@ -53,12 +53,24 @@ def save_sheet(path: str, sheet: SheetData) -> None:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(document, f, indent=2, ensure_ascii=False)
                 f.write("\n")
+            # mkstemp makes owner-only files; give the result normal permissions.
+            os.chmod(temp_path, _file_mode(path))
             os.replace(temp_path, path)
         except BaseException:
             os.unlink(temp_path)
             raise
     except OSError as e:
         raise SheetFileError(f"Couldn't save {path}: {e.strerror or e}") from e
+
+
+def _file_mode(path: str) -> int:
+    """Permissions for a saved file: keep an existing file's, else the umask default."""
+    try:
+        return os.stat(path).st_mode & 0o7777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        return 0o666 & ~umask
 
 
 def load_sheet(path: str) -> SheetData:

@@ -8,7 +8,7 @@ from .window import MainWindow
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="py_spread", description="A Python spreadsheet.")
-    parser.add_argument("file", nargs="?", help="a .pysheet file to open")
+    parser.add_argument("file", nargs="?", help="a .pysheet file to open, or to create when first saved")
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
@@ -16,7 +16,7 @@ def main() -> int:
     window = MainWindow()
     window.show()
     if args.file:
-        window.open_path(args.file)
+        window.open_or_create(args.file)
     return app.exec()
 
 

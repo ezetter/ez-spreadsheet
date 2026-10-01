@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 
 import pytest
 from PySide6.QtCore import Qt
@@ -193,3 +195,56 @@ def test_loading_cancels_pending_cut(window, tmp_path):
     window.view.setCurrentIndex(window.model.index(3, 3))
     window.clipboard.paste()
     assert window.model.get_cell(0, 0) == "from file"  # cut source not cleared in the new sheet
+
+
+def mode(path):
+    return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def test_new_file_gets_default_permissions(tmp_path):
+    path = str(tmp_path / "s.pysheet")
+    old_umask = os.umask(0o022)
+    try:
+        save_sheet(path, SheetData(10, 5))
+    finally:
+        os.umask(old_umask)
+    assert mode(path) == 0o644
+
+
+def test_overwrite_keeps_existing_permissions(tmp_path):
+    path = str(tmp_path / "s.pysheet")
+    save_sheet(path, SheetData(10, 5))
+    os.chmod(path, 0o640)
+    save_sheet(path, SheetData(10, 5, {(0, 0): "x"}))
+    assert mode(path) == 0o640
+
+
+def test_open_or_create_missing_file_starts_named_sheet(window, tmp_path, dialogs):
+    path = tmp_path / "budget.pysheet"
+    assert window.open_or_create(str(path))
+    assert dialogs.errors == []
+    assert window.file_path == str(path)
+    assert window.windowTitle() == "budget.pysheet[*] — Py-Spread"
+    assert not path.exists()  # nothing is written until saved
+    window.model.set_cell(0, 0, "rent")
+    assert window.save()  # saves straight to the path, no dialog
+    assert load_sheet(str(path)).cells == {(0, 0): "rent"}
+
+
+def test_open_or_create_makes_relative_path_absolute(window, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window.open_or_create("budget.pysheet")
+    assert window.file_path == str(tmp_path / "budget.pysheet")
+
+
+def test_open_or_create_existing_file_opens_it(window, tmp_path):
+    path = str(tmp_path / "s.pysheet")
+    save_sheet(path, SheetData(10, 5, {(0, 0): "there"}))
+    assert window.open_or_create(path)
+    assert window.model.get_cell(0, 0) == "there"
+
+
+def test_open_or_create_in_missing_folder_is_an_error(window, tmp_path, dialogs):
+    assert not window.open_or_create(str(tmp_path / "no-such-folder" / "s.pysheet"))
+    assert dialogs.errors
+    assert window.file_path is None
