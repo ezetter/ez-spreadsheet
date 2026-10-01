@@ -3,7 +3,7 @@
 import os
 
 from PySide6.QtCore import QEvent, QStandardPaths, Qt, Signal
-from PySide6.QtGui import QAction, QKeySequence, QPen
+from PySide6.QtGui import QAction, QFont, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .autosum import AutoSumController
 from .clipboard import ClipboardController
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .references import cell_name
@@ -27,14 +28,15 @@ from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_shee
 FILE_FILTER = f"Py-Spread Sheets (*{EXTENSION})"
 
 # A clicked cell reference can be inserted after any of these characters.
-REFERENCE_TRIGGERS = "=+-*/^("
+REFERENCE_TRIGGERS = "=+-*/^(,:"
 
 
 class ReferenceInserter:
     """Inserts clicked cell references into a formula being typed in a line edit.
 
-    A reference is accepted right after '=', an operator, or '('. Clicking again
-    straight after an insertion replaces that reference, as in other spreadsheets.
+    A reference is accepted right after "=", an operator, "(", ",", or ":".
+    Clicking again straight after an insertion replaces that reference, as in
+    other spreadsheets.
     """
 
     def __init__(self, edit: QLineEdit):
@@ -135,6 +137,8 @@ class SheetView(QTableView):
 
         # Returns the ReferenceInserter for the formula being edited, if any.
         self.reference_target = lambda: None
+        # When set, a left click on a cell goes to this callable instead of selecting it.
+        self.pick_handler = None
         self._swallow_mouse = False
         # (top, left, bottom, right) of copied cells, outlined until pasted or cancelled.
         self.marquee = None
@@ -159,11 +163,11 @@ class SheetView(QTableView):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
-        if not self._insert_reference(event):
+        if not (self._pick_cell(event) or self._insert_reference(event)):
             super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        if not self._insert_reference(event):
+        if not (self._pick_cell(event) or self._insert_reference(event)):
             super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -175,6 +179,14 @@ class SheetView(QTableView):
             self._swallow_mouse = False
             return
         super().mouseReleaseEvent(event)
+
+    def _pick_cell(self, event) -> bool:
+        index = self.indexAt(event.position().toPoint())
+        if self.pick_handler is None or event.button() != Qt.LeftButton or not index.isValid():
+            return False
+        self._swallow_mouse = True
+        self.pick_handler(index)
+        return True
 
     def _insert_reference(self, event) -> bool:
         """If a formula is waiting for a reference, insert the clicked cell's name."""
@@ -231,8 +243,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.clipboard = ClipboardController(self.view, self.model)
+        self.autosum = AutoSumController(self.view, self.model)
         self._build_file_menu()
         self._build_edit_menu()
+        self._build_toolbar()
 
         self._bar_refs = ReferenceInserter(self.edit_bar)
         self._grid_refs = None  # ReferenceInserter for the open in-cell editor
@@ -276,6 +290,37 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
             action.triggered.connect(lambda _checked=False, m=method: self._clipboard_action(m))
             menu.addAction(action)
+
+    def _build_toolbar(self):
+        toolbar = self.addToolBar("Tools")
+        toolbar.setMovable(False)
+        self.autosum_action = QAction("Σ", self)
+        self.autosum_action.setCheckable(True)  # stays pressed while waiting for a click
+        self.autosum_action.setToolTip(
+            "AutoSum: sum the selected numbers into the cell you click next, "
+            "or sum the numbers above or to the left of the current cell"
+        )
+        font = QFont()
+        font.setPointSize(18)
+        self.autosum_action.setFont(font)
+        self.autosum_action.triggered.connect(self._autosum)
+        toolbar.addAction(self.autosum_action)
+
+        self.autosum.pending_changed.connect(self.autosum_action.setChecked)
+        self.autosum.message.connect(self._show_status)
+        self.statusBar()  # create it now so the window doesn't resize on the first message
+
+    def _autosum(self):
+        self._commit_pending_edit()
+        self.view.setFocus()  # so Escape reaches the grid to cancel
+        self.autosum.trigger()
+        self.autosum_action.setChecked(self.autosum.pending)
+
+    def _show_status(self, text: str):
+        if text:
+            self.statusBar().showMessage(text)
+        else:
+            self.statusBar().clearMessage()
 
     def _clipboard_action(self, method: str):
         # While text is being edited (cell editor or edit bar), act on the text.
@@ -360,6 +405,7 @@ class MainWindow(QMainWindow):
 
     def _load(self, sheet: SheetData, path: str | None) -> None:
         self.clipboard.cancel()
+        self.autosum.cancel()
         self.model.load_sheet_data(sheet)
         self.view.setCurrentIndex(self.model.index(0, 0))
         self._refresh_bar(self.view.currentIndex())

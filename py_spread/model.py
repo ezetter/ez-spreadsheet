@@ -5,7 +5,6 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from .formula import (
     CIRCULAR_ERROR,
     REF_ERROR,
-    VALUE_ERROR,
     CellError,
     FormulaError,
     evaluate,
@@ -41,6 +40,7 @@ class SheetModel(QAbstractTableModel):
         self._parsed: dict[tuple[int, int], tuple] = {}
         # Computed values: float, str, or CellError. Cleared on every edit.
         self._values: dict[tuple[int, int], object] = {}
+        self._formula_sheet = _FormulaSheet(self)
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else self._rows
@@ -163,10 +163,22 @@ class SheetModel(QAbstractTableModel):
         if key not in self._parsed:
             try:
                 ast = parse(self._cells[key][1:])
-                self._parsed[key] = (ast, references(ast))
+                self._parsed[key] = (ast, *references(ast))
             except FormulaError as e:
-                self._parsed[key] = (CellError(e.code), set())
+                self._parsed[key] = (CellError(e.code), set(), [])
         return self._parsed[key]
+
+    def _dependencies(self, key) -> list:
+        """Formula cells that `key` refers to and that still need computing."""
+        _, cells, ranges = self._parse(key)
+        pending = [c for c in cells if c in self._formula_keys and c not in self._values]
+        if ranges:
+            # Scan the formula cells rather than every cell in each range.
+            pending += [
+                f for f in self._formula_keys
+                if f not in self._values and any(_in_range(f, r) for r in ranges)
+            ]
+        return pending
 
     def _compute(self, root) -> None:
         """Evaluate a formula cell, first evaluating the formulas it depends on.
@@ -183,8 +195,7 @@ class SheetModel(QAbstractTableModel):
                 stack.pop()
                 in_progress.discard(key)
                 continue
-            _, refs = self._parse(key)
-            pending = [r for r in refs if r in self._formula_keys and r not in self._values]
+            pending = self._dependencies(key)
             if any(r in in_progress for r in pending):
                 self._values[key] = CellError(CIRCULAR_ERROR)
             elif pending and key not in in_progress:
@@ -197,22 +208,38 @@ class SheetModel(QAbstractTableModel):
             in_progress.discard(key)
 
     def _evaluate(self, key):
-        ast, _ = self._parse(key)
+        ast = self._parse(key)[0]
         if isinstance(ast, CellError):
             return ast
         try:
-            return evaluate(ast, self._lookup)
+            return evaluate(ast, self._formula_sheet)
         except FormulaError as e:
             return CellError(e.code)
 
-    def _lookup(self, row: int, col: int) -> float:
-        if not (0 <= row < self._rows and 0 <= col < self._cols):
+
+def _in_range(key, bounds) -> bool:
+    top, left, bottom, right = bounds
+    return top <= key[0] <= bottom and left <= key[1] <= right
+
+
+class _FormulaSheet:
+    """The sheet as formula evaluation sees it (see formula.evaluate)."""
+
+    def __init__(self, model: SheetModel):
+        self.model = model
+
+    def _check(self, row: int, col: int) -> None:
+        if not (0 <= row < self.model.rowCount() and 0 <= col < self.model.columnCount()):
             raise FormulaError(REF_ERROR)
-        value = self.value(row, col)
-        if value is None:
-            return 0.0
-        if isinstance(value, float):
-            return value
-        if isinstance(value, CellError):
-            raise FormulaError(value.code)
-        raise FormulaError(VALUE_ERROR)
+
+    def cell(self, row: int, col: int):
+        self._check(row, col)
+        return self.model.value(row, col)
+
+    def cells_in(self, top: int, left: int, bottom: int, right: int) -> list:
+        """Values of the non-empty cells in a range."""
+        self._check(top, left)
+        self._check(bottom, right)
+        bounds = (top, left, bottom, right)
+        keys = [key for key in self.model._cells if _in_range(key, bounds)]
+        return [self.model.value(*key) for key in keys]

@@ -12,8 +12,16 @@ from py_spread.formula import (
 from py_spread.model import SheetModel
 
 
+class EmptySheet:
+    def cell(self, row, col):
+        return None
+
+    def cells_in(self, top, left, bottom, right):
+        return []
+
+
 def calc(text):
-    return evaluate(parse(text), lambda row, col: 0.0)
+    return evaluate(parse(text), EmptySheet())
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -36,7 +44,8 @@ def test_arithmetic(text, expected):
     assert calc(text) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize("text", ["", "1+", "(1+2", "1+2)", "1 2", "*3", "A1B", "1..2", "sum(A1)"])
+@pytest.mark.parametrize("text", ["", "1+", "(1+2", "1+2)", "1 2", "*3", "1..2", "A1:B2", "SUM()",
+                                  "SUM(A1", "SUM(A1:)", "SUM(A1:3)", "SUM(A1,)", "SUM(A1 B1)"])
 def test_parse_errors(text):
     with pytest.raises(FormulaError) as e:
         calc(text)
@@ -163,3 +172,88 @@ def test_ref_error_literal(app):
     model = SheetModel(rows=10, cols=5)
     model.set_cell(0, 0, "=#REF!+1")
     assert model.display_text(0, 0) == "#REF!"
+
+
+@pytest.mark.parametrize("text", ["A1B", "FOO(1)", "SUM", "SUMX(A1)"])
+def test_unknown_names(text):
+    with pytest.raises(FormulaError) as e:
+        calc(text)
+    assert e.value.code == "#NAME?"
+
+
+def test_parse_sum():
+    assert parse("sum(B3:A1, C2, 1+2)") == ("call", "SUM", [
+        ("range", 0, 0, 2, 1),
+        ("ref", 1, 2),
+        ("bin", "+", ("num", 1.0), ("num", 2.0)),
+    ])
+
+
+def test_shift_references_in_ranges_and_functions():
+    assert shift_references("=SUM(A1:B2, $C$1)", 2, 1) == "=SUM(B3:C4, $C$1)"
+    assert shift_references("=SUM(A1:A3)", -1, 0) == "=SUM(#REF!:A2)"
+
+
+@pytest.fixture
+def sheet(app):
+    model = SheetModel(rows=20, cols=6)
+    for row, value in enumerate(["10", "20", "30"]):
+        model.set_cell(row, 0, value)  # A1:A3
+    return model
+
+
+def test_sum_range(sheet):
+    sheet.set_cell(5, 0, "=SUM(A1:A3)")
+    assert sheet.display_text(5, 0) == "60"
+
+
+def test_sum_mixed_arguments(sheet):
+    sheet.set_cell(0, 1, "5")
+    sheet.set_cell(5, 0, "=sum(A1:A2, B1, 100, A3*2)")
+    assert sheet.display_text(5, 0) == "195"
+
+
+def test_sum_in_expressions(sheet):
+    sheet.set_cell(5, 0, "=SUM(A1:A3)/3 - -SUM(A1)")
+    assert sheet.display_text(5, 0) == "30"
+
+
+def test_sum_skips_text_and_empty_cells(sheet):
+    sheet.set_cell(3, 0, "total")
+    sheet.set_cell(5, 0, "=SUM(A1:A5, A4)")
+    assert sheet.display_text(5, 0) == "60"
+
+
+def test_sum_propagates_errors(sheet):
+    sheet.set_cell(3, 0, "=1/0")
+    sheet.set_cell(5, 0, "=SUM(A1:A4)")
+    assert sheet.display_text(5, 0) == "#DIV/0!"
+
+
+def test_sum_recalculates_when_range_cell_changes(sheet):
+    sheet.set_cell(5, 0, "=SUM(A1:A4)")
+    sheet.set_cell(3, 0, "40")
+    assert sheet.display_text(5, 0) == "100"
+
+
+def test_sum_depends_on_formulas_in_range(sheet):
+    sheet.set_cell(3, 0, "=A1*10")      # A4 = 100
+    sheet.set_cell(5, 0, "=SUM(A1:A4)")
+    assert sheet.display_text(5, 0) == "160"
+
+
+def test_sum_over_itself_is_circular(sheet):
+    sheet.set_cell(3, 0, "=SUM(A1:A4)")
+    assert sheet.display_text(3, 0) == "#CIRC!"
+
+
+def test_sum_range_off_sheet(sheet):
+    sheet.set_cell(0, 1, "=SUM(A1:A99)")
+    assert sheet.display_text(0, 1) == "#REF!"
+
+
+def test_sum_large_range(app):
+    model = SheetModel(rows=1000, cols=52)
+    model.set_cell(999, 51, "7")
+    model.set_cell(0, 0, "=SUM(B1:AZ1000)")
+    assert model.display_text(0, 0) == "7"
