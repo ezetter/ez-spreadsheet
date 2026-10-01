@@ -57,6 +57,9 @@ The Format menu gives the selected cells an explicit format:
 - **Increase Decimals** and **Decrease Decimals** show one more or one fewer
   decimal place, starting from how each number is shown now.
 
+Currency and the two decimal commands also have toolbar buttons: `$`,
+`.0→.00`, and `.00→.0`.
+
 A cell keeps its format when you type a new value into it, so a Currency cell
 shows `1300` as `$1,300.00`. Values are rounded only for display, with halves
 rounded up. A formula without its own format shows its result in the format of

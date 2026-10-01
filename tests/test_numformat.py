@@ -296,3 +296,33 @@ def test_save_and_open_keeps_formats(window, tmp_path):
     other = MainWindow()
     other.open_path(path)
     assert other.model.display_text(0, 0) == "$5.00"
+
+
+def toolbar_buttons(window):
+    from PySide6.QtWidgets import QToolBar
+    toolbar = window.findChild(QToolBar)
+    return [toolbar.widgetForAction(a) for a in toolbar.actions() if not a.isSeparator()]
+
+
+def test_format_toolbar_buttons(window):
+    buttons = toolbar_buttons(window)
+    assert buttons[:2] == [window.autosum_button, window.fill_button]
+    assert [b.text() for b in buttons[2:]] == ["$", ".0→.00", ".00→.0"]
+    assert buttons[2].defaultAction() is window.format_actions["Currency"]  # same action as the menu
+    assert window.format_actions["Currency"].text() == "Currency  ($1,234.50)"  # menu text unchanged
+
+
+def test_clicking_format_buttons(window):
+    from PySide6.QtTest import QTest
+    model = window.model
+    model.set_cells({(0, 0): "1234.5", (1, 0): "2"})
+    window.view.select_range(0, 0, 1, 0)
+    currency, more, fewer = toolbar_buttons(window)[2:]
+    QTest.mouseClick(currency, Qt.LeftButton)
+    assert [model.display_text(r, 0) for r in range(2)] == ["$1,234.50", "$2.00"]
+    QTest.mouseClick(more, Qt.LeftButton)
+    assert model.display_text(0, 0) == "$1,234.500"
+    QTest.mouseClick(fewer, Qt.LeftButton)
+    QTest.mouseClick(fewer, Qt.LeftButton)
+    assert model.display_text(0, 0) == "$1,234.5"
+    assert window.undo_action.text() == "Undo Decrease Decimals"
