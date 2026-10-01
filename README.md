@@ -4,17 +4,31 @@ A desktop spreadsheet written in Python with PySide6 (Qt). Currently supports
 text, numbers, and arithmetic formulas; functions (NumPy) and graphing
 (Matplotlib) come later.
 
+## Setup
+
+The app runs in a virtual environment in `.venv`. To create it (once):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+`requirements.txt` lists what the app needs (PySide6, NumPy, Matplotlib);
+`requirements-dev.txt` adds pytest for the tests.
+
 ## Run
 
 ```bash
-pip install -r requirements.txt
-python3 -m py_spread
+.venv/bin/python -m py_spread
 ```
+
+Or activate the environment first (`source .venv/bin/activate`), after which
+`python -m py_spread` works.
 
 To open a saved sheet directly:
 
 ```bash
-python3 -m py_spread budget.pysheet
+.venv/bin/python -m py_spread budget.pysheet
 ```
 
 If the file doesn't exist yet, you get an empty sheet with that name, and Save
@@ -75,9 +89,14 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
 - Operators: `+ - * / ^` and parentheses. `^` binds tighter than unary minus
   (`-2^2` is -4) and is right-associative (`2^3^2` is 512).
 - References are case-insensitive; `$` anchors (`$A$1`) are accepted.
-- Functions: `SUM(...)` adds its arguments, which can be ranges (`A1:B10`),
+- Functions, computed with NumPy. Their arguments can be ranges (`A1:B10`),
   cells, or expressions, separated by commas: `=SUM(A1:A9, C4, B2*2)`. In
   ranges and plain references, text and empty cells are skipped.
+  - `SUM` adds the numbers (0 if there are none).
+  - `MEAN` averages them (`#DIV/0!` if there are none).
+  - `MEDIAN` gives the middle value (`#NUM!` if there are none).
+  - `STDDEV` gives the sample standard deviation, dividing by n − 1 like
+    `STDEV` in other spreadsheets (`#DIV/0!` with fewer than two numbers).
 - Empty cells count as 0. Formulas recalculate whenever a cell changes.
 - While typing a formula, clicking a cell right after `=`, an operator, `(`,
   `,`, or `:` inserts its reference. Clicking again replaces the reference just inserted.
@@ -88,13 +107,18 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
 
 ## AutoSum (Σ)
 
-The Σ button on the toolbar adds up numbers with a `SUM` formula. It uses the
-first of these that applies:
+The Σ button on the toolbar applies a function to a block of numbers. The
+arrow beside it chooses the function: Sum (Σ), Mean (x̄), Median (x̃), or
+Standard Deviation (σ). Choosing one runs it straight away, and the button
+keeps using it until you choose another. The button uses the first of these
+that applies:
 
-1. If any selected cells hold numbers, Σ stays pressed and the next cell you
-   click gets the sum of the selection (Escape or Σ again cancels).
-2. Otherwise, it sums the numbers above the current cell into it.
-3. Otherwise, it sums the numbers to the left of the current cell into it.
+1. If any selected cells hold numbers, the button stays pressed and the next
+   cell you click gets the function of the selection (Escape or pressing the
+   button again cancels).
+2. Otherwise, it applies the function to the numbers above the current cell,
+   putting the result in the current cell.
+3. Otherwise, it does the same with the numbers to the left.
 
 For 2 and 3 it takes the nearest unbroken block of numbers, skipping blank
 cells right next to the current cell and stopping at text or a gap.
@@ -102,5 +126,5 @@ cells right next to the current cell and stopping at text or a gap.
 ## Tests
 
 ```bash
-python3 -m pytest
+.venv/bin/python -m pytest
 ```

@@ -1,9 +1,9 @@
 import pytest
-from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QLineEdit, QToolBar
+from PySide6.QtWidgets import QLineEdit, QToolBar, QToolButton
 
-from py_spread.autosum import cell_ranges, run_above, run_left, sum_formula
+from py_spread.autosum import aggregate_formula, cell_ranges, run_above, run_left
 from py_spread.model import SheetModel
 from py_spread.window import MainWindow
 
@@ -22,9 +22,9 @@ def test_cell_ranges(cells, expected):
     assert sorted(cell_ranges(cells)) == sorted(expected)
 
 
-def test_sum_formula():
-    assert sum_formula([(0, 0, 99, 0)]) == "=SUM(A1:A100)"
-    assert sum_formula([(0, 0, 0, 0), (2, 1, 3, 2)]) == "=SUM(A1, B3:C4)"
+def test_aggregate_formula():
+    assert aggregate_formula("SUM", [(0, 0, 99, 0)]) == "=SUM(A1:A100)"
+    assert aggregate_formula("MEAN", [(0, 0, 0, 0), (2, 1, 3, 2)]) == "=MEAN(A1, B3:C4)"
 
 
 @pytest.fixture
@@ -85,14 +85,19 @@ def click_cell(window, row, col):
 
 
 def press_sigma(window):
-    toolbar = window.findChild(QToolBar)
-    QTest.mouseClick(toolbar.widgetForAction(window.autosum_action), Qt.LeftButton)
+    """Click the main part of the split button (not its menu arrow)."""
+    button = window.autosum_button
+    QTest.mouseClick(button, Qt.LeftButton, Qt.NoModifier, QPoint(4, button.height() // 2))
 
 
 def test_sigma_is_first_toolbar_button(window):
     toolbar = window.findChild(QToolBar)
-    assert toolbar.actions()[0] is window.autosum_action
-    assert window.autosum_action.text() == "Σ"
+    assert toolbar.widgetForAction(toolbar.actions()[0]) is window.autosum_button
+    assert window.autosum_button.text() == "Σ"
+    assert window.autosum_button.popupMode() == QToolButton.MenuButtonPopup
+    labels = [a.text().split()[-1] for a in window.autosum_button.menu().actions()]
+    assert labels == ["Sum", "Mean", "Median", "Deviation"]
+    assert window.aggregate_actions["SUM"].isChecked()
 
 
 def test_selected_numbers_sum_into_clicked_cell(window):
@@ -235,3 +240,46 @@ def test_editing_cancels_waiting(window):
     press_sigma(window)
     model.set_cell(5, 5, "x")
     assert not window.autosum.pending
+
+
+def choose(window, function):
+    window.aggregate_actions[function].trigger()
+
+
+@pytest.mark.parametrize("function, symbol, expected", [
+    ("MEAN", "x̄", "5"),
+    ("MEDIAN", "x̃", "4"),
+    ("STDDEV", "σ", "3.605551275"),
+])
+def test_choosing_function_runs_it_on_numbers_above(window, function, symbol, expected):
+    model = window.model
+    fill(model, {(0, 0): "2", (1, 0): "4", (2, 0): "9"})
+    select(window, 3, 0, 3, 0)
+    choose(window, function)
+    assert model.get_cell(3, 0) == f"={function}(A1:A3)"
+    assert model.display_text(3, 0) == expected
+    assert window.autosum_button.text() == symbol
+    assert window.aggregate_actions[function].isChecked()
+
+
+def test_chosen_function_sticks_for_the_button(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (0, 1): "3"})
+    select(window, 1, 0, 1, 0)
+    choose(window, "MEDIAN")  # median of A1 into A2
+    select(window, 0, 2, 0, 2)
+    press_sigma(window)  # numbers to the left of C1
+    assert model.get_cell(0, 2) == "=MEDIAN(A1:B1)"
+
+
+def test_choosing_while_waiting_switches_function(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (1, 0): "2", (2, 0): "6"})
+    select(window, 0, 0, 2, 0)
+    press_sigma(window)
+    choose(window, "MEAN")
+    assert window.autosum.pending
+    assert "mean" in window.statusBar().currentMessage()
+    click_cell(window, 0, 2)
+    assert model.get_cell(0, 2) == "=MEAN(A1:A3)"
+    assert model.display_text(0, 2) == "3"

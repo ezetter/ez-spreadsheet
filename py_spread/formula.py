@@ -18,36 +18,20 @@ minus (-2^2 = -4) and is right-associative (2^3^2 = 512).
 
 import math
 import re
-from dataclasses import dataclass
 
+from .errors import (  # noqa: F401 -- re-exported for the rest of the app
+    CIRCULAR_ERROR,
+    DIV_ZERO_ERROR,
+    NAME_ERROR,
+    NUM_ERROR,
+    PARSE_ERROR,
+    REF_ERROR,
+    VALUE_ERROR,
+    CellError,
+    FormulaError,
+)
+from .functions import FUNCTIONS
 from .references import column_index, column_name, parse_cell_name
-
-PARSE_ERROR = "#ERROR!"
-VALUE_ERROR = "#VALUE!"
-DIV_ZERO_ERROR = "#DIV/0!"
-REF_ERROR = "#REF!"
-NUM_ERROR = "#NUM!"
-CIRCULAR_ERROR = "#CIRC!"
-NAME_ERROR = "#NAME?"
-
-
-class FormulaError(Exception):
-    """Raised while parsing or evaluating; `code` is what the cell displays."""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
-
-
-@dataclass(frozen=True)
-class CellError:
-    """An error value held by a cell."""
-
-    code: str
-
-    def __str__(self):
-        return self.code
-
 
 _TOKEN = re.compile(
     r"""\s*(?:
@@ -171,23 +155,6 @@ def to_number(value) -> float:
     if isinstance(value, CellError):
         raise FormulaError(value.code)
     raise FormulaError(VALUE_ERROR)
-
-
-def _sum(args) -> float:
-    """SUM adds the numbers in its arguments, skipping empty cells and text."""
-    total = 0.0
-    for values in args:
-        for value in values:
-            if isinstance(value, float):
-                total += value
-            elif isinstance(value, CellError):
-                raise FormulaError(value.code)
-    return total
-
-
-# Each function takes a list of arguments, each a list of cell values (for a
-# range or a single reference) or a one-item list holding a computed number.
-FUNCTIONS = {"SUM": _sum}
 
 
 def evaluate(node, sheet) -> float:

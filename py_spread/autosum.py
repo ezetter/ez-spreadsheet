@@ -1,15 +1,34 @@
 """AutoSum, behind the toolbar's Σ button.
 
-In order of priority, pressing Σ:
+The button applies an aggregate function (sum by default; its menu offers the
+others). In order of priority, pressing it:
 1. If the selection holds any numbers, waits for a cell to be clicked and puts
-   the sum of the selection there.
-2. Otherwise, if there are numbers above the current cell, sums them into it.
-3. Otherwise, if there are numbers to its left, sums them into it.
+   the function of the selection there.
+2. Otherwise, if there are numbers above the current cell, applies the
+   function to them in the current cell.
+3. Otherwise, if there are numbers to its left, does the same with those.
 """
+
+from dataclasses import dataclass
 
 from PySide6.QtCore import QItemSelectionModel, QObject, Signal
 
 from .references import cell_name
+
+
+@dataclass(frozen=True)
+class Aggregate:
+    function: str  # formula function name
+    label: str  # menu text
+    symbol: str  # button text
+
+
+AGGREGATES = [
+    Aggregate("SUM", "Sum", "Σ"),
+    Aggregate("MEAN", "Mean", "x̄"),
+    Aggregate("MEDIAN", "Median", "x̃"),
+    Aggregate("STDDEV", "Standard Deviation", "σ"),
+]
 
 
 def cell_ranges(cells) -> list[tuple[int, int, int, int]]:
@@ -57,8 +76,8 @@ def range_name(bounds: tuple[int, int, int, int]) -> str:
     return f"{cell_name(top, left)}:{cell_name(bottom, right)}"
 
 
-def sum_formula(ranges) -> str:
-    return "=SUM(" + ", ".join(range_name(r) for r in ranges) + ")"
+def aggregate_formula(function: str, ranges) -> str:
+    return f"={function}(" + ", ".join(range_name(r) for r in ranges) + ")"
 
 
 def run_above(model, row: int, col: int):
@@ -98,13 +117,20 @@ class AutoSumController(QObject):
         super().__init__(view)
         self.view = view
         self.model = model
-        self._cells = None  # cells being summed while waiting for a click
+        self.aggregate = AGGREGATES[0]
+        self._cells = None  # cells being aggregated while waiting for a click
         model.contents_changed.connect(self.cancel)
         view.escape_pressed.connect(self.cancel)
 
     @property
     def pending(self) -> bool:
         return self._cells is not None
+
+    def set_aggregate(self, aggregate: Aggregate) -> None:
+        """Choose the function; if waiting for a click, keep waiting with it."""
+        self.aggregate = aggregate
+        if self.pending:
+            self._prompt()
 
     def trigger(self) -> None:
         if self.pending:
@@ -115,17 +141,20 @@ class AutoSumController(QObject):
             self._cells = selected
             self.view.pick_handler = self._place
             self.pending_changed.emit(True)
-            self.message.emit("Click the cell where the sum should go. Esc cancels.")
+            self._prompt()
             return
 
         current = self.view.currentIndex()
         row, col = current.row(), current.column()
         run = run_above(self.model, row, col) or run_left(self.model, row, col)
         if run is None:
-            self.message.emit("Nothing to sum: select some numbers, or start below or right of them.")
+            self.message.emit(
+                f"Nothing to {self.aggregate.label.lower()}: select some numbers, "
+                "or start below or right of them."
+            )
             return
         self.message.emit("")
-        self.model.set_cell(row, col, sum_formula([run]))
+        self.model.set_cell(row, col, aggregate_formula(self.aggregate.function, [run]))
 
     def cancel(self) -> None:
         if not self.pending:
@@ -135,12 +164,15 @@ class AutoSumController(QObject):
         self.pending_changed.emit(False)
         self.message.emit("")
 
+    def _prompt(self) -> None:
+        self.message.emit(f"Click the cell where the {self.aggregate.label.lower()} should go. Esc cancels.")
+
     def _place(self, index) -> None:
         target = (index.row(), index.column())
         if target in self._cells:
-            self.message.emit("Pick a cell outside the ones being summed. Esc cancels.")
+            self.message.emit("Pick a cell outside the selected ones. Esc cancels.")
             return
-        formula = sum_formula(cell_ranges(self._cells))
+        formula = aggregate_formula(self.aggregate.function, cell_ranges(self._cells))
         self.cancel()
         self.model.set_cell(*target, formula)
         selection = self.view.selectionModel()

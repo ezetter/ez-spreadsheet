@@ -3,7 +3,7 @@
 import os
 
 from PySide6.QtCore import QEvent, QStandardPaths, Qt, Signal
-from PySide6.QtGui import QAction, QFont, QKeySequence, QPen
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -12,14 +12,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QStyledItemDelegate,
     QTableView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from .autosum import AutoSumController
+from .autosum import AGGREGATES, Aggregate, AutoSumController
 from .clipboard import ClipboardController
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .references import cell_name
@@ -294,21 +296,55 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self):
         toolbar = self.addToolBar("Tools")
         toolbar.setMovable(False)
-        self.autosum_action = QAction("Σ", self)
+        self.autosum_action = QAction(self)
         self.autosum_action.setCheckable(True)  # stays pressed while waiting for a click
-        self.autosum_action.setToolTip(
-            "AutoSum: sum the selected numbers into the cell you click next, "
-            "or sum the numbers above or to the left of the current cell"
-        )
-        font = QFont()
-        font.setPointSize(18)
-        self.autosum_action.setFont(font)
+        # The system UI font misplaces the marks in x̄ and x̃; Helvetica Neue doesn't.
+        symbol_font = QFont()
+        symbol_font.setFamilies(["Helvetica Neue", *symbol_font.families()])
+        button_font = QFont(symbol_font)
+        button_font.setPointSize(18)
+        self.autosum_action.setFont(button_font)
         self.autosum_action.triggered.connect(self._autosum)
-        toolbar.addAction(self.autosum_action)
+
+        # The arrow beside the button picks which function it applies.
+        menu = QMenu(self)
+        menu.setFont(symbol_font)
+        group = QActionGroup(self)
+        self.aggregate_actions = {}
+        for aggregate in AGGREGATES:
+            action = menu.addAction(f"{aggregate.symbol}   {aggregate.label}")
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, a=aggregate: self._choose_aggregate(a))
+            self.aggregate_actions[aggregate.function] = action
+
+        self.autosum_button = QToolButton()
+        self.autosum_button.setDefaultAction(self.autosum_action)
+        self.autosum_button.setMenu(menu)
+        self.autosum_button.setPopupMode(QToolButton.MenuButtonPopup)
+        toolbar.addWidget(self.autosum_button)
+        self._show_aggregate()
 
         self.autosum.pending_changed.connect(self.autosum_action.setChecked)
         self.autosum.message.connect(self._show_status)
         self.statusBar()  # create it now so the window doesn't resize on the first message
+
+    def _choose_aggregate(self, aggregate: Aggregate):
+        """A function picked from the menu becomes the button's, and runs right away."""
+        self.autosum.set_aggregate(aggregate)
+        self._show_aggregate()
+        if not self.autosum.pending:
+            self._autosum()
+
+    def _show_aggregate(self):
+        aggregate = self.autosum.aggregate
+        self.autosum_action.setText(aggregate.symbol)
+        self.autosum_action.setToolTip(
+            f"{aggregate.label}: of the selected numbers, into the cell you click next; "
+            "or of the numbers above or left of the current cell. "
+            "The arrow chooses another function."
+        )
+        self.aggregate_actions[aggregate.function].setChecked(True)
 
     def _autosum(self):
         self._commit_pending_edit()

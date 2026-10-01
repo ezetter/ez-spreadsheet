@@ -257,3 +257,38 @@ def test_sum_large_range(app):
     model.set_cell(999, 51, "7")
     model.set_cell(0, 0, "=SUM(B1:AZ1000)")
     assert model.display_text(0, 0) == "7"
+
+
+@pytest.mark.parametrize("formula, expected", [
+    ("=MEAN(A1:A3)", "20"),
+    ("=mean(A1:A3, 50)", "27.5"),
+    ("=MEDIAN(A1:A3)", "20"),
+    ("=MEDIAN(A1:A3, 100)", "25"),
+    ("=STDDEV(A1:A3)", "10"),
+    ("=STDDEV(A1:A2)", "7.071067812"),
+    ("=SUM(A1:A3)*2", "120"),
+])
+def test_aggregate_functions(sheet, formula, expected):
+    sheet.set_cell(0, 2, formula)
+    assert sheet.display_text(0, 2) == expected
+
+
+@pytest.mark.parametrize("formula, error", [
+    ("=MEAN(B1:B5)", "#DIV/0!"),
+    ("=MEDIAN(B1:B5)", "#NUM!"),
+    ("=STDDEV(A1)", "#DIV/0!"),
+    ("=SUM(1e308, 1e308)", "#NUM!"),
+])
+def test_aggregate_errors(sheet, formula, error):
+    sheet.set_cell(0, 2, formula)
+    assert sheet.display_text(0, 2) == error
+
+
+def test_empty_sum_is_zero(sheet):
+    sheet.set_cell(0, 2, "=SUM(B1:B5)")
+    assert sheet.display_text(0, 2) == "0"
+
+
+def test_function_results_are_plain_floats(sheet):
+    sheet.set_cell(0, 2, "=MEAN(A1:A3)")
+    assert type(sheet.value(0, 2)) is float
