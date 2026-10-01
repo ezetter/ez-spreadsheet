@@ -81,32 +81,42 @@ class SheetModel(QAbstractTableModel):
         return self._cells.get((row, col), "")
 
     def set_cell(self, row: int, col: int, value) -> None:
+        self.set_cells({(row, col): value})
+
+    def set_cells(self, writes: dict[tuple[int, int], object]) -> None:
+        """Set many cells at once, recalculating and notifying views a single time."""
+        changed = [key for key, value in writes.items() if self._store(key, value)]
+        if not changed:
+            return
+        self._values.clear()
+        if self._formula_keys:
+            # Any formula might depend on these cells, so refresh the whole sheet.
+            self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
+        else:
+            rows = [row for row, _ in changed]
+            cols = [col for _, col in changed]
+            self.dataChanged.emit(self.index(min(rows), min(cols)), self.index(max(rows), max(cols)))
+
+    def _store(self, key, value) -> bool:
+        """Store one cell's raw text; returns whether it changed."""
         text = "" if value is None else str(value)
-        key = (row, col)
         if text:
             if self._cells.get(key) == text:
-                return
+                return False
             self._cells[key] = text
         elif key in self._cells:
             del self._cells[key]
         else:
-            return
+            return False
         if is_formula(text):
             self._formula_keys.add(key)
         else:
             self._formula_keys.discard(key)
         self._parsed.pop(key, None)
-        self._values.clear()
-        if self._formula_keys:
-            # Any formula might depend on this cell, so refresh the whole sheet.
-            self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
-        else:
-            index = self.index(row, col)
-            self.dataChanged.emit(index, index)
+        return True
 
     def clear_cells(self, indexes) -> None:
-        for index in indexes:
-            self.set_cell(index.row(), index.column(), "")
+        self.set_cells({(index.row(), index.column()): "" for index in indexes})
 
     def display_text(self, row: int, col: int) -> str:
         raw = self.get_cell(row, col)

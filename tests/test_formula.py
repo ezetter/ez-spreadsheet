@@ -5,7 +5,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from py_spread.formula import CellError, FormulaError, evaluate, format_number, parse, parse_number
+from py_spread.formula import (
+    CellError,
+    FormulaError,
+    evaluate,
+    format_number,
+    parse,
+    parse_number,
+    shift_references,
+)
 from py_spread.model import SheetModel
 
 
@@ -145,3 +153,23 @@ def test_long_dependency_chain(app):
     for row in range(rows - 1):
         model.set_cell(row, 0, f"=A{row + 2}+1")
     assert model.display_text(0, 0) == str(rows)
+
+
+@pytest.mark.parametrize("formula, d_row, d_col, expected", [
+    ("=A1+B2", 1, 0, "=A2+B3"),
+    ("=A1+B2", 0, 2, "=C1+D2"),
+    ("=$A$1+A$1+$A1", 3, 3, "=$A$1+D$1+$A4"),
+    ("=(a1 + 2) * Z9", 1, 1, "=(B2 + 2) * AA10"),
+    ("=1e3+E3", 1, 0, "=1e3+E4"),
+    ("=A2-B1", -1, 0, "=A1-#REF!"),
+    ("=A1+", 1, 1, "=B2+"),
+    ("=A1 ! bad", 1, 1, "=A1 ! bad"),
+])
+def test_shift_references(formula, d_row, d_col, expected):
+    assert shift_references(formula, d_row, d_col) == expected
+
+
+def test_ref_error_literal(app):
+    model = SheetModel(rows=10, cols=5)
+    model.set_cell(0, 0, "=#REF!+1")
+    assert model.display_text(0, 0) == "#REF!"

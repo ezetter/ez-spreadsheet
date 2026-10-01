@@ -19,6 +19,23 @@ python3 -m py_spread
 - Delete/Backspace clears the selected cells.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 
+## Cut, copy, and paste
+
+Cmd+X, Cmd+C, and Cmd+V (also in the Edit menu) work on the selected cells.
+
+- Copied cells get a dashed outline. Escape removes it.
+- Pasting goes to the top-left of the selection. A single copied cell fills
+  the whole selection.
+- Pasted formulas adjust their relative references (`=A1` copied one row down
+  becomes `=A2`); `$`-anchored parts stay fixed. A reference pushed off the
+  top or left of the sheet becomes `#REF!`.
+- Cut cells are removed when you paste, and moved formulas keep pointing at
+  the same cells. Escape or editing any cell cancels a pending cut.
+- Copied cells go on the system clipboard as tab-separated values, so they
+  paste into other apps (as displayed values), and tab-separated text from
+  other apps pastes into the grid.
+- While editing text in a cell or the bar, the shortcuts act on the text.
+
 ## Formulas
 
 Start a cell with `=`, e.g. `=A1+B2*2` or `=(A1-B1)/2^3`.

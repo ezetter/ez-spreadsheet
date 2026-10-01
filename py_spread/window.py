@@ -1,6 +1,7 @@
 """Main window: a cell-reference label and edit bar above the grid."""
 
 from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QAction, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .clipboard import ClipboardController
 from .model import SheetModel
 from .references import cell_name
 
@@ -60,7 +62,8 @@ class ReferenceInserter:
 
 
 class CellDelegate(QStyledItemDelegate):
-    """Cell editor delegate that reports new editors and Return presses."""
+    """Cell delegate that reports new editors and Return presses, and draws the
+    dashed outline around copied cells."""
 
     editor_created = Signal(QLineEdit)
     return_pressed = Signal()
@@ -78,11 +81,34 @@ class CellDelegate(QStyledItemDelegate):
             return True
         return super().eventFilter(editor, event)
 
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        marquee = self.parent().marquee
+        if marquee is None:
+            return
+        top, left, bottom, right = marquee
+        row, col = index.row(), index.column()
+        if not (top <= row <= bottom and left <= col <= right):
+            return
+        rect = option.rect
+        painter.save()
+        painter.setPen(QPen(option.palette.highlight().color(), 2, Qt.DashLine))
+        if row == top:
+            painter.drawLine(rect.left(), rect.top() + 1, rect.right(), rect.top() + 1)
+        if row == bottom:
+            painter.drawLine(rect.left(), rect.bottom() - 1, rect.right(), rect.bottom() - 1)
+        if col == left:
+            painter.drawLine(rect.left() + 1, rect.top(), rect.left() + 1, rect.bottom())
+        if col == right:
+            painter.drawLine(rect.right() - 1, rect.top(), rect.right() - 1, rect.bottom())
+        painter.restore()
+
 
 class SheetView(QTableView):
     """Table view with spreadsheet-style keyboard and mouse behavior."""
 
     editor_closed = Signal()
+    escape_pressed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,6 +129,13 @@ class SheetView(QTableView):
         # Returns the ReferenceInserter for the formula being edited, if any.
         self.reference_target = lambda: None
         self._swallow_mouse = False
+        # (top, left, bottom, right) of copied cells, outlined until pasted or cancelled.
+        self.marquee = None
+
+    def set_marquee(self, bounds) -> None:
+        if bounds != self.marquee:
+            self.marquee = bounds
+            self.viewport().update()
 
     def keyPressEvent(self, event):
         if self.state() != QAbstractItemView.EditingState:
@@ -112,6 +145,9 @@ class SheetView(QTableView):
                 return
             if key == Qt.Key_F2:
                 self.edit(self.currentIndex())
+                return
+            if key == Qt.Key_Escape:
+                self.escape_pressed.emit()
                 return
         super().keyPressEvent(event)
 
@@ -186,6 +222,9 @@ class MainWindow(QMainWindow):
         central.setLayout(layout)
         self.setCentralWidget(central)
 
+        self.clipboard = ClipboardController(self.view, self.model)
+        self._build_edit_menu()
+
         self._bar_refs = ReferenceInserter(self.edit_bar)
         self._grid_refs = None  # ReferenceInserter for the open in-cell editor
         self.view.reference_target = self._reference_target
@@ -202,6 +241,27 @@ class MainWindow(QMainWindow):
 
         self.view.setCurrentIndex(self.model.index(0, 0))
         self.view.setFocus()
+
+    def _build_edit_menu(self):
+        menu = self.menuBar().addMenu("Edit")
+        for name, shortcut, method in (
+            ("Cut", QKeySequence.Cut, "cut"),
+            ("Copy", QKeySequence.Copy, "copy"),
+            ("Paste", QKeySequence.Paste, "paste"),
+        ):
+            action = QAction(name, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, m=method: self._clipboard_action(m))
+            menu.addAction(action)
+
+    def _clipboard_action(self, method: str):
+        # While text is being edited (cell editor or edit bar), act on the text.
+        # Keyboard shortcuts reach the line edit directly; this covers the menu.
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            getattr(focus, method)()
+        else:
+            getattr(self.clipboard, method)()
 
     def _reference_target(self):
         if self._grid_refs is not None:

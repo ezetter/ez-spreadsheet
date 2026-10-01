@@ -6,7 +6,7 @@ Grammar (lowest to highest precedence):
     term    := unary (('*' | '/') unary)*
     unary   := ('+' | '-') unary | power
     power   := primary ('^' unary)?
-    primary := NUMBER | REF | '(' expr ')'
+    primary := NUMBER | REF | '#REF!' | '(' expr ')'
 
 Exponentiation follows mathematical convention: it binds tighter than unary
 minus (-2^2 = -4) and is right-associative (2^3^2 = 512).
@@ -16,7 +16,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from .references import parse_cell_name
+from .references import column_index, column_name, parse_cell_name
 
 PARSE_ERROR = "#ERROR!"
 VALUE_ERROR = "#VALUE!"
@@ -47,7 +47,8 @@ class CellError:
 _TOKEN = re.compile(
     r"""\s*(?:
         (?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)
-      | (?P<ref>\$?[A-Za-z]+\$?\d+)
+      | (?P<ref>(?P<col_anchor>\$?)(?P<col>[A-Za-z]+)(?P<row_anchor>\$?)(?P<row>\d+))
+      | (?P<error>\#REF!)
       | (?P<op>[-+*/^()])
     )""",
     re.VERBOSE,
@@ -71,8 +72,8 @@ def format_number(value: float) -> str:
     return f"{value:.10g}"
 
 
-def tokenize(text: str) -> list[tuple[str, str]]:
-    tokens = []
+def _scan(text: str) -> list[re.Match]:
+    matches = []
     text = text.rstrip()
     pos = 0
     while pos < len(text):
@@ -80,13 +81,55 @@ def tokenize(text: str) -> list[tuple[str, str]]:
         if not match:
             raise FormulaError(PARSE_ERROR)
         pos = match.end()
-        tokens.append((match.lastgroup, match.group(match.lastgroup)))
-    return tokens
+        matches.append(match)
+    return matches
+
+
+def _token_kind(match: re.Match) -> str:
+    return next(kind for kind in ("number", "ref", "error", "op") if match.group(kind) is not None)
+
+
+def tokenize(text: str) -> list[tuple[str, str]]:
+    return [(_token_kind(m), m.group(_token_kind(m))) for m in _scan(text)]
+
+
+def shift_references(formula: str, d_row: int, d_col: int) -> str:
+    """Move the relative references in a formula (with its leading '=') by an offset,
+    as when the formula is pasted elsewhere. $-anchored parts stay put, and a
+    reference pushed off the top or left of the sheet becomes #REF!. Text that
+    doesn't tokenize is returned unchanged.
+    """
+    body = formula[1:]
+    try:
+        matches = _scan(body)
+    except FormulaError:
+        return formula
+    pieces = []
+    pos = 0
+    for match in matches:
+        if match.group("ref") is None:
+            continue
+        col = column_index(match.group("col"))
+        row = int(match.group("row")) - 1
+        if not match.group("col_anchor"):
+            col += d_col
+        if not match.group("row_anchor"):
+            row += d_row
+        if row < 0 or col < 0:
+            shifted = REF_ERROR
+        else:
+            shifted = f"{match.group('col_anchor')}{column_name(col)}{match.group('row_anchor')}{row + 1}"
+        pieces.append(body[pos:match.start("ref")])
+        pieces.append(shifted)
+        pos = match.end("ref")
+    pieces.append(body[pos:])
+    return "=" + "".join(pieces)
 
 
 def parse(text: str):
     """Parse a formula body (without the leading '=') into an AST of tuples:
-    ("num", value), ("ref", row, col), ("neg", operand), ("bin", op, left, right).
+    ("num", value), ("ref", row, col), ("err", code), ("neg", operand),
+    ("bin", op, left, right).
     """
     return _Parser(tokenize(text)).parse()
 
@@ -114,6 +157,8 @@ def evaluate(node, lookup) -> float:
         return node[1]
     if kind == "ref":
         return lookup(node[1], node[2])
+    if kind == "err":
+        raise FormulaError(node[1])
     if kind == "neg":
         return -evaluate(node[1], lookup)
     _, op, left, right = node
@@ -195,6 +240,8 @@ class _Parser:
             return ("num", float(text))
         if kind == "ref":
             return ("ref", *parse_cell_name(text))
+        if kind == "error":
+            return ("err", text)
         if text == "(":
             node = self.expr()
             if self.take()[1] != ")":
