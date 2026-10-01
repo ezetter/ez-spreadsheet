@@ -1,20 +1,11 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QLineEdit
 
 from py_spread.model import SheetModel
 from py_spread.references import cell_name, column_index, column_name, parse_cell_name
 from py_spread.window import MainWindow
-
-
-@pytest.fixture(scope="session")
-def app():
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.mark.parametrize("col, name", [(0, "A"), (25, "Z"), (26, "AA"), (51, "AZ"), (701, "ZZ"), (702, "AAA")])

@@ -1,7 +1,3 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import pytest
 from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
 from PySide6.QtTest import QTest
@@ -13,11 +9,6 @@ from py_spread.window import MainWindow
 COPY = (Qt.Key_C, Qt.ControlModifier)  # Qt maps Control to Cmd on macOS
 CUT = (Qt.Key_X, Qt.ControlModifier)
 PASTE = (Qt.Key_V, Qt.ControlModifier)
-
-
-@pytest.fixture(scope="session")
-def app():
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 """Sheet data model: sparse storage of raw cell text behind a Qt table model."""
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 
 from .formula import (
     CIRCULAR_ERROR,
@@ -16,6 +16,7 @@ from .formula import (
     references,
 )
 from .references import column_name
+from .storage import SheetData
 
 DEFAULT_ROWS = 1000
 DEFAULT_COLS = 52
@@ -26,6 +27,9 @@ class SheetModel(QAbstractTableModel):
 
     Qt's EditRole is the raw text (e.g. "=A1+2"); DisplayRole is the computed value.
     """
+
+    # Emitted when cell contents are edited (not when a whole sheet is loaded).
+    contents_changed = Signal()
 
     def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
         super().__init__(parent)
@@ -89,6 +93,7 @@ class SheetModel(QAbstractTableModel):
         if not changed:
             return
         self._values.clear()
+        self.contents_changed.emit()
         if self._formula_keys:
             # Any formula might depend on these cells, so refresh the whole sheet.
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
@@ -114,6 +119,20 @@ class SheetModel(QAbstractTableModel):
             self._formula_keys.discard(key)
         self._parsed.pop(key, None)
         return True
+
+    def sheet_data(self) -> SheetData:
+        return SheetData(self._rows, self._cols, dict(self._cells))
+
+    def load_sheet_data(self, sheet: SheetData) -> None:
+        """Replace the whole sheet, including its size."""
+        self.beginResetModel()
+        self._rows = sheet.rows
+        self._cols = sheet.cols
+        self._cells = {key: text for key, text in sheet.cells.items() if text}
+        self._formula_keys = {key for key, text in self._cells.items() if is_formula(text)}
+        self._parsed.clear()
+        self._values.clear()
+        self.endResetModel()
 
     def clear_cells(self, indexes) -> None:
         self.set_cells({(index.row(), index.column()): "" for index in indexes})

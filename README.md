@@ -11,6 +11,12 @@ pip install -r requirements.txt
 python3 -m py_spread
 ```
 
+To open a saved sheet directly:
+
+```bash
+python3 -m py_spread budget.pysheet
+```
+
 ## Using the grid
 
 - Click a cell and start typing to replace its contents.
@@ -18,6 +24,28 @@ python3 -m py_spread
 - Return commits and moves down; Tab commits and moves right; Escape cancels.
 - Delete/Backspace clears the selected cells.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
+
+## Saving and opening
+
+The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As
+(Cmd+Shift+S). The window title shows the file name, and you're asked before
+unsaved changes are discarded by New, Open, or closing the window.
+
+Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
+(formulas, not their results) under its cell name, e.g.
+
+```json
+{
+  "format": "py-spread",
+  "version": 1,
+  "rows": 1000,
+  "columns": 52,
+  "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"}
+}
+```
+
+Saves go to a temporary file that then replaces the original, so a failed save
+never leaves a half-written file.
 
 ## Cut, copy, and paste
 

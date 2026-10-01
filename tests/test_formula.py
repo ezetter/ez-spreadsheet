@@ -1,9 +1,4 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from py_spread.formula import (
     CellError,
@@ -15,11 +10,6 @@ from py_spread.formula import (
     shift_references,
 )
 from py_spread.model import SheetModel
-
-
-@pytest.fixture(scope="session")
-def app():
-    return QApplication.instance() or QApplication([])
 
 
 def calc(text):

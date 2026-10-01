@@ -1,14 +1,18 @@
 """Main window: a cell-reference label and edit bar above the grid."""
 
-from PySide6.QtCore import QEvent, Qt, Signal
+import os
+
+from PySide6.QtCore import QEvent, QStandardPaths, Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QStyledItemDelegate,
     QTableView,
     QVBoxLayout,
@@ -16,8 +20,11 @@ from PySide6.QtWidgets import (
 )
 
 from .clipboard import ClipboardController
-from .model import SheetModel
+from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .references import cell_name
+from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
+
+FILE_FILTER = f"Py-Spread Sheets (*{EXTENSION})"
 
 # A clicked cell reference can be inserted after any of these characters.
 REFERENCE_TRIGGERS = "=+-*/^("
@@ -196,8 +203,9 @@ class SheetView(QTableView):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Py-Spread")
         self.resize(1100, 700)
+        self.file_path: str | None = None
+        self._set_file_path(None)
 
         self.model = SheetModel(parent=self)
         self.view = SheetView()
@@ -223,6 +231,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.clipboard = ClipboardController(self.view, self.model)
+        self._build_file_menu()
         self._build_edit_menu()
 
         self._bar_refs = ReferenceInserter(self.edit_bar)
@@ -233,6 +242,7 @@ class MainWindow(QMainWindow):
         self.view.cell_delegate.editor_created.connect(self._on_editor_created)
         self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
+        self.model.contents_changed.connect(lambda: self.setWindowModified(True))
         self.edit_bar.returnPressed.connect(self._commit_edit_bar)
         self.edit_bar.textChanged.connect(self._update_reference_mode)
         self.edit_bar.cursorPositionChanged.connect(self._update_reference_mode)
@@ -241,6 +251,19 @@ class MainWindow(QMainWindow):
 
         self.view.setCurrentIndex(self.model.index(0, 0))
         self.view.setFocus()
+
+    def _build_file_menu(self):
+        menu = self.menuBar().addMenu("File")
+        for name, shortcut, slot in (
+            ("New", QKeySequence.New, self.new_file),
+            ("Open…", QKeySequence.Open, self.open_file),
+            ("Save", QKeySequence.Save, self.save),
+            ("Save As…", QKeySequence.SaveAs, self.save_as),
+        ):
+            action = QAction(name, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, s=slot: s())
+            menu.addAction(action)
 
     def _build_edit_menu(self):
         menu = self.menuBar().addMenu("Edit")
@@ -262,6 +285,116 @@ class MainWindow(QMainWindow):
             getattr(focus, method)()
         else:
             getattr(self.clipboard, method)()
+
+    # --- Files ---
+
+    def new_file(self) -> None:
+        if self.maybe_save():
+            self._load(SheetData(DEFAULT_ROWS, DEFAULT_COLS), None)
+
+    def open_file(self) -> None:
+        if not self.maybe_save():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Open Sheet", self._dialog_dir(), FILE_FILTER)
+        if path:
+            self.open_path(path)
+
+    def open_path(self, path: str) -> bool:
+        try:
+            sheet = load_sheet(path)
+        except SheetFileError as e:
+            self._show_error("Couldn't open the sheet.", str(e))
+            return False
+        self._load(sheet, path)
+        return True
+
+    def save(self) -> bool:
+        if self.file_path is None:
+            return self.save_as()
+        return self.save_to(self.file_path)
+
+    def save_as(self) -> bool:
+        suggested = self.file_path or os.path.join(self._dialog_dir(), "Untitled" + EXTENSION)
+        path, _ = QFileDialog.getSaveFileName(self, "Save Sheet", suggested, FILE_FILTER)
+        if not path:
+            return False
+        if not os.path.splitext(path)[1]:
+            path += EXTENSION
+        return self.save_to(path)
+
+    def save_to(self, path: str) -> bool:
+        self._commit_pending_edit()
+        try:
+            save_sheet(path, self.model.sheet_data())
+        except SheetFileError as e:
+            self._show_error("Couldn't save the sheet.", str(e))
+            return False
+        self._set_file_path(path)
+        self.setWindowModified(False)
+        return True
+
+    def maybe_save(self) -> bool:
+        """Offer to save unsaved changes. Returns False if the user cancels."""
+        self._commit_pending_edit()
+        if not self.isWindowModified():
+            return True
+        answer = self._ask_to_save()
+        if answer == QMessageBox.Save:
+            return self.save()
+        return answer == QMessageBox.Discard
+
+    def closeEvent(self, event):
+        if self.maybe_save():
+            event.accept()
+        else:
+            event.ignore()
+
+    def _load(self, sheet: SheetData, path: str | None) -> None:
+        self.clipboard.cancel()
+        self.model.load_sheet_data(sheet)
+        self.view.setCurrentIndex(self.model.index(0, 0))
+        self._refresh_bar(self.view.currentIndex())
+        self._set_file_path(path)
+        self.setWindowModified(False)
+
+    def _commit_pending_edit(self) -> None:
+        """Store text still being typed, so saving includes it."""
+        if self._grid_refs is not None:
+            editor = self._grid_refs.edit
+            self.view.cell_delegate.commitData.emit(editor)
+            self.view.cell_delegate.closeEditor.emit(editor, QStyledItemDelegate.NoHint)
+        elif self.edit_bar.hasFocus():
+            self._store_edit_bar()
+
+    def _set_file_path(self, path: str | None) -> None:
+        self.file_path = path
+        self.setWindowFilePath(path or "")
+        name = os.path.basename(path) if path else "Untitled"
+        self.setWindowTitle(f"{name}[*] — Py-Spread")
+
+    def _dialog_dir(self) -> str:
+        if self.file_path:
+            return os.path.dirname(self.file_path)
+        return QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+
+    def _ask_to_save(self):
+        name = os.path.basename(self.file_path) if self.file_path else "Untitled"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f'Do you want to save the changes you made to "{name}"?')
+        box.setInformativeText("Your changes will be lost if you don't save them.")
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Save)
+        return box.exec()
+
+    def _show_error(self, text: str, detail: str) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Critical)
+        box.setText(text)
+        box.setInformativeText(detail)
+        box.exec()
+
+    # --- Formula editing ---
 
     def _reference_target(self):
         if self._grid_refs is not None:
