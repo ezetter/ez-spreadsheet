@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 
 from .autosum import AGGREGATES, Aggregate, AutoSumController
 from .clipboard import ClipboardController
+from .fill import FILL_MODES, FillController, FillMode
+from .fill_dialogs import FillDialogs
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
@@ -246,6 +248,7 @@ class MainWindow(QMainWindow):
 
         self.clipboard = ClipboardController(self.view, self.model)
         self.autosum = AutoSumController(self.view, self.model)
+        self.fill = FillController(self.view, self.model, FillDialogs(self))
         self._build_file_menu()
         self._build_edit_menu()
         self._build_toolbar()
@@ -327,7 +330,50 @@ class MainWindow(QMainWindow):
 
         self.autosum.pending_changed.connect(self.autosum_action.setChecked)
         self.autosum.message.connect(self._show_status)
+
+        self._build_fill_button(toolbar)
         self.statusBar()  # create it now so the window doesn't resize on the first message
+
+    def _build_fill_button(self, toolbar):
+        self.fill_action = QAction(self)
+        self.fill_action.triggered.connect(lambda _checked=False: self._fill())
+
+        # The arrow beside the button picks the fill mode.
+        menu = QMenu(self)
+        group = QActionGroup(self)
+        self.fill_actions = {}
+        for mode in FILL_MODES:
+            action = menu.addAction(mode.label)
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, m=mode: self._fill(m))
+            self.fill_actions[mode.key] = action
+
+        self.fill_button = QToolButton()
+        self.fill_button.setDefaultAction(self.fill_action)
+        self.fill_button.setMenu(menu)
+        self.fill_button.setPopupMode(QToolButton.MenuButtonPopup)
+        toolbar.addWidget(self.fill_button)
+        self.fill.message.connect(self._show_status)
+        self._show_fill_mode()
+
+    def _fill(self, mode: FillMode | None = None):
+        """Fill the selection; a mode picked from the menu becomes the button's."""
+        self._commit_pending_edit()
+        self.autosum.cancel()
+        self.view.setFocus()
+        self.fill.run(mode)
+        self._show_fill_mode()
+
+    def _show_fill_mode(self):
+        mode = self.fill.mode
+        self.fill_action.setText(f"Fill: {mode.label}")
+        self.fill_action.setToolTip(
+            f"Fill the selected cells ({mode.label.lower()}). Values already in the first "
+            "cells are used when they show what to do; otherwise a dialog asks. "
+            "The arrow chooses another kind of fill."
+        )
+        self.fill_actions[mode.key].setChecked(True)
 
     def _choose_aggregate(self, aggregate: Aggregate):
         """A function picked from the menu becomes the button's. It then switches

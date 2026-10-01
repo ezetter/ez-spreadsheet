@@ -129,6 +129,38 @@ such as `=SUM(A1:A9)*2`, are left alone.
 For 2 and 3 it takes the nearest unbroken block of numbers, skipping blank
 cells right next to the current cell and stopping at text or a gap.
 
+## Fill
+
+The Fill button on the toolbar fills the selected cells. The arrow beside it
+chooses the kind of fill (choosing one runs it straight away), and the button
+repeats the last kind used. Cells are filled down each column, then across
+the columns.
+
+If the first cells of the selection already show what you want, Fill uses
+them without asking:
+
+- **Uniform** puts the first cell's value in every selected cell. A formula's
+  references move with each cell, as when pasting.
+- **Sequence** continues from the first two numbers, using their difference
+  as the step: `5, 10` continues `15, 20, …`; `1, 0.5` continues `0, -0.5, …`.
+- **Random** fills every selected cell, including the first two, with random
+  numbers between the first two numbers. They're integers if both numbers are
+  whole, floating point otherwise.
+
+Otherwise a dialog asks for the settings, starting from the ones you used
+last:
+
+- **Random:** lower and upper bounds, and integers or floating point.
+  Integers can be either bound itself. Integer bounds must be whole numbers;
+  floating point bounds can be anything, such as 0.25 to 0.75.
+- **Sequence:** lower and upper bounds, a step, ascending or descending, and
+  the fill order (down columns first, or across rows first). Leave the step
+  blank to spread the values evenly over the selected cells. Whole-number
+  values are written as integers. If the step reaches the far bound before
+  the cells run out, the remaining cells are left as they are. The dialog
+  previews the values.
+- **Uniform:** the value to use: a number, text, or formula.
+
 ## Tests
 
 ```bash
