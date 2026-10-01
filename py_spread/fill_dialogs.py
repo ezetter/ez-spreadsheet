@@ -13,7 +13,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .fill import RandomFill, SequenceFill, UniformFill, check_random, check_sequence, sequence_values
+from .fill import (
+    RandomFill,
+    SequenceFill,
+    UniformFill,
+    check_random,
+    check_sequence,
+    sequence_values,
+    written_as_float,
+)
 from .formula import format_number, parse_number
 
 
@@ -128,7 +136,10 @@ class SequenceDialog(_FillDialog):
             step = parse_number(self.step.text())
             if step is None:
                 return "The step must be a number, or blank."
-        params = SequenceFill(lower, upper, step, self.descending.isChecked(), self.across_first.isChecked())
+        # As with numbers in cells, typing 1.0 rather than 1 asks for floats.
+        floats = any(written_as_float(f.text()) for f in (self.lower, self.upper, self.step))
+        params = SequenceFill(lower, upper, step, self.descending.isChecked(),
+                              self.across_first.isChecked(), floats)
         return check_sequence(params) or params
 
     def params(self) -> SequenceFill | None:

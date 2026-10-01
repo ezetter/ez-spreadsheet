@@ -11,6 +11,8 @@ the selection are checked for a value to work from:
 - Uniform uses the first cell's value.
 - Sequence continues from the first two numbers (their difference is the step).
 - Random picks numbers between the first two numbers, replacing them too.
+Numbers typed as floating point (1.0, 2.50, 1e3) make the fill floating point,
+even when their values are whole.
 """
 
 import math
@@ -19,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 
-from .formula import format_number, is_formula, shift_references
+from .formula import format_number, is_formula, parse_number, shift_references
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ class SequenceFill:
     step: float | None = None  # None spreads the values evenly over the cells
     descending: bool = False
     across_first: bool = False  # fill across each row before moving down
+    floats: bool = False  # write whole values as floats too (3.0, not 3)
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,17 @@ def order_cells(cells, across_first: bool = False) -> list[tuple[int, int]]:
 
 def is_whole(value: float) -> bool:
     return float(value).is_integer()
+
+
+def written_as_float(text: str) -> bool:
+    """Whether text is a number typed in floating point form, like 1.0 or 1e3."""
+    return parse_number(text) is not None and any(c in text for c in ".eE")
+
+
+def format_float(value: float) -> str:
+    """Like format_number, but whole values keep a decimal point: 3.0, not 3."""
+    text = format_number(value)
+    return text if any(c in text for c in ".e") else text + ".0"
 
 
 def check_random(params: RandomFill) -> str | None:
@@ -89,7 +103,7 @@ def random_values(params: RandomFill, count: int, rng: np.random.Generator) -> l
         numbers = rng.integers(int(params.lower), int(params.upper), size=count, endpoint=True)
         return [str(int(n)) for n in numbers]
     numbers = rng.uniform(params.lower, params.upper, size=count)
-    return [format_number(float(n)) for n in numbers]
+    return [format_float(float(n)) for n in numbers]
 
 
 def sequence_numbers(params: SequenceFill, count: int) -> list[float]:
@@ -108,9 +122,10 @@ def sequence_numbers(params: SequenceFill, count: int) -> list[float]:
 
 
 def sequence_values(params: SequenceFill, count: int) -> list[str]:
-    # format_number writes whole numbers as integers and trims float noise
-    # such as 0.30000000000000004.
-    return [format_number(n) for n in sequence_numbers(params, count)]
+    # Both formats trim float noise such as 0.30000000000000004; format_number
+    # also writes whole values as integers.
+    write = format_float if params.floats else format_number
+    return [write(n) for n in sequence_numbers(params, count)]
 
 
 def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int):
@@ -121,14 +136,15 @@ def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int):
     if len(first_values) < 2 or not all(isinstance(v, float) for v in first_values):
         return None
     a, b = first_values
+    floats = any(written_as_float(raw) for raw in first_raw)
     if mode.key == "random":
         lower, upper = min(a, b), max(a, b)
-        return RandomFill(lower, upper, integers=is_whole(a) and is_whole(b))
+        return RandomFill(lower, upper, integers=is_whole(a) and is_whole(b) and not floats)
     step = b - a
     if step == 0:
         return UniformFill(first_raw[0])
     last = a + (count - 1) * step
-    return SequenceFill(min(a, last), max(a, last), abs(step), descending=step < 0)
+    return SequenceFill(min(a, last), max(a, last), abs(step), descending=step < 0, floats=floats)
 
 
 class FillController(QObject):

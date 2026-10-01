@@ -147,6 +147,11 @@ them without asking:
   numbers between the first two numbers. They're integers if both numbers are
   whole, floating point otherwise.
 
+Numbers typed in floating point form (`1.0`, `2.50`, `1e3`) count as floating
+point even when they're whole: `1.0, 2.0` continues `3.0, 4.0, …`, and
+Random between `1.0` and `6.0` picks floating point numbers. The same goes
+for the bounds and step typed into the Sequence dialog.
+
 Otherwise a dialog asks for the settings, starting from the ones you used
 last:
 
@@ -156,7 +161,8 @@ last:
 - **Sequence:** lower and upper bounds, a step, ascending or descending, and
   the fill order (down columns first, or across rows first). Leave the step
   blank to spread the values evenly over the selected cells. Whole-number
-  values are written as integers. If the step reaches the far bound before
+  values are written as integers, unless a bound or step was typed as
+  floating point. If the step reaches the far bound before
   the cells run out, the remaining cells are left as they are. The dialog
   previews the values.
 - **Uniform:** the value to use: a number, text, or formula.

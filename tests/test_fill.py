@@ -14,6 +14,7 @@ from py_spread.fill import (
     order_cells,
     random_values,
     sequence_values,
+    written_as_float,
 )
 from py_spread.fill_dialogs import RandomDialog, SequenceDialog, UniformDialog
 from py_spread.window import MainWindow
@@ -45,6 +46,19 @@ def test_sequence_values(params, count, expected):
     assert sequence_values(params, count) == expected
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("1.0", True), ("2.50", True), ("1e3", True), (".5", True),
+    ("1", False), ("-7", False), ("abc", False), ("1.0x", False), ("", False),
+])
+def test_written_as_float(text, expected):
+    assert written_as_float(text) == expected
+
+
+def test_float_sequences_keep_decimal_point():
+    assert sequence_values(SequenceFill(1, 3, 1, floats=True), 3) == ["1.0", "2.0", "3.0"]
+    assert sequence_values(SequenceFill(0, 1, 0.5, floats=True), 3) == ["0.0", "0.5", "1.0"]
+
+
 def test_random_integers_within_inclusive_bounds():
     rng = np.random.default_rng(0)
     values = [int(v) for v in random_values(RandomFill(1, 3, True), 500, rng)]
@@ -53,7 +67,9 @@ def test_random_integers_within_inclusive_bounds():
 
 def test_random_floats_within_bounds():
     rng = np.random.default_rng(0)
-    values = [float(v) for v in random_values(RandomFill(2.25, 2.75, False), 500, rng)]
+    texts = random_values(RandomFill(2.25, 2.75, False), 500, rng)
+    assert all("." in t for t in texts)
+    values = [float(t) for t in texts]
     assert all(2.25 <= v <= 2.75 for v in values)
     assert len(set(values)) > 400
 
@@ -86,12 +102,18 @@ def test_check_sequence(params, ok):
     ("uniform", ["hello", "3"], ["hello", 3.0], 5, UniformFill("hello")),
     ("uniform", ["", "3"], [None, 3.0], 5, None),
     ("sequence", ["1", "3"], [1.0, 3.0], 5, SequenceFill(1, 9, 2)),
+    ("sequence", ["1.0", "2.0"], [1.0, 2.0], 3, SequenceFill(1, 3, 1, floats=True)),
+    ("sequence", ["1", "2.0"], [1.0, 2.0], 3, SequenceFill(1, 3, 1, floats=True)),
+    ("sequence", ["1e2", "2e2"], [100.0, 200.0], 3, SequenceFill(100, 300, 100, floats=True)),
+    ("sequence", ["=1+0", "2"], [1.0, 2.0], 3, SequenceFill(1, 3, 1)),
     ("sequence", ["10", "8"], [10.0, 8.0], 4, SequenceFill(4, 10, 2, descending=True)),
     ("sequence", ["4", "4"], [4.0, 4.0], 4, UniformFill("4")),
     ("sequence", ["1", ""], [1.0, None], 4, None),
     ("sequence", ["1", "x"], [1.0, "x"], 4, None),
     ("random", ["10", "1"], [10.0, 1.0], 4, RandomFill(1, 10, True)),
     ("random", ["0", "0.5"], [0.0, 0.5], 4, RandomFill(0, 0.5, False)),
+    ("random", ["1.0", "6.0"], [1.0, 6.0], 4, RandomFill(1, 6, False)),
+    ("random", ["1", "6.0"], [1.0, 6.0], 4, RandomFill(1, 6, False)),
     ("random", ["1", ""], [1.0, None], 4, None),
 ])
 def test_infer(mode, raw, values, count, expected):
@@ -198,7 +220,7 @@ def test_sequence_inferred_across_a_row(window):
     window.model.set_cell(2, 1, "0.5")
     select(window, 2, 0, 2, 4)
     fill(window, "sequence")
-    assert [window.model.get_cell(2, c) for c in range(5)] == ["1", "0.5", "0", "-0.5", "-1"]
+    assert [window.model.get_cell(2, c) for c in range(5)] == ["1.0", "0.5", "0.0", "-0.5", "-1.0"]
 
 
 def test_sequence_inferred_continues_into_next_column(window):
@@ -348,3 +370,32 @@ def test_uniform_dialog(app):
     dialog.value.setText("=A1+1")
     assert ok_enabled(dialog)
     assert dialog.params() == UniformFill("=A1+1")
+
+
+def test_sequence_from_float_cells_stays_float(window):
+    window.model.set_cell(0, 0, "1.0")
+    window.model.set_cell(1, 0, "2.0")
+    select(window, 0, 0, 4, 0)
+    fill(window, "sequence")
+    assert column(window, 0, range(5)) == ["1.0", "2.0", "3.0", "4.0", "5.0"]
+
+
+def test_random_from_float_cells_is_float(window):
+    window.model.set_cell(0, 0, "1.0")
+    window.model.set_cell(1, 0, "6.0")
+    select(window, 0, 0, 29, 0)
+    fill(window, "random")
+    values = column(window, 0, range(30))
+    assert all("." in v and 1 <= float(v) <= 6 for v in values)
+    assert any(not float(v).is_integer() for v in values)
+
+
+def test_sequence_dialog_floats_from_typed_bounds(app):
+    dialog = SequenceDialog(cell_count=3)
+    dialog.lower.setText("1.0")
+    dialog.upper.setText("3")
+    assert dialog.params().floats
+    assert "1.0, 2.0, 3.0" in dialog.note.text()
+    dialog.lower.setText("1")
+    assert not dialog.params().floats
+    assert "1, 2, 3" in dialog.note.text()
