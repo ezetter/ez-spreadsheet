@@ -77,6 +77,21 @@ Saves go to a temporary file that then replaces the original, so a failed save
 never leaves a half-written file. New files get your normal default
 permissions; saving over a file keeps its existing permissions.
 
+## CSV import and export
+
+The File menu also has Import CSV… and Export CSV….
+
+- **Export** writes what the cells show (formula results, not formulas) from
+  A1 to the last filled row and column, so cell positions are kept. It
+  doesn't change which file the sheet is saved to.
+- **Import** puts the file's fields into the sheet starting at the selected
+  cell (the top-left of a selection), as one step that Undo can reverse. The
+  sheet grows if the data doesn't fit. To import into a fresh sheet, use New
+  first. Numbers in the file become numbers; everything else is text.
+- Comma-, semicolon-, and tab-separated files are recognized, as are quoted
+  fields and the encodings Excel writes (UTF-8, with or without a byte order
+  mark, and Windows).
+
 ## Cut, copy, and paste
 
 Cmd+X, Cmd+C, and Cmd+V (also in the Edit menu) work on the selected cells.

@@ -54,7 +54,7 @@ class ClipboardController:
             self._clip = None
 
     def _take(self, cut: bool) -> None:
-        top, left, bottom, right = self._selection_bounds()
+        top, left, bottom, right = self.view.selection_bounds()
         rows = range(top, bottom + 1)
         cols = range(left, right + 1)
         cells = tuple(tuple(self.model.get_cell(r, c) for c in cols) for r in rows)
@@ -68,7 +68,7 @@ class ClipboardController:
         block = clip.cells if clip else from_tsv(QApplication.clipboard().text())
         if not block:
             return
-        top, left, bottom, right = self._selection_bounds()
+        top, left, bottom, right = self.view.selection_bounds()
         cut = clip is not None and clip.cut
 
         # A single copied cell fills the whole selection; anything else pastes once.
@@ -103,13 +103,6 @@ class ClipboardController:
             self._clip = replace(clip, top=top, left=left, cut=False)
             self.view.set_marquee(None)
         self.view.select_range(top, left, top + height - 1, left + width - 1)
-
-    def _selection_bounds(self) -> tuple[int, int, int, int]:
-        """(top, left, bottom, right) of the selection, or of the current cell."""
-        indexes = self.view.selectedIndexes() or [self.view.currentIndex()]
-        rows = [index.row() for index in indexes]
-        cols = [index.column() for index in indexes]
-        return min(rows), min(cols), max(rows), max(cols)
 
     def _on_data_changed(self, *_args) -> None:
         # Editing any cell ends the copy outline and abandons a pending cut, as in Excel.

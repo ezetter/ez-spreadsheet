@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from .autosum import AGGREGATES, Aggregate, AutoSumController
 from .clipboard import ClipboardController
+from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
@@ -30,6 +31,7 @@ from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
 FILE_FILTER = f"Py-Spread Sheets (*{EXTENSION})"
+CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
 
 # A clicked cell reference can be inserted after any of these characters.
 REFERENCE_TRIGGERS = "=+-*/^(,:"
@@ -209,6 +211,13 @@ class SheetView(QTableView):
         super().closeEditor(editor, hint)
         self.editor_closed.emit()
 
+    def selection_bounds(self) -> tuple[int, int, int, int]:
+        """(top, left, bottom, right) of the selection, or of the current cell."""
+        indexes = self.selectedIndexes() or [self.currentIndex()]
+        rows = [index.row() for index in indexes]
+        cols = [index.column() for index in indexes]
+        return min(rows), min(cols), max(rows), max(cols)
+
     def select_range(self, top: int, left: int, bottom: int, right: int) -> None:
         """Select a block of cells, make its top-left current, and scroll to it."""
         model = self.model()
@@ -295,6 +304,11 @@ class MainWindow(QMainWindow):
         ):
             action = QAction(name, self)
             action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, s=slot: s())
+            menu.addAction(action)
+        menu.addSeparator()
+        for name, slot in (("Import CSV…", self.import_csv), ("Export CSV…", self.export_csv)):
+            action = QAction(name, self)
             action.triggered.connect(lambda _checked=False, s=slot: s())
             menu.addAction(action)
 
@@ -528,6 +542,65 @@ class MainWindow(QMainWindow):
         self._set_file_path(path)
         self.model.undo_stack.setClean()
         self.setWindowModified(False)
+        return True
+
+    def import_csv(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Import CSV", self._dialog_dir(), CSV_FILTER)
+        if path:
+            self.import_csv_from(path)
+
+    def import_csv_from(self, path: str) -> bool:
+        """Put a CSV file's fields into the sheet at the selected cell, as one
+        undoable step, growing the sheet if they don't fit."""
+        self._commit_pending_edit()
+        try:
+            rows = read_csv(path)
+        except SheetFileError as e:
+            self._show_error("Couldn't import the CSV file.", str(e))
+            return False
+        name = os.path.basename(path)
+        if not rows:
+            self._show_status(f"{name} is empty, so nothing was imported.")
+            return False
+        top, left, _, _ = self.view.selection_bounds()
+        height, width = len(rows), max(len(row) for row in rows)
+        self.model.ensure_size(top + height, left + width)
+        writes = {
+            (top + r, left + c): row[c] if c < len(row) else ""
+            for r, row in enumerate(rows)
+            for c in range(width)
+        }
+        self.model.set_cells(writes, "Import CSV")
+        self.view.select_range(top, left, top + height - 1, left + width - 1)
+        self._show_status(
+            f"Imported {height} rows × {width} columns from {name} at {cell_name(top, left)}.")
+        return True
+
+    def export_csv(self) -> None:
+        name = os.path.splitext(os.path.basename(self.file_path or "Untitled"))[0]
+        suggested = os.path.join(self._dialog_dir(), name + ".csv")
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", suggested, CSV_FILTER)
+        if not path:
+            return
+        if not os.path.splitext(path)[1]:
+            path += ".csv"
+        self.export_csv_to(path)
+
+    def export_csv_to(self, path: str) -> bool:
+        """Write what the cells show (formula results, not formulas), from A1
+        to the last filled row and column."""
+        self._commit_pending_edit()
+        rows = self.model.displayed_rows()
+        if not rows:
+            self._show_status("The sheet is empty, so there's nothing to export.")
+            return False
+        try:
+            write_csv(path, rows)
+        except SheetFileError as e:
+            self._show_error("Couldn't export the CSV file.", str(e))
+            return False
+        self._show_status(
+            f"Exported {len(rows)} rows × {len(rows[0])} columns to {os.path.basename(path)}.")
         return True
 
     def maybe_save(self) -> bool:

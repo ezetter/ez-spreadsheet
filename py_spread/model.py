@@ -176,6 +176,25 @@ class SheetModel(QAbstractTableModel):
         self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
 
+    def ensure_size(self, rows: int, cols: int) -> None:
+        """Grow the sheet, if needed, to at least `rows` by `cols`."""
+        if rows > self._rows:
+            self.beginInsertRows(QModelIndex(), self._rows, rows - 1)
+            self._rows = rows
+            self.endInsertRows()
+        if cols > self._cols:
+            self.beginInsertColumns(QModelIndex(), self._cols, cols - 1)
+            self._cols = cols
+            self.endInsertColumns()
+
+    def displayed_rows(self) -> list[list[str]]:
+        """What each cell shows, from A1 to the last non-empty row and column."""
+        if not self._cells:
+            return []
+        bottom = max(row for row, _ in self._cells)
+        right = max(col for _, col in self._cells)
+        return [[self.display_text(r, c) for c in range(right + 1)] for r in range(bottom + 1)]
+
     def clear_cells(self, indexes) -> None:
         self.set_cells({(index.row(), index.column()): "" for index in indexes}, "Clear")
 

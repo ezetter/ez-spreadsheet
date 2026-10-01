@@ -44,15 +44,18 @@ def save_sheet(path: str, sheet: SheetData) -> None:
         "columns": sheet.cols,
         "cells": {cell_name(row, col): text for (row, col), text in ordered},
     }
-    # Write to a temporary file and swap it in, so a failed save can't
-    # leave a half-written file in place of the old one.
+    write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+
+
+def write_text_atomically(path: str, text: str) -> None:
+    """Write UTF-8 text to a temporary file and swap it in, so a failed save
+    can't leave a half-written file in place of the old one."""
     directory = os.path.dirname(os.path.abspath(path))
     try:
-        fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".", suffix=EXTENSION)
+        fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".", suffix=os.path.splitext(path)[1])
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(document, f, indent=2, ensure_ascii=False)
-                f.write("\n")
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
             # mkstemp makes owner-only files; give the result normal permissions.
             os.chmod(temp_path, _file_mode(path))
             os.replace(temp_path, path)

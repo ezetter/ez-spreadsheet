@@ -45,10 +45,10 @@ def test_failed_save_keeps_old_file(tmp_path, monkeypatch):
     path = tmp_path / "s.pysheet"
     save_sheet(str(path), SheetData(10, 5, {(0, 0): "original"}))
 
-    def broken_dump(*args, **kwargs):
+    def broken_replace(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr("py_spread.storage.json.dump", broken_dump)
+    monkeypatch.setattr("py_spread.storage.os.replace", broken_replace)
     with pytest.raises(SheetFileError):
         save_sheet(str(path), SheetData(10, 5, {(0, 0): "new"}))
     assert load_sheet(str(path)).cells == {(0, 0): "original"}
