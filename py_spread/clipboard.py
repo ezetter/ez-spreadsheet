@@ -20,6 +20,7 @@ class Clip:
     cells: tuple[tuple[str, ...], ...]  # raw text, row by row
     text: str  # what was put on the system clipboard
     cut: bool
+    formats: tuple[tuple, ...] = ()  # explicit number formats (or None), row by row
 
 
 def to_tsv(rows) -> str:
@@ -58,8 +59,9 @@ class ClipboardController:
         rows = range(top, bottom + 1)
         cols = range(left, right + 1)
         cells = tuple(tuple(self.model.get_cell(r, c) for c in cols) for r in rows)
+        formats = tuple(tuple(self.model.cell_format(r, c) for c in cols) for r in rows)
         text = to_tsv([self.model.display_text(r, c) for c in cols] for r in rows)
-        self._clip = Clip(top, left, cells, text, cut)
+        self._clip = Clip(top, left, cells, text, cut, formats)
         QApplication.clipboard().setText(text)
         self.view.set_marquee((top, left, bottom, right))
 
@@ -78,11 +80,13 @@ class ClipboardController:
         height = min(height, self.model.rowCount() - top)
         width = min(width, self.model.columnCount() - left)
 
-        writes = {}
+        # Cells copied from this sheet bring their number formats along.
+        writes, formats = {}, {}
         if cut:
             for r, row in enumerate(block):
                 for c in range(len(row)):
                     writes[(clip.top + r, clip.left + c)] = ""
+                    formats[(clip.top + r, clip.left + c)] = None
         for r in range(height):
             for c in range(width):
                 src_r, src_c = (0, 0) if fill else (r, c)
@@ -91,10 +95,12 @@ class ClipboardController:
                 if clip and not cut and is_formula(text):
                     text = shift_references(text, top + r - (clip.top + src_r), left + c - (clip.left + src_c))
                 writes[(top + r, left + c)] = text
+                if clip:
+                    formats[(top + r, left + c)] = clip.formats[src_r][src_c]
 
         self._pasting = True
         try:
-            self.model.set_cells(writes, "Move" if cut else "Paste")
+            self.model.set_cells(writes, "Move" if cut else "Paste", formats)
         finally:
             self._pasting = False
 

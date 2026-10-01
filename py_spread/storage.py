@@ -17,10 +17,11 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 
+from .numformat import NumberFormat, from_json, to_json
 from .references import cell_name, parse_cell_name
 
 FORMAT = "py-spread"
-VERSION = 1
+VERSION = 2  # 2 added number formats
 EXTENSION = ".pysheet"
 
 
@@ -33,6 +34,7 @@ class SheetData:
     rows: int
     cols: int
     cells: dict[tuple[int, int], str] = field(default_factory=dict)
+    formats: dict[tuple[int, int], NumberFormat] = field(default_factory=dict)
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -44,6 +46,10 @@ def save_sheet(path: str, sheet: SheetData) -> None:
         "columns": sheet.cols,
         "cells": {cell_name(row, col): text for (row, col), text in ordered},
     }
+    if sheet.formats:
+        document["formats"] = {
+            cell_name(row, col): to_json(fmt) for (row, col), fmt in sorted(sheet.formats.items())
+        }
     write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
 
 
@@ -94,23 +100,43 @@ def load_sheet(path: str) -> SheetData:
     rows = document.get("rows")
     cols = document.get("columns")
     cells = document.get("cells", {})
-    if not (_positive_int(rows) and _positive_int(cols) and isinstance(cells, dict)):
-        raise SheetFileError(f"{path} is damaged: bad sheet size or cell table.")
+    formats = document.get("formats", {})  # absent before version 2
+    if not (_positive_int(rows) and _positive_int(cols)
+            and isinstance(cells, dict) and isinstance(formats, dict)):
+        raise SheetFileError(f"{path} is damaged: bad sheet size, cell table, or format table.")
 
     sheet = SheetData(rows, cols)
     for name, text in cells.items():
-        try:
-            row, col = parse_cell_name(name)
-        except ValueError:
-            raise SheetFileError(f"{path} is damaged: {name!r} isn't a cell name.") from None
-        if row < 0 or not isinstance(text, str):
+        row, col = _cell_key(path, name)
+        if not isinstance(text, str):
             raise SheetFileError(f"{path} is damaged: bad entry for cell {name}.")
         if text:
             sheet.cells[(row, col)] = text
-            # Grow the sheet if a cell lies outside the recorded size.
-            sheet.rows = max(sheet.rows, row + 1)
-            sheet.cols = max(sheet.cols, col + 1)
+            _grow_to_fit(sheet, row, col)
+    for name, data in formats.items():
+        row, col = _cell_key(path, name)
+        fmt = from_json(data)
+        if fmt is None:
+            raise SheetFileError(f"{path} is damaged: bad format for cell {name}.")
+        sheet.formats[(row, col)] = fmt
+        _grow_to_fit(sheet, row, col)
     return sheet
+
+
+def _cell_key(path: str, name) -> tuple[int, int]:
+    try:
+        row, col = parse_cell_name(name)
+    except (TypeError, ValueError):
+        row = -1
+    if row < 0:
+        raise SheetFileError(f"{path} is damaged: {name!r} isn't a cell name.")
+    return row, col
+
+
+def _grow_to_fit(sheet: SheetData, row: int, col: int) -> None:
+    # A cell outside the recorded size grows the sheet.
+    sheet.rows = max(sheet.rows, row + 1)
+    sheet.cols = max(sheet.cols, col + 1)
 
 
 def _positive_int(value) -> bool:

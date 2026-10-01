@@ -42,6 +42,29 @@ creates the file.
 - Delete/Backspace clears the selected cells.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 
+## Number formats
+
+Numbers can be typed with a dollar sign and thousands separators: `$1,234.50`,
+`1,234`, `-$5`. They're numbers (formulas and AutoSum use them) and are shown
+just as typed. Commas must separate groups of three digits, so `1,5` stays
+text rather than being read as 15.
+
+The Format menu gives the selected cells an explicit format:
+
+- **General** shows numbers plainly (`1234.5`).
+- **Number** shows two decimals with thousands separators (`1,234.50`).
+- **Currency** adds a dollar sign (`$1,234.50`).
+- **Increase Decimals** and **Decrease Decimals** show one more or one fewer
+  decimal place, starting from how each number is shown now.
+
+A cell keeps its format when you type a new value into it, so a Currency cell
+shows `1300` as `$1,300.00`. Values are rounded only for display, with halves
+rounded up. A formula without its own format shows its result in the format of
+the first formatted cell it uses, so `=SUM(A1:A9)` over dollar amounts shows
+dollars. Formats are saved with the sheet, travel with copy and paste, can be
+undone, and are given by Fill to the cells it fills. Fill also continues
+numbers in the style they were typed: `$1.00, $1.50` continues `$2.00, $2.50`.
+
 ## Undo and redo
 
 Undo (Cmd+Z) and Redo (Cmd+Shift+Z) are in the Edit menu. Every change to
@@ -61,15 +84,17 @@ The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As
 unsaved changes are discarded by New, Open, or closing the window.
 
 Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
-(formulas, not their results) under its cell name, e.g.
+(formulas, not their results) under its cell name, plus any number formats,
+e.g.
 
 ```json
 {
   "format": "py-spread",
-  "version": 1,
+  "version": 2,
   "rows": 1000,
   "columns": 52,
-  "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"}
+  "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
+  "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}}
 }
 ```
 

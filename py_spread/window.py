@@ -1,5 +1,6 @@
 """Main window: a cell-reference label and edit bar above the grid."""
 
+import dataclasses
 import os
 
 from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QStandardPaths, Qt, Signal
@@ -27,6 +28,7 @@ from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
+from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
@@ -269,6 +271,7 @@ class MainWindow(QMainWindow):
         self.fill = FillController(self.view, self.model, FillDialogs(self))
         self._build_file_menu()
         self._build_edit_menu()
+        self._build_format_menu()
         self._build_toolbar()
 
         self._bar_refs = ReferenceInserter(self.edit_bar)
@@ -341,6 +344,51 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
             action.triggered.connect(lambda _checked=False, m=method: self._clipboard_action(m))
             menu.addAction(action)
+
+    def _build_format_menu(self):
+        menu = self.menuBar().addMenu("Format")
+        self.format_actions = {}
+        for name, fmt, example in (
+            ("General", GENERAL, "1234.5"),
+            ("Number", NumberFormat("number"), "1,234.50"),
+            ("Currency", NumberFormat("currency"), "$1,234.50"),
+        ):
+            action = QAction(f"{name}  ({example})", self)
+            action.triggered.connect(lambda _checked=False, n=name, f=fmt: self._set_number_format(n, f))
+            menu.addAction(action)
+            self.format_actions[name] = action
+        menu.addSeparator()
+        for name, delta in (("Increase Decimals", 1), ("Decrease Decimals", -1)):
+            action = QAction(name, self)
+            action.triggered.connect(lambda _checked=False, n=name, d=delta: self._change_decimals(n, d))
+            menu.addAction(action)
+            self.format_actions[name] = action
+
+    def _selected_cells(self) -> list[tuple[int, int]]:
+        indexes = self.view.selectedIndexes() or [self.view.currentIndex()]
+        return [(i.row(), i.column()) for i in indexes if i.isValid()]
+
+    def _set_number_format(self, name: str, fmt: NumberFormat):
+        self._commit_pending_edit()
+        self.model.set_formats({key: fmt for key in self._selected_cells()}, f"{name} Format")
+
+    def _change_decimals(self, name: str, delta: int):
+        """Show one more or one fewer decimal place in each selected number,
+        starting from how it's shown now."""
+        self._commit_pending_edit()
+        formats = {}
+        for row, col in self._selected_cells():
+            value = self.model.value(row, col)
+            if not isinstance(value, float):
+                continue
+            shown = self.model.number_format(row, col)
+            if shown is None or shown.kind == "general":
+                text = format_number(value)
+                decimals = len(text.split(".")[1]) if "." in text and "e" not in text else 0
+                shown = NumberFormat("number", decimals, thousands=False)
+            decimals = min(max(shown.decimals + delta, 0), MAX_DECIMALS)
+            formats[(row, col)] = dataclasses.replace(shown, decimals=decimals)
+        self.model.set_formats(formats, name)
 
     def _build_toolbar(self):
         toolbar = self.addToolBar("Tools")

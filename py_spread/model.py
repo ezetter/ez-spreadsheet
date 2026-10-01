@@ -1,4 +1,5 @@
-"""Sheet data model: sparse storage of raw cell text behind a Qt table model."""
+"""Sheet data model: sparse storage of raw cell text and number formats behind
+a Qt table model."""
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QUndoCommand, QUndoStack
@@ -11,10 +12,12 @@ from .formula import (
     evaluate,
     format_number,
     is_formula,
+    ordered_references,
     parse,
     parse_number,
     references,
 )
+from .numformat import NumberFormat, format_value, parse_formatted
 from .references import column_name
 from .storage import SheetData
 
@@ -24,9 +27,10 @@ UNDO_LIMIT = 1000
 
 
 class _CellsCommand(QUndoCommand):
-    """One undoable change: the raw text of some cells before and after."""
+    """One undoable change: the raw text and formats of some cells, before and
+    after, each as a (texts, formats) pair of dicts."""
 
-    def __init__(self, model, before: dict, after: dict, description: str):
+    def __init__(self, model, before: tuple, after: tuple, description: str):
         super().__init__(description)
         self.model = model
         self.before = before
@@ -36,17 +40,19 @@ class _CellsCommand(QUndoCommand):
     def redo(self):
         # QUndoStack.push calls redo() to make the change in the first place;
         # only later calls are redos the user asked for.
-        self.model._apply(self.after, from_history=self._done)
+        self.model._apply(*self.after, from_history=self._done)
         self._done = True
 
     def undo(self):
-        self.model._apply(self.before, from_history=True)
+        self.model._apply(*self.before, from_history=True)
 
 
 class SheetModel(QAbstractTableModel):
-    """Holds the raw text of each non-empty cell, keyed by (row, col).
+    """Holds the raw text of each non-empty cell, keyed by (row, col), and each
+    cell's explicit number format, if it has one.
 
-    Qt's EditRole is the raw text (e.g. "=A1+2"); DisplayRole is the computed value.
+    Qt's EditRole is the raw text (e.g. "=A1+2"); DisplayRole is the computed
+    value, formatted.
     """
 
     # Emitted when cell contents are edited (not when a whole sheet is loaded).
@@ -64,6 +70,10 @@ class SheetModel(QAbstractTableModel):
         self._parsed: dict[tuple[int, int], tuple] = {}
         # Computed values: float, str, or CellError. Cleared on every edit.
         self._values: dict[tuple[int, int], object] = {}
+        # Explicit number formats, set from the Format menu.
+        self._formats: dict[tuple[int, int], NumberFormat] = {}
+        # Formats formula cells take from the cells they refer to. Cleared on every edit.
+        self._inferred_formats: dict[tuple[int, int], NumberFormat | None] = {}
         self._formula_sheet = _FormulaSheet(self)
         # Every edit goes through set_cells and lands here as one undo step.
         self.undo_stack = QUndoStack(self)
@@ -114,9 +124,11 @@ class SheetModel(QAbstractTableModel):
     def set_cell(self, row: int, col: int, value, description: str = "Edit") -> None:
         self.set_cells({(row, col): value}, description)
 
-    def set_cells(self, writes: dict[tuple[int, int], object], description: str = "Edit") -> None:
-        """Set many cells as one undoable step, recalculating and notifying
-        views a single time. `description` names the step in the Undo menu."""
+    def set_cells(self, writes: dict[tuple[int, int], object], description: str = "Edit",
+                  formats: dict[tuple[int, int], NumberFormat | None] | None = None) -> None:
+        """Set many cells' text, and optionally their formats (None removes
+        one), as one undoable step, recalculating and notifying views a single
+        time. `description` names the step in the Undo menu."""
         before, after = {}, {}
         for key, value in writes.items():
             text = "" if value is None else str(value)
@@ -124,14 +136,37 @@ class SheetModel(QAbstractTableModel):
             if text != old:
                 before[key] = old
                 after[key] = text
-        if after:
-            self.undo_stack.push(_CellsCommand(self, before, after, description))
+        formats_before, formats_after = {}, {}
+        for key, fmt in (formats or {}).items():
+            old = self._formats.get(key)
+            if fmt != old:
+                formats_before[key] = old
+                formats_after[key] = fmt
+        if after or formats_after:
+            self.undo_stack.push(_CellsCommand(
+                self, (before, formats_before), (after, formats_after), description))
 
-    def _apply(self, changes: dict[tuple[int, int], str], from_history: bool = False) -> None:
-        changed = [key for key, text in changes.items() if self._store(key, text)]
+    def set_formats(self, formats: dict[tuple[int, int], NumberFormat | None], description: str) -> None:
+        self.set_cells({}, description, formats)
+
+    def cell_format(self, row: int, col: int) -> NumberFormat | None:
+        """The cell's explicit format, if it has one."""
+        return self._formats.get((row, col))
+
+    def _apply(self, texts: dict, formats: dict, from_history: bool = False) -> None:
+        changed = {key for key, text in texts.items() if self._store(key, text)}
+        for key, fmt in formats.items():
+            if self._formats.get(key) != fmt:
+                if fmt is None:
+                    del self._formats[key]
+                else:
+                    self._formats[key] = fmt
+                changed.add(key)
         if not changed:
             return
+        changed = sorted(changed)
         self._values.clear()
+        self._inferred_formats.clear()
         self.contents_changed.emit()
         if self._formula_keys:
             # Any formula might depend on these cells, so refresh the whole sheet.
@@ -162,7 +197,7 @@ class SheetModel(QAbstractTableModel):
         return True
 
     def sheet_data(self) -> SheetData:
-        return SheetData(self._rows, self._cols, dict(self._cells))
+        return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats))
 
     def load_sheet_data(self, sheet: SheetData) -> None:
         """Replace the whole sheet, including its size."""
@@ -171,8 +206,10 @@ class SheetModel(QAbstractTableModel):
         self._cols = sheet.cols
         self._cells = {key: text for key, text in sheet.cells.items() if text}
         self._formula_keys = {key for key, text in self._cells.items() if is_formula(text)}
+        self._formats = dict(sheet.formats)
         self._parsed.clear()
         self._values.clear()
+        self._inferred_formats.clear()
         self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
 
@@ -200,10 +237,54 @@ class SheetModel(QAbstractTableModel):
 
     def display_text(self, row: int, col: int) -> str:
         raw = self.get_cell(row, col)
-        if not is_formula(raw):
-            return raw
         value = self.value(row, col)
-        return format_number(value) if isinstance(value, float) else str(value)
+        if not isinstance(value, float):
+            return str(value) if is_formula(raw) else raw
+        fmt = self._formats.get((row, col))
+        if fmt is None and not is_formula(raw):
+            return raw  # typed numbers show as typed, e.g. $1,234.50
+        fmt = fmt or self.number_format(row, col)
+        return format_value(value, fmt) if fmt else format_number(value)
+
+    def number_format(self, row: int, col: int) -> NumberFormat | None:
+        """The format the cell's number is shown with: its explicit format;
+        else the one it was typed with ($1,234.50 is currency with 2 decimals);
+        else, for a formula, the format of the first formatted cell it refers
+        to, so =SUM(A1:A9) over dollar amounts shows dollars. None means general."""
+        return self._shown_format((row, col), set())
+
+    def _shown_format(self, key, seen: set) -> NumberFormat | None:
+        explicit = self._formats.get(key)
+        if explicit is not None:
+            return explicit
+        raw = self._cells.get(key)
+        if raw is None:
+            return None
+        if key not in self._formula_keys:
+            typed = parse_formatted(raw)
+            return typed[1] if typed else None
+        if key in self._inferred_formats:
+            return self._inferred_formats[key]
+        if key in seen or len(seen) > 100:
+            return None  # circular, or a very long chain of formulas
+        seen.add(key)
+        inferred = None
+        ast = self._parse(key)[0]
+        if not isinstance(ast, CellError):
+            for node in ordered_references(ast):
+                if node[0] == "ref":
+                    candidates = [node[1:]]
+                else:
+                    candidates = sorted(k for k in self._cells if _in_range(k, node[1:]))
+                for candidate in candidates:
+                    fmt = self._shown_format(candidate, seen)
+                    if fmt is not None and fmt.kind != "general":
+                        inferred = fmt
+                        break
+                if inferred:
+                    break
+        self._inferred_formats[key] = inferred
+        return inferred
 
     def value(self, row: int, col: int):
         """The computed value: None (empty), float, str, or CellError."""

@@ -22,7 +22,9 @@ the selection are checked for a value to work from:
   random vowel where it has a vowel and a random consonant where it has a
   consonant (or any letter, if that's turned off in the dialog).
 Numbers typed as floating point (1.0, 2.50, 1e3) make the fill floating point,
-even when their values are whole.
+even when their values are whole. Numbers typed with a dollar sign or thousands
+separators ($1.00, 1,000) are filled in the same style, and the first cell's
+number format, if it has one, is given to every filled cell.
 """
 
 import math
@@ -32,6 +34,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from .formula import format_number, is_formula, parse_number, shift_references
+from .numformat import NumberFormat, format_value, parse_formatted
 from .references import column_index, column_name
 
 MAX_LETTERS = 10  # longest letter string; keeps random picks within NumPy's int64
@@ -247,6 +250,15 @@ def sequence_values(params: SequenceFill, count: int) -> list[str]:
     return [write(n) for n in sequence_numbers(params, count)]
 
 
+def typed_style(first_raw: list[str]) -> NumberFormat | None:
+    """The style the first cells' numbers were typed in ($1.00, 1,000), with
+    as many decimals as the more precise of them; None for plain numbers."""
+    styles = [parsed[1] for parsed in map(parse_formatted, first_raw) if parsed]
+    if not styles:
+        return None
+    return NumberFormat(styles[0].kind, max(s.decimals for s in styles), styles[0].thousands)
+
+
 def infer(mode: FillMode, first_raw: list[str], first_values: list, count: int,
           keep_vowels: bool = True):
     """Fill settings implied by the first one or two cells of the selection
@@ -303,6 +315,8 @@ class FillController(QObject):
         # Whether random letter patterns keep vowels and consonants in place;
         # on by default, and changed by the checkbox in the Random dialog.
         self.keep_vowels = True
+        self._source_format = None  # explicit format of the first cell being filled
+        self._style = None  # style the first cells' numbers were typed in
 
     def run(self, mode: FillMode | None = None) -> None:
         if mode is not None:
@@ -313,6 +327,8 @@ class FillController(QObject):
             cells = {(current.row(), current.column())}
         ordered = order_cells(cells)
         first = ordered[:2]
+        self._source_format = self.model.cell_format(*ordered[0])
+        self._style = typed_style([self.model.get_cell(*c) for c in first])
         params = infer(
             self.mode,
             [self.model.get_cell(*c) for c in first],
@@ -342,7 +358,15 @@ class FillController(QObject):
         return params
 
     def _write(self, writes: dict) -> None:
-        self.model.set_cells(writes, f"{self.mode.label} Fill")
+        # Filled cells get the first cell's number format, if it has one.
+        formats = {key: self._source_format for key in writes} if self._source_format else None
+        self.model.set_cells(writes, f"{self.mode.label} Fill", formats)
+
+    def _styled(self, values: list[str]) -> list[str]:
+        """Numbers written in the style the first cells were typed in."""
+        if self._style is None:
+            return values
+        return [format_value(parse_number(v), self._style) for v in values]
 
     def _fill(self, cells, params) -> str:
         """Write the values; returns a status message."""
@@ -381,14 +405,14 @@ class FillController(QObject):
 
         if isinstance(params, RandomFill):
             ordered = order_cells(cells)
-            values = random_values(params, len(ordered), self.rng)
+            values = self._styled(random_values(params, len(ordered), self.rng))
             self._write(dict(zip(ordered, values)))
             kind = "integers" if params.integers else "numbers"
             return (f"Filled {len(cells)} cells with random {kind} from "
                     f"{format_number(params.lower)} to {format_number(params.upper)}.")
 
         ordered = order_cells(cells, params.across_first)
-        values = sequence_values(params, len(ordered))
+        values = self._styled(sequence_values(params, len(ordered)))
         self._write(dict(zip(ordered, values)))
         text = f"Filled {len(values)} cells with a sequence from {values[0]} to {values[-1]}."
         if len(values) < len(ordered):

@@ -31,6 +31,7 @@ from .errors import (  # noqa: F401 -- re-exported for the rest of the app
     FormulaError,
 )
 from .functions import FUNCTIONS
+from .numformat import format_number, parse_formatted  # noqa: F401 -- format_number re-exported
 from .references import column_index, column_name, parse_cell_name
 
 _TOKEN = re.compile(
@@ -51,15 +52,13 @@ def is_formula(text: str) -> bool:
 
 
 def parse_number(text: str) -> float | None:
-    """The numeric value of plain cell text, or None if it isn't a number."""
+    """The numeric value of typed cell text, or None if it isn't a number.
+    Dollar signs and thousands separators are allowed: $1,234.50 is 1234.5."""
     text = text.strip()
-    return float(text) if _NUMBER.fullmatch(text) else None
-
-
-def format_number(value: float) -> str:
-    if value == int(value) and abs(value) < 1e15:
-        return str(int(value))
-    return f"{value:.10g}"
+    if _NUMBER.fullmatch(text):
+        return float(text)
+    formatted = parse_formatted(text)
+    return formatted[0] if formatted else None
 
 
 def _scan(text: str) -> list[re.Match]:
@@ -161,6 +160,25 @@ def references(node) -> tuple[set[tuple[int, int]], list[tuple[int, int, int, in
         elif kind == "call":
             stack.extend(node[2])
     return cells, ranges
+
+
+def ordered_references(node) -> list:
+    """The ("ref", row, col) and ("range", top, left, bottom, right) nodes of
+    an AST, in the order they appear in the formula."""
+    found = []
+    stack = [node]
+    while stack:
+        node = stack.pop()
+        kind = node[0]
+        if kind in ("ref", "range"):
+            found.append(node)
+        elif kind == "neg":
+            stack.append(node[1])
+        elif kind == "bin":
+            stack.extend(reversed(node[2:]))
+        elif kind == "call":
+            stack.extend(reversed(node[2]))
+    return found
 
 
 def to_number(value) -> float:
