@@ -77,11 +77,10 @@ copy and paste, can be undone, and are given by Fill to the cells it fills.
 
 ## Charts
 
-Select some rows and columns, then use the Chart button on the toolbar or the
-Insert menu. The first selected column is the x axis; each other column is a
-series of y values. The Chart button's arrow (or Insert > Line Chart /
-Scatter Chart) chooses a line or scatter chart, and the button then makes
-that kind.
+Select some rows and columns, then use the Chart button on the toolbar or
+Insert > Chart. The first selected column is the x axis; each other column is
+a series of y values. Charts start as line charts; the Chart type control in
+the chart window switches between line and scatter.
 
 - If the first selected row has text in the y columns, it's a header: it
   names the series (in the legend, or on the y axis for a single series) and
@@ -89,8 +88,10 @@ that kind.
 - A text x column (months, say) gives category labels along the x axis.
 - Empty or non-numeric y cells leave gaps; rows without an x value are left
   out of a numeric x axis. Line charts with up to 50 points mark each point.
-- Each chart opens in its own window, with a Line/Scatter switch and
+- Each chart opens in its own window, with the Line/Scatter switch and
   Matplotlib's toolbar for zooming, panning, and saving the chart as an image.
+  (Its Configure Subplots button is left out: charts lay themselves out so
+  labels aren't cut off, which overrides that button's margin settings.)
 - Charts redraw as you edit their cells. They aren't saved with the sheet, and
   they close when you open another sheet or start a new one.
 

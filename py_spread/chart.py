@@ -93,6 +93,14 @@ def draw(axes, data: ChartData, kind: str) -> None:
     axes.grid(True, alpha=0.3)
 
 
+class ChartToolbar(NavigationToolbar2QT):
+    """Matplotlib's toolbar without its Configure Subplots button: the chart
+    lays itself out (so labels aren't cut off), which ignores that button's
+    margin settings."""
+
+    toolitems = [item for item in NavigationToolbar2QT.toolitems if item[0] != "Subplots"]
+
+
 class ChartWindow(QWidget):
     """A window showing a chart of some cells. It redraws when the sheet
     changes, and its kind can be switched between line and scatter."""
@@ -115,7 +123,7 @@ class ChartWindow(QWidget):
         self.problem = QLabel()  # says why the chart can't be drawn, if it can't
 
         controls = QHBoxLayout()
-        controls.addWidget(NavigationToolbar2QT(self.canvas, self))
+        controls.addWidget(ChartToolbar(self.canvas, self))
         controls.addStretch()
         controls.addWidget(QLabel("Chart type:"))
         controls.addWidget(self.kind_box)

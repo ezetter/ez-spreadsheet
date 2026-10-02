@@ -352,59 +352,34 @@ class MainWindow(QMainWindow):
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
-        self.chart_kind = "line"  # what the Chart button makes
-        self.chart_actions = {}
         self.charts = []  # open chart windows
-        for kind, label in (("line", "Line"), ("scatter", "Scatter")):
-            action = QAction(f"{label} Chart", self)
-            action.setCheckable(True)
-            action.triggered.connect(lambda _checked=False, k=kind: self.make_chart(k))
-            menu.addAction(action)
-            self.chart_actions[kind] = action
-        group = QActionGroup(self)
-        for action in self.chart_actions.values():
-            group.addAction(action)
+        # Charts start as line charts; the chart window switches the type.
+        self.chart_action = QAction("Chart", self)
+        self.chart_action.setToolTip(
+            "Chart the selected cells: the first column is x, the others are y. "
+            "Switch between line and scatter in the chart window.")
+        self.chart_action.triggered.connect(lambda _checked=False: self.make_chart())
+        menu.addAction(self.chart_action)
 
     def _build_chart_button(self, toolbar):
-        """A split button like Fill's: it makes a chart of the selected cells,
-        and its arrow chooses line or scatter."""
-        self.chart_action = QAction(self)
-        self.chart_action.triggered.connect(lambda _checked=False: self.make_chart())
-        menu = QMenu(self)
-        for action in self.chart_actions.values():
-            menu.addAction(action)
         self.chart_button = QToolButton()
         self.chart_button.setDefaultAction(self.chart_action)
-        self.chart_button.setMenu(menu)
-        self.chart_button.setPopupMode(QToolButton.MenuButtonPopup)
         toolbar.addWidget(self.chart_button)
-        self._show_chart_kind()
 
-    def _show_chart_kind(self):
-        label = {"line": "Line", "scatter": "Scatter"}[self.chart_kind]
-        self.chart_action.setText(f"Chart: {label}")
-        self.chart_action.setToolTip(
-            f"Make a {label.lower()} chart of the selected cells: the first column is x, "
-            "the others are y. The arrow chooses line or scatter.")
-        self.chart_actions[self.chart_kind].setChecked(True)
-
-    def make_chart(self, kind: str | None = None):
-        """Open a chart window for the selected cells; returns it, or None if
-        the cells can't be charted (the status bar says why)."""
+    def make_chart(self):
+        """Open a line chart window for the selected cells; returns it, or None
+        if the cells can't be charted (the status bar says why)."""
         # Imported here so Matplotlib loads only when a chart is first made.
         from .chart import ChartError, ChartWindow, chart_data
 
         self._commit_pending_edit()
-        if kind is not None:
-            self.chart_kind = kind
-        self._show_chart_kind()
         cells = self._selected_cells()
         try:
             chart_data(self.model, cells)
         except ChartError as e:
             self._show_status(f"Can't make a chart: {e}")
             return None
-        window = ChartWindow(self.model, cells, self.chart_kind, parent=self)
+        window = ChartWindow(self.model, cells, "line", parent=self)
         window.destroyed.connect(lambda _obj=None, w=window: self._forget_chart(w))
         self.charts.append(window)
         window.show()

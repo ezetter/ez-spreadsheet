@@ -100,7 +100,7 @@ DATA = [["x", "up", "down"], ["1", "1", "9"], ["2", "4", "8"], ["3", "9", "7"]]
 def test_line_chart(window):
     fill(window, DATA)
     window.view.select_range(0, 0, 3, 2)
-    chart = window.make_chart("line")
+    chart = window.make_chart()
     assert chart.windowTitle() == "Line Chart of A1:C4"
     lines = chart.axes.get_lines()
     assert [line.get_label() for line in lines] == ["up", "down"]
@@ -112,7 +112,8 @@ def test_line_chart(window):
 def test_scatter_chart(window):
     fill(window, DATA)
     window.view.select_range(0, 0, 3, 1)
-    chart = window.make_chart("scatter")
+    chart = window.make_chart()
+    chart.kind_box.setCurrentIndex(1)
     assert chart.windowTitle() == "Scatter Chart of A1:B4"
     assert chart.axes.get_lines() == []
     points = chart.axes.collections[0].get_offsets()
@@ -124,7 +125,7 @@ def test_scatter_chart(window):
 def test_switching_chart_type(window):
     fill(window, DATA)
     window.view.select_range(0, 0, 3, 2)
-    chart = window.make_chart("line")
+    chart = window.make_chart()
     chart.kind_box.setCurrentIndex(1)
     assert chart.kind == "scatter"
     assert len(chart.axes.collections) == 2 and chart.axes.get_lines() == []
@@ -134,7 +135,7 @@ def test_switching_chart_type(window):
 def test_chart_follows_edits(window):
     fill(window, DATA)
     window.view.select_range(0, 0, 3, 1)
-    chart = window.make_chart("line")
+    chart = window.make_chart()
     window.model.set_cell(2, 1, "100")
     assert same(chart.axes.get_lines()[0].get_ydata(), [1, 100, 9])
     window.model.set_cells({(r, 1): "" for r in range(1, 4)})
@@ -146,20 +147,31 @@ def test_chart_follows_edits(window):
 def test_chart_button_and_menu(window):
     fill(window, DATA)
     toolbar = window.findChild(QToolBar)
-    assert window.chart_button.text() == "Chart: Line"
-    insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
-    assert [a.text() for a in insert.actions()] == ["Line Chart", "Scatter Chart"]
-    window.view.select_range(0, 0, 3, 1)
-    window.chart_actions["scatter"].trigger()
-    assert window.chart_button.text() == "Chart: Scatter"
-    window.chart_button.click()  # the main part repeats the last type
-    assert [c.kind for c in window.charts] == ["scatter", "scatter"]
     assert toolbar.widgetForAction(toolbar.actions()[2]) is window.chart_button
+    assert window.chart_button.text() == "Chart"
+    assert window.chart_button.menu() is None  # no line/scatter choice on the toolbar
+    insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
+    assert [a.text() for a in insert.actions()] == ["Chart"]
+    window.view.select_range(0, 0, 3, 1)
+    window.chart_button.click()
+    insert.actions()[0].trigger()
+    assert [c.kind for c in window.charts] == ["line", "line"]  # always starts as a line chart
+
+
+def test_chart_toolbar_has_no_subplots_button(window):
+    from py_spread.chart import ChartToolbar
+    fill(window, DATA)
+    window.view.select_range(0, 0, 3, 1)
+    chart = window.make_chart()
+    toolbar = chart.findChild(ChartToolbar)
+    tips = [a.toolTip() for a in toolbar.actions()]
+    assert not any("subplot" in tip.lower() for tip in tips)
+    assert any("zoom" in tip.lower() for tip in tips) and any("save" in tip.lower() for tip in tips)
 
 
 def test_cannot_chart_shows_why(window):
     window.view.select_range(0, 0, 3, 0)
-    assert window.make_chart("line") is None
+    assert window.make_chart() is None
     assert window.charts == []
     assert "at least two columns" in window.statusBar().currentMessage()
 
@@ -167,7 +179,7 @@ def test_cannot_chart_shows_why(window):
 def test_opening_a_sheet_closes_charts(window, tmp_path, app):
     fill(window, DATA)
     window.view.select_range(0, 0, 3, 1)
-    window.make_chart("line")
+    window.make_chart()
     path = str(tmp_path / "s.pysheet")
     save_sheet(path, SheetData(10, 5))
     window.setWindowModified(False)
