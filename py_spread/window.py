@@ -426,25 +426,21 @@ class MainWindow(QMainWindow):
         self.autosum.message.connect(self._show_status)
 
         self._build_fill_button(toolbar)
-        self._add_format_buttons(toolbar)
+        self._add_currency_button(toolbar)
         self.statusBar()  # create it now so the window doesn't resize on the first message
 
-    def _add_format_buttons(self, toolbar):
-        """Toolbar buttons for Format menu actions; a button shows its action's icon text."""
+    def _add_currency_button(self, toolbar):
+        """A toolbar button for the Format menu's Currency action; the button
+        shows the action's icon text."""
         toolbar.addSeparator()
-        for name, label, tip in (
-            ("Currency", "$", "Currency format ($1,234.50)"),
-            ("Increase Decimals", ".0→.00", "Increase decimals: show one more decimal place"),
-            ("Decrease Decimals", ".00→.0", "Decrease decimals: show one fewer decimal place"),
-        ):
-            action = self.format_actions[name]
-            action.setIconText(label)
-            action.setToolTip(tip)
-            toolbar.addAction(action)
-            button = toolbar.widgetForAction(action)
-            font = button.font()
-            font.setPointSize(15)  # closer to the Σ button; the menu items keep normal text
-            button.setFont(font)
+        action = self.format_actions["Currency"]
+        action.setIconText("$")
+        action.setToolTip("Currency format ($1,234.50)")
+        toolbar.addAction(action)
+        button = toolbar.widgetForAction(action)
+        font = button.font()
+        font.setPointSize(15)  # closer to the Σ button; the menu item keeps normal text
+        button.setFont(font)
 
     def _build_fill_button(self, toolbar):
         self.fill_action = QAction(self)
