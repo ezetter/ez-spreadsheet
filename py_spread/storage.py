@@ -17,11 +17,13 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 
-from .numformat import NumberFormat, from_json, to_json
+from . import numformat, textstyle
+from .numformat import NumberFormat
+from .textstyle import CellStyle
 from .references import cell_name, parse_cell_name
 
 FORMAT = "py-spread"
-VERSION = 2  # 2 added number formats
+VERSION = 3  # 2 added number formats; 3 added bold and italic
 EXTENSION = ".pysheet"
 
 
@@ -35,6 +37,7 @@ class SheetData:
     cols: int
     cells: dict[tuple[int, int], str] = field(default_factory=dict)
     formats: dict[tuple[int, int], NumberFormat] = field(default_factory=dict)
+    styles: dict[tuple[int, int], CellStyle] = field(default_factory=dict)
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -48,7 +51,11 @@ def save_sheet(path: str, sheet: SheetData) -> None:
     }
     if sheet.formats:
         document["formats"] = {
-            cell_name(row, col): to_json(fmt) for (row, col), fmt in sorted(sheet.formats.items())
+            cell_name(row, col): numformat.to_json(fmt) for (row, col), fmt in sorted(sheet.formats.items())
+        }
+    if sheet.styles:
+        document["styles"] = {
+            cell_name(row, col): textstyle.to_json(style) for (row, col), style in sorted(sheet.styles.items())
         }
     write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
 
@@ -101,9 +108,10 @@ def load_sheet(path: str) -> SheetData:
     cols = document.get("columns")
     cells = document.get("cells", {})
     formats = document.get("formats", {})  # absent before version 2
-    if not (_positive_int(rows) and _positive_int(cols)
-            and isinstance(cells, dict) and isinstance(formats, dict)):
-        raise SheetFileError(f"{path} is damaged: bad sheet size, cell table, or format table.")
+    styles = document.get("styles", {})  # absent before version 3
+    if not (_positive_int(rows) and _positive_int(cols) and isinstance(cells, dict)
+            and isinstance(formats, dict) and isinstance(styles, dict)):
+        raise SheetFileError(f"{path} is damaged: bad sheet size, or cell, format, or style table.")
 
     sheet = SheetData(rows, cols)
     for name, text in cells.items():
@@ -115,11 +123,19 @@ def load_sheet(path: str) -> SheetData:
             _grow_to_fit(sheet, row, col)
     for name, data in formats.items():
         row, col = _cell_key(path, name)
-        fmt = from_json(data)
+        fmt = numformat.from_json(data)
         if fmt is None:
             raise SheetFileError(f"{path} is damaged: bad format for cell {name}.")
         sheet.formats[(row, col)] = fmt
         _grow_to_fit(sheet, row, col)
+    for name, data in styles.items():
+        row, col = _cell_key(path, name)
+        style = textstyle.from_json(data)
+        if style is None:
+            raise SheetFileError(f"{path} is damaged: bad style for cell {name}.")
+        if style != textstyle.PLAIN:
+            sheet.styles[(row, col)] = style
+            _grow_to_fit(sheet, row, col)
     return sheet
 
 

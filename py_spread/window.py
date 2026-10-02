@@ -29,6 +29,7 @@ from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
+from .textstyle import PLAIN
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
@@ -279,6 +280,9 @@ class MainWindow(QMainWindow):
         self.view.reference_target = self._reference_target
 
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
+        self.view.selectionModel().currentChanged.connect(self._show_current_style)
+        self.model.dataChanged.connect(self._show_current_style)
+        self.model.modelReset.connect(self._show_current_style)
         self.view.cell_delegate.editor_created.connect(self._on_editor_created)
         self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
@@ -363,6 +367,34 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, n=name, d=delta: self._change_decimals(n, d))
             menu.addAction(action)
             self.format_actions[name] = action
+        menu.addSeparator()
+        # Checked when the current cell has the style.
+        for name, attribute, shortcut in (("Bold", "bold", QKeySequence.Bold),
+                                          ("Italic", "italic", QKeySequence.Italic)):
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, n=name, a=attribute: self._toggle_style(n, a))
+            menu.addAction(action)
+            self.format_actions[name] = action
+    def _toggle_style(self, name: str, attribute: str):
+        """Like other spreadsheets: if the current cell already has the style,
+        remove it from the selected cells; otherwise give it to them."""
+        self._commit_pending_edit()
+        current = self.view.currentIndex()
+        turn_on = not getattr(self.model.cell_style(current.row(), current.column()), attribute)
+        styles = {
+            key: dataclasses.replace(self.model.cell_style(*key), **{attribute: turn_on})
+            for key in self._selected_cells()
+        }
+        self.model.set_styles(styles, name)
+        self._show_current_style()
+
+    def _show_current_style(self, *_args):
+        current = self.view.currentIndex()
+        style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
+        self.format_actions["Bold"].setChecked(style.bold)
+        self.format_actions["Italic"].setChecked(style.italic)
 
     def _selected_cells(self) -> list[tuple[int, int]]:
         indexes = self.view.selectedIndexes() or [self.view.currentIndex()]
@@ -441,6 +473,22 @@ class MainWindow(QMainWindow):
         font = button.font()
         font.setPointSize(15)  # closer to the Σ button; the menu item keeps normal text
         button.setFont(font)
+        self._add_style_buttons(toolbar)
+
+    def _add_style_buttons(self, toolbar):
+        """B and I toolbar buttons for the Format menu's Bold and Italic, drawn
+        in bold and italic; they're pressed when the current cell has the style."""
+        for name, label, tip in (("Bold", "B", "Bold (⌘B)"), ("Italic", "I", "Italic (⌘I)")):
+            action = self.format_actions[name]
+            action.setIconText(label)
+            action.setToolTip(tip)
+            toolbar.addAction(action)
+            button = toolbar.widgetForAction(action)
+            font = button.font()
+            font.setPointSize(15)
+            font.setBold(name == "Bold")
+            font.setItalic(name == "Italic")
+            button.setFont(font)
 
     def _build_fill_button(self, toolbar):
         self.fill_action = QAction(self)

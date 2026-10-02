@@ -178,7 +178,7 @@ def test_format_menu(window):
     menu = [m for m in window.menuBar().actions() if m.text() == "Format"][0].menu()
     names = [a.text() for a in menu.actions() if a.text()]
     assert names == ["General  (1234.5)", "Number  (1,234.50)", "Currency  ($1,234.50)",
-                     "Increase Decimals", "Decrease Decimals"]
+                     "Increase Decimals", "Decrease Decimals", "Bold", "Italic"]
 
 
 def test_currency_menu_item(window):
@@ -308,7 +308,7 @@ def test_currency_toolbar_button(window):
     from PySide6.QtTest import QTest
     buttons = toolbar_buttons(window)
     assert buttons[:2] == [window.autosum_button, window.fill_button]
-    assert [b.text() for b in buttons[2:]] == ["$"]  # no decimal buttons
+    assert [b.text() for b in buttons[2:]] == ["$", "B", "I"]  # no decimal buttons
     currency = buttons[2]
     assert currency.defaultAction() is window.format_actions["Currency"]  # same action as the menu
     assert window.format_actions["Currency"].text() == "Currency  ($1,234.50)"  # menu text unchanged

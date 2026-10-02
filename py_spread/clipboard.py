@@ -21,6 +21,7 @@ class Clip:
     text: str  # what was put on the system clipboard
     cut: bool
     formats: tuple[tuple, ...] = ()  # explicit number formats (or None), row by row
+    styles: tuple[tuple, ...] = ()  # text styles, row by row
 
 
 def to_tsv(rows) -> str:
@@ -60,8 +61,9 @@ class ClipboardController:
         cols = range(left, right + 1)
         cells = tuple(tuple(self.model.get_cell(r, c) for c in cols) for r in rows)
         formats = tuple(tuple(self.model.cell_format(r, c) for c in cols) for r in rows)
+        styles = tuple(tuple(self.model.cell_style(r, c) for c in cols) for r in rows)
         text = to_tsv([self.model.display_text(r, c) for c in cols] for r in rows)
-        self._clip = Clip(top, left, cells, text, cut, formats)
+        self._clip = Clip(top, left, cells, text, cut, formats, styles)
         QApplication.clipboard().setText(text)
         self.view.set_marquee((top, left, bottom, right))
 
@@ -80,13 +82,14 @@ class ClipboardController:
         height = min(height, self.model.rowCount() - top)
         width = min(width, self.model.columnCount() - left)
 
-        # Cells copied from this sheet bring their number formats along.
-        writes, formats = {}, {}
+        # Cells copied from this sheet bring their number formats and styles along.
+        writes, formats, styles = {}, {}, {}
         if cut:
             for r, row in enumerate(block):
                 for c in range(len(row)):
                     writes[(clip.top + r, clip.left + c)] = ""
                     formats[(clip.top + r, clip.left + c)] = None
+                    styles[(clip.top + r, clip.left + c)] = None
         for r in range(height):
             for c in range(width):
                 src_r, src_c = (0, 0) if fill else (r, c)
@@ -97,10 +100,11 @@ class ClipboardController:
                 writes[(top + r, left + c)] = text
                 if clip:
                     formats[(top + r, left + c)] = clip.formats[src_r][src_c]
+                    styles[(top + r, left + c)] = clip.styles[src_r][src_c]
 
         self._pasting = True
         try:
-            self.model.set_cells(writes, "Move" if cut else "Paste", formats)
+            self.model.set_cells(writes, "Move" if cut else "Paste", formats, styles)
         finally:
             self._pasting = False
 

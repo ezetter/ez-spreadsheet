@@ -24,7 +24,8 @@ the selection are checked for a value to work from:
 Numbers typed as floating point (1.0, 2.50, 1e3) make the fill floating point,
 even when their values are whole. Numbers typed with a dollar sign or thousands
 separators ($1.00, 1,000) are filled in the same style, and the first cell's
-number format, if it has one, is given to every filled cell.
+number format and bold/italic style, if it has them, are given to every
+filled cell.
 """
 
 import math
@@ -35,6 +36,7 @@ from PySide6.QtCore import QObject, Signal
 
 from .formula import format_number, is_formula, parse_number, shift_references
 from .numformat import NumberFormat, format_value, parse_formatted
+from .textstyle import PLAIN
 from .references import column_index, column_name
 
 MAX_LETTERS = 10  # longest letter string; keeps random picks within NumPy's int64
@@ -316,6 +318,7 @@ class FillController(QObject):
         # on by default, and changed by the checkbox in the Random dialog.
         self.keep_vowels = True
         self._source_format = None  # explicit format of the first cell being filled
+        self._source_style = PLAIN  # bold/italic of the first cell being filled
         self._style = None  # style the first cells' numbers were typed in
 
     def run(self, mode: FillMode | None = None) -> None:
@@ -328,6 +331,7 @@ class FillController(QObject):
         ordered = order_cells(cells)
         first = ordered[:2]
         self._source_format = self.model.cell_format(*ordered[0])
+        self._source_style = self.model.cell_style(*ordered[0])
         self._style = typed_style([self.model.get_cell(*c) for c in first])
         params = infer(
             self.mode,
@@ -358,9 +362,10 @@ class FillController(QObject):
         return params
 
     def _write(self, writes: dict) -> None:
-        # Filled cells get the first cell's number format, if it has one.
+        # Filled cells get the first cell's number format and style, if it has them.
         formats = {key: self._source_format for key in writes} if self._source_format else None
-        self.model.set_cells(writes, f"{self.mode.label} Fill", formats)
+        styles = {key: self._source_style for key in writes} if self._source_style != PLAIN else None
+        self.model.set_cells(writes, f"{self.mode.label} Fill", formats, styles)
 
     def _styled(self, values: list[str]) -> list[str]:
         """Numbers written in the style the first cells were typed in."""

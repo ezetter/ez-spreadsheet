@@ -67,6 +67,15 @@ dollars. Formats are saved with the sheet, travel with copy and paste, can be
 undone, and are given by Fill to the cells it fills. Fill also continues
 numbers in the style they were typed: `$1.00, $1.50` continues `$2.00, $2.50`.
 
+## Bold and italic
+
+Format > Bold (Cmd+B) and Format > Italic (Cmd+I), also the **B** and *I*
+toolbar buttons, style the selected cells. If the current cell already has
+the style, it's removed from the selection; otherwise it's added. The buttons
+and menu items show whether the current cell is bold or italic. Styles are
+kept when you retype or clear a cell, are saved with the sheet, travel with
+copy and paste, can be undone, and are given by Fill to the cells it fills.
+
 ## Undo and redo
 
 Undo (Cmd+Z) and Redo (Cmd+Shift+Z) are in the Edit menu. Every change to
@@ -86,17 +95,18 @@ The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As
 unsaved changes are discarded by New, Open, or closing the window.
 
 Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
-(formulas, not their results) under its cell name, plus any number formats,
-e.g.
+(formulas, not their results) under its cell name, plus any number formats
+and bold/italic styles, e.g.
 
 ```json
 {
   "format": "py-spread",
-  "version": 2,
+  "version": 3,
   "rows": 1000,
   "columns": 52,
   "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
-  "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}}
+  "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}},
+  "styles": {"A1": {"bold": true}, "B1": {"bold": true}}
 }
 ```
 

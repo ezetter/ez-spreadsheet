@@ -2,7 +2,7 @@
 a Qt table model."""
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QUndoCommand, QUndoStack
+from PySide6.QtGui import QFont, QUndoCommand, QUndoStack
 
 from .formula import (
     CIRCULAR_ERROR,
@@ -18,6 +18,7 @@ from .formula import (
     references,
 )
 from .numformat import NumberFormat, format_value, parse_formatted
+from .textstyle import PLAIN, CellStyle
 from .references import column_name
 from .storage import SheetData
 
@@ -27,8 +28,9 @@ UNDO_LIMIT = 1000
 
 
 class _CellsCommand(QUndoCommand):
-    """One undoable change: the raw text and formats of some cells, before and
-    after, each as a (texts, formats) pair of dicts."""
+    """One undoable change: the raw text, number formats, and text styles of
+    some cells, before and after, each as a (texts, formats, styles) tuple of
+    dicts."""
 
     def __init__(self, model, before: tuple, after: tuple, description: str):
         super().__init__(description)
@@ -49,7 +51,7 @@ class _CellsCommand(QUndoCommand):
 
 class SheetModel(QAbstractTableModel):
     """Holds the raw text of each non-empty cell, keyed by (row, col), and each
-    cell's explicit number format, if it has one.
+    cell's explicit number format and text style, if it has them.
 
     Qt's EditRole is the raw text (e.g. "=A1+2"); DisplayRole is the computed
     value, formatted.
@@ -72,6 +74,8 @@ class SheetModel(QAbstractTableModel):
         self._values: dict[tuple[int, int], object] = {}
         # Explicit number formats, set from the Format menu.
         self._formats: dict[tuple[int, int], NumberFormat] = {}
+        # Bold and italic, for cells that aren't plain.
+        self._styles: dict[tuple[int, int], CellStyle] = {}
         # Formats formula cells take from the cells they refer to. Cleared on every edit.
         self._inferred_formats: dict[tuple[int, int], NumberFormat | None] = {}
         self._formula_sheet = _FormulaSheet(self)
@@ -93,6 +97,14 @@ class SheetModel(QAbstractTableModel):
             return self.get_cell(row, col)
         if role == Qt.DisplayRole:
             return self.display_text(row, col)
+        if role == Qt.FontRole:
+            style = self._styles.get((row, col))
+            if style is None:
+                return None
+            font = QFont()
+            font.setBold(style.bold)
+            font.setItalic(style.italic)
+            return font
         if role == Qt.TextAlignmentRole:
             if isinstance(self.value(row, col), float):
                 return Qt.AlignRight | Qt.AlignVCenter
@@ -125,10 +137,12 @@ class SheetModel(QAbstractTableModel):
         self.set_cells({(row, col): value}, description)
 
     def set_cells(self, writes: dict[tuple[int, int], object], description: str = "Edit",
-                  formats: dict[tuple[int, int], NumberFormat | None] | None = None) -> None:
-        """Set many cells' text, and optionally their formats (None removes
-        one), as one undoable step, recalculating and notifying views a single
-        time. `description` names the step in the Undo menu."""
+                  formats: dict[tuple[int, int], NumberFormat | None] | None = None,
+                  styles: dict[tuple[int, int], CellStyle | None] | None = None) -> None:
+        """Set many cells' text, and optionally their number formats and text
+        styles (None removes one), as one undoable step, recalculating and
+        notifying views a single time. `description` names the step in the
+        Undo menu."""
         before, after = {}, {}
         for key, value in writes.items():
             text = "" if value is None else str(value)
@@ -136,32 +150,37 @@ class SheetModel(QAbstractTableModel):
             if text != old:
                 before[key] = old
                 after[key] = text
-        formats_before, formats_after = {}, {}
-        for key, fmt in (formats or {}).items():
-            old = self._formats.get(key)
-            if fmt != old:
-                formats_before[key] = old
-                formats_after[key] = fmt
-        if after or formats_after:
+        formats_before, formats_after = _changes(self._formats, formats)
+        styles_before, styles_after = _changes(self._styles, {
+            key: None if style == PLAIN else style for key, style in (styles or {}).items()})
+        if after or formats_after or styles_after:
             self.undo_stack.push(_CellsCommand(
-                self, (before, formats_before), (after, formats_after), description))
+                self, (before, formats_before, styles_before),
+                (after, formats_after, styles_after), description))
 
     def set_formats(self, formats: dict[tuple[int, int], NumberFormat | None], description: str) -> None:
         self.set_cells({}, description, formats)
+
+    def set_styles(self, styles: dict[tuple[int, int], CellStyle | None], description: str) -> None:
+        self.set_cells({}, description, styles=styles)
+
+    def cell_style(self, row: int, col: int) -> CellStyle:
+        return self._styles.get((row, col), PLAIN)
 
     def cell_format(self, row: int, col: int) -> NumberFormat | None:
         """The cell's explicit format, if it has one."""
         return self._formats.get((row, col))
 
-    def _apply(self, texts: dict, formats: dict, from_history: bool = False) -> None:
+    def _apply(self, texts: dict, formats: dict, styles: dict, from_history: bool = False) -> None:
         changed = {key for key, text in texts.items() if self._store(key, text)}
-        for key, fmt in formats.items():
-            if self._formats.get(key) != fmt:
-                if fmt is None:
-                    del self._formats[key]
-                else:
-                    self._formats[key] = fmt
-                changed.add(key)
+        for table, updates in ((self._formats, formats), (self._styles, styles)):
+            for key, value in updates.items():
+                if table.get(key) != value:
+                    if value is None:
+                        del table[key]
+                    else:
+                        table[key] = value
+                    changed.add(key)
         if not changed:
             return
         changed = sorted(changed)
@@ -197,7 +216,7 @@ class SheetModel(QAbstractTableModel):
         return True
 
     def sheet_data(self) -> SheetData:
-        return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats))
+        return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats), dict(self._styles))
 
     def load_sheet_data(self, sheet: SheetData) -> None:
         """Replace the whole sheet, including its size."""
@@ -207,6 +226,7 @@ class SheetModel(QAbstractTableModel):
         self._cells = {key: text for key, text in sheet.cells.items() if text}
         self._formula_keys = {key for key, text in self._cells.items() if is_formula(text)}
         self._formats = dict(sheet.formats)
+        self._styles = dict(sheet.styles)
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
@@ -357,6 +377,17 @@ class SheetModel(QAbstractTableModel):
             return evaluate(ast, self._formula_sheet)
         except FormulaError as e:
             return CellError(e.code)
+
+
+def _changes(table: dict, updates: dict | None) -> tuple[dict, dict]:
+    """(before, after) for the entries of `updates` that differ from `table`."""
+    before, after = {}, {}
+    for key, value in (updates or {}).items():
+        old = table.get(key)
+        if value != old:
+            before[key] = old
+            after[key] = value
+    return before, after
 
 
 def _in_range(key, bounds) -> bool:
