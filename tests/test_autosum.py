@@ -137,8 +137,19 @@ def test_scattered_selection(window):
     view.selectionModel().select(QItemSelection(model.index(0, 2), model.index(0, 2)), QItemSelectionModel.Select)
     press_sigma(window)
     click_cell(window, 4, 4)
-    assert model.get_cell(4, 4) == "=SUM(A1:A2, C1)"
-    assert model.display_text(4, 4) == "13"
+    # Several rows and columns: one result per column, spaced like the columns.
+    assert [model.get_cell(4, c) for c in (4, 5, 6)] == ["=SUM(A1:A2)", "", "=SUM(C1)"]
+    assert model.display_text(4, 6) == "10"
+
+
+def test_single_row_across_columns_gets_one_total(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (0, 1): "2", (0, 2): "3"})
+    select(window, 0, 0, 0, 2)
+    press_sigma(window)
+    click_cell(window, 2, 0)
+    assert model.get_cell(2, 0) == "=SUM(A1:C1)"
+    assert model.get_cell(2, 1) == ""
 
 
 def test_click_inside_summed_cells_keeps_waiting(window):
@@ -429,3 +440,64 @@ def test_nothing_to_total_in_selection(window):
     press_sigma(window)
     assert window.model.sheet_data().cells == {}
     assert "Nothing to sum" in window.statusBar().currentMessage()
+
+
+
+def test_selected_columns_get_a_result_each(window):
+    model = window.model
+    columns_of_numbers(model)  # numbers in A2:C5
+    select(window, 1, 0, 4, 2)
+    press_sigma(window)
+    assert "first column" in window.statusBar().currentMessage()
+    click_cell(window, 6, 0)
+    assert [model.get_cell(6, c) for c in range(3)] == ["=SUM(A2:A5)", "=SUM(B2:B5)", "=SUM(C2:C5)"]
+    assert [model.display_text(6, c) for c in range(3)] == ["10", "20", "30"]
+    assert sorted((i.row(), i.column()) for i in window.view.selectedIndexes()) == [(6, 0), (6, 1), (6, 2)]
+    assert window.view.currentIndex() == model.index(6, 0)
+    window.undo_action.trigger()
+    assert all(model.get_cell(6, c) == "" for c in range(3))  # one step
+
+
+def test_column_results_can_go_elsewhere(window):
+    model = window.model
+    columns_of_numbers(model)
+    select(window, 1, 0, 4, 2)
+    choose(window, "MEAN")
+    click_cell(window, 8, 3)
+    assert [model.get_cell(8, c) for c in range(3, 6)] == ["=MEAN(A2:A5)", "=MEAN(B2:B5)", "=MEAN(C2:C5)"]
+
+
+def test_column_without_numbers_is_skipped(window):
+    model = window.model
+    fill(model, {(0, 0): "bolt", (1, 0): "nut", (0, 1): "4", (1, 1): "6"})
+    select(window, 0, 0, 1, 1)
+    press_sigma(window)
+    click_cell(window, 3, 0)
+    assert [model.get_cell(3, c) for c in range(2)] == ["", "=SUM(B1:B2)"]
+
+
+def test_column_results_must_not_land_in_selection(window):
+    model = window.model
+    columns_of_numbers(model)
+    select(window, 1, 1, 4, 2)  # B2:C5
+    press_sigma(window)
+    click_cell(window, 6, 0)  # fine: A7 and B7
+    assert [model.get_cell(6, c) for c in range(2)] == ["=SUM(B2:B5)", "=SUM(C2:C5)"]
+
+    select(window, 1, 1, 4, 2)
+    press_sigma(window)
+    click_cell(window, 4, 0)  # A5 is outside, but B5 would land in the selection
+    assert window.autosum.pending
+    assert "outside" in window.statusBar().currentMessage()
+    assert model.get_cell(4, 0) == "4"
+
+
+def test_column_results_stop_at_sheet_edge(window):
+    model = window.model
+    columns_of_numbers(model)
+    select(window, 1, 0, 4, 2)
+    press_sigma(window)
+    last = model.columnCount() - 1
+    window.view.scrollTo(model.index(6, last))
+    click_cell(window, 6, last)
+    assert model.get_cell(6, last) == "=SUM(A2:A5)"

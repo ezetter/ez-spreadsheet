@@ -3,7 +3,9 @@
 The button applies an aggregate function (sum by default; its menu offers the
 others). In order of priority, pressing it:
 1. If the selection holds any numbers, waits for a cell to be clicked and puts
-   the function of the selection there.
+   the function of the selection there. If the selection spans several rows
+   and columns, each column gets its own result instead: the first column's in
+   the clicked cell, the others' in the cells to its right.
 2. Otherwise, if there are numbers above the current cell, applies the
    function to them in the current cell.
 3. Otherwise, if there are numbers to its left, does the same with those.
@@ -17,7 +19,7 @@ one, to the new function instead.
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QItemSelectionModel, QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
 from .formula import is_formula, replace_function
 from .references import cell_name
@@ -204,16 +206,48 @@ class AutoSumController(QObject):
         self.pending_changed.emit(False)
         self.message.emit("")
 
+    def _per_column(self) -> bool:
+        """Whether the cells being aggregated get one result per column: they
+        span several columns and several rows."""
+        rows = {row for row, _ in self._cells}
+        cols = {col for _, col in self._cells}
+        return len(rows) > 1 and len(cols) > 1
+
     def _prompt(self) -> None:
-        self.message.emit(f"Click the cell where the {self.aggregate.label.lower()} should go. Esc cancels.")
+        label = self.aggregate.label.lower()
+        if self._per_column():
+            self.message.emit(f"Click the cell for the first column's {label}; the other columns' "
+                              "go to its right. Esc cancels.")
+        else:
+            self.message.emit(f"Click the cell where the {label} should go. Esc cancels.")
 
     def _place(self, index) -> None:
-        target = (index.row(), index.column())
-        if target in self._cells:
+        row, col = index.row(), index.column()
+        if self._per_column():
+            writes = self._per_column_formulas(row, col)
+        else:
+            writes = {(row, col): aggregate_formula(self.aggregate.function, cell_ranges(self._cells))}
+        if any(target in self._cells for target in writes) or (row, col) in self._cells:
             self.message.emit("Pick a cell outside the selected ones. Esc cancels.")
             return
-        formula = aggregate_formula(self.aggregate.function, cell_ranges(self._cells))
         self.cancel()
-        self.model.set_cell(*target, formula, self.aggregate.label)
-        selection = self.view.selectionModel()
-        selection.setCurrentIndex(index, QItemSelectionModel.ClearAndSelect)
+        self.model.set_cells(writes, self.aggregate.label)
+        right = max([c for _, c in writes] + [col])
+        self.view.select_range(row, col, row, right)
+
+    def _per_column_formulas(self, row: int, col: int) -> dict:
+        """One formula per selected column, laid out from (row, col) rightward
+        with the same spacing as the columns. Columns without numbers are
+        skipped, as are any that would land off the sheet."""
+        columns: dict[int, set] = {}
+        for cell in self._cells:
+            columns.setdefault(cell[1], set()).add(cell)
+        left = min(columns)
+        writes = {}
+        for source_col, cells in sorted(columns.items()):
+            target_col = col + source_col - left
+            if target_col >= self.model.columnCount():
+                continue
+            if any(isinstance(self.model.value(*cell), float) for cell in cells):
+                writes[(row, target_col)] = aggregate_formula(self.aggregate.function, cell_ranges(cells))
+        return writes

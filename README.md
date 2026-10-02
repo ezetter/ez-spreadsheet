@@ -179,7 +179,10 @@ that applies:
 
 1. If any selected cells hold numbers, the button stays pressed and the next
    cell you click gets the function of the selection (Escape or pressing the
-   button again cancels).
+   button again cancels). If the selection spans several rows and columns,
+   each column gets its own result: the first column's goes in the clicked
+   cell and the others' in the cells to its right, spaced like the columns.
+   Columns without numbers leave their cell empty.
 2. Otherwise, it applies the function to the numbers above the current cell,
    putting the result in the current cell.
 3. Otherwise, it does the same with the numbers to the left.
