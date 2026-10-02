@@ -348,3 +348,84 @@ def test_main_button_does_not_switch_cell(window):
     press_sigma(window)
     assert model.get_cell(1, 0) == "=SUM(A1)"
     assert window.autosum.pending
+
+
+def columns_of_numbers(model):
+    """A1:C5 — a header row, then four numbers in each of three columns."""
+    fill(model, {(0, 0): "Q1", (0, 1): "Q2", (0, 2): "Q3"})
+    for r in range(1, 5):
+        for c in range(3):
+            model.set_cell(r, c, str(r * (c + 1)))
+
+
+def test_row_under_columns_gets_a_total_each(window):
+    model = window.model
+    columns_of_numbers(model)
+    select(window, 5, 0, 5, 2)
+    press_sigma(window)
+    assert [model.get_cell(5, c) for c in range(3)] == ["=SUM(A2:A5)", "=SUM(B2:B5)", "=SUM(C2:C5)"]
+    assert [model.display_text(5, c) for c in range(3)] == ["10", "20", "30"]
+    assert not window.autosum.pending
+    assert window.statusBar().currentMessage() == "Added 3 sum formulas."
+    assert window.undo_action.text() == "Undo Sum"
+    window.undo_action.trigger()
+    assert all(model.get_cell(5, c) == "" for c in range(3))  # one step
+
+
+def test_choosing_function_for_row_under_columns(window):
+    model = window.model
+    columns_of_numbers(model)
+    select(window, 5, 0, 5, 2)
+    choose(window, "MEAN")
+    assert [model.get_cell(5, c) for c in range(3)] == ["=MEAN(A2:A5)", "=MEAN(B2:B5)", "=MEAN(C2:C5)"]
+    assert [model.display_text(5, c) for c in range(3)] == ["2.5", "5", "7.5"]
+
+
+def test_switching_a_row_of_totals(window):
+    model = window.model
+    columns_of_numbers(model)
+    select(window, 5, 0, 5, 2)
+    press_sigma(window)
+    select(window, 5, 0, 5, 2)
+    choose(window, "MEDIAN")
+    assert [model.get_cell(5, c) for c in range(3)] == ["=MEDIAN(A2:A5)", "=MEDIAN(B2:B5)", "=MEDIAN(C2:C5)"]
+    assert not window.autosum.pending  # numbers in the selection didn't start waiting for a click
+
+
+def test_switching_leaves_other_selected_cells_alone(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (1, 0): "=SUM(A1)", (1, 1): "=SUM(A1)*2", (1, 2): "note"})
+    select(window, 1, 0, 1, 2)
+    choose(window, "MEAN")
+    assert [model.get_cell(1, c) for c in range(3)] == ["=MEAN(A1)", "=SUM(A1)*2", "note"]
+
+
+def test_column_right_of_rows_gets_row_totals(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (0, 1): "2", (1, 0): "3", (1, 1): "4", (2, 0): "5", (2, 1): "6"})
+    select(window, 0, 2, 2, 2)
+    press_sigma(window)
+    assert [model.get_cell(r, 2) for r in range(3)] == ["=SUM(A1:B1)", "=SUM(A2:B2)", "=SUM(A3:B3)"]
+
+
+def test_totals_do_not_include_each_other(window):
+    model = window.model
+    fill(model, {(0, 0): "1", (0, 1): "2", (1, 0): "3", (1, 1): "4"})
+    select(window, 2, 0, 2, 2)  # C3 has nothing above; to its left are only the new totals
+    press_sigma(window)
+    assert [model.get_cell(2, c) for c in range(3)] == ["=SUM(A1:A2)", "=SUM(B1:B2)", ""]
+
+
+def test_label_in_selection_is_kept(window):
+    model = window.model
+    fill(model, {(0, 1): "4", (1, 1): "5", (2, 0): "Total"})
+    select(window, 2, 0, 2, 1)
+    press_sigma(window)
+    assert [model.get_cell(2, c) for c in range(2)] == ["Total", "=SUM(B1:B2)"]
+
+
+def test_nothing_to_total_in_selection(window):
+    select(window, 3, 3, 3, 5)
+    press_sigma(window)
+    assert window.model.sheet_data().cells == {}
+    assert "Nothing to sum" in window.statusBar().currentMessage()

@@ -7,9 +7,12 @@ others). In order of priority, pressing it:
 2. Otherwise, if there are numbers above the current cell, applies the
    function to them in the current cell.
 3. Otherwise, if there are numbers to its left, does the same with those.
+With several cells selected (say, the empty cells under several columns of
+numbers), 2 and 3 apply to each empty one, so each column gets its own total.
 
 Choosing a function from the menu while on a cell that already holds one,
-such as =SUM(A1:A9), switches that cell to the new function instead.
+such as =SUM(A1:A9), switches that cell, and any others selected that hold
+one, to the new function instead.
 """
 
 from dataclasses import dataclass
@@ -136,22 +139,26 @@ class AutoSumController(QObject):
         if self.pending:
             self._prompt()
 
-    def switch_current_cell(self) -> bool:
-        """If the current cell's formula is a single aggregate call, make it
-        use the chosen function. Returns whether the cell held one."""
+    def switch_selected_cells(self) -> bool:
+        """If the current cell's formula is a single aggregate call, make it,
+        and every other selected cell holding one, use the chosen function.
+        Returns whether the current cell held one."""
         index = self.view.currentIndex()
-        if not index.isValid():
+        if not index.isValid() or self._switched(index.row(), index.column()) is None:
             return False
-        raw = self.model.get_cell(index.row(), index.column())
-        if not is_formula(raw):
-            return False
-        names = {a.function for a in AGGREGATES}
-        switched = replace_function(raw, names, self.aggregate.function)
-        if switched is None:
-            return False
+        cells = {(i.row(), i.column()) for i in self.view.selectedIndexes()} | {(index.row(), index.column())}
+        writes = {cell: self._switched(*cell) for cell in cells}
         self.message.emit("")
-        self.model.set_cell(index.row(), index.column(), switched, "Change Function")
+        self.model.set_cells({cell: text for cell, text in writes.items() if text is not None},
+                             "Change Function")
         return True
+
+    def _switched(self, row: int, col: int) -> str | None:
+        """The cell's formula calling the chosen function, if it's a single aggregate call."""
+        raw = self.model.get_cell(row, col)
+        if not is_formula(raw):
+            return None
+        return replace_function(raw, {a.function for a in AGGREGATES}, self.aggregate.function)
 
     def trigger(self) -> None:
         if self.pending:
@@ -166,16 +173,28 @@ class AutoSumController(QObject):
             return
 
         current = self.view.currentIndex()
-        row, col = current.row(), current.column()
-        run = run_above(self.model, row, col) or run_left(self.model, row, col)
-        if run is None:
+        if len(selected) > 1:
+            # Each empty selected cell gets its own total; text such as a
+            # "Total" label is left alone.
+            targets = sorted(cell for cell in selected if not self.model.get_cell(*cell))
+        else:
+            targets = [(current.row(), current.column())]
+        # Work every formula out before writing any, so new totals never
+        # include each other.
+        writes = {}
+        for row, col in targets:
+            run = run_above(self.model, row, col) or run_left(self.model, row, col)
+            if run is not None:
+                writes[(row, col)] = aggregate_formula(self.aggregate.function, [run])
+        if not writes:
             self.message.emit(
                 f"Nothing to {self.aggregate.label.lower()}: select some numbers, "
                 "or start below or right of them."
             )
             return
-        self.message.emit("")
-        self.model.set_cell(row, col, aggregate_formula(self.aggregate.function, [run]), self.aggregate.label)
+        self.message.emit("" if len(writes) == 1 else
+                          f"Added {len(writes)} {self.aggregate.label.lower()} formulas.")
+        self.model.set_cells(writes, self.aggregate.label)
 
     def cancel(self) -> None:
         if not self.pending:

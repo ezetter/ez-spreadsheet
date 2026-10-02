@@ -533,13 +533,14 @@ class MainWindow(QMainWindow):
 
     def _choose_aggregate(self, aggregate: Aggregate):
         """A function picked from the menu becomes the button's. It then switches
-        the current cell's function if it has one, or else runs right away."""
+        the function of the selected cells if the current cell has one, or
+        else runs right away."""
         self.autosum.set_aggregate(aggregate)
         self._show_aggregate()
         if self.autosum.pending:
             return
         self._commit_pending_edit()
-        if not self.autosum.switch_current_cell():
+        if not self.autosum.switch_selected_cells():
             self._autosum()
 
     def _show_aggregate(self):

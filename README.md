@@ -184,11 +184,17 @@ that applies:
    putting the result in the current cell.
 3. Otherwise, it does the same with the numbers to the left.
 
+With several cells selected, 2 and 3 apply to each empty one: select the
+empty cells under several columns of numbers (or right of several rows) and
+each gets its own total, all as one step. Text in the selection, such as a
+"Total" label, is left alone, and the new totals never include each other.
+
 If the current cell already holds one of these functions on its own, such as
 `=SUM(A1:A9)`, choosing a different function from the menu switches that cell
-to it (`=MEAN(A1:A9)`), keeping the same arguments. This also works while
-you're still typing the formula. Formulas that do more than call one function,
-such as `=SUM(A1:A9)*2`, are left alone.
+to it (`=MEAN(A1:A9)`), keeping the same arguments, along with any other
+selected cells holding one, so a whole row of totals can be switched at once.
+This also works while you're still typing the formula. Formulas that do more
+than call one function, such as `=SUM(A1:A9)*2`, are left alone.
 
 For 2 and 3 it takes the nearest unbroken block of numbers, skipping blank
 cells right next to the current cell and stopping at text or a gap.
