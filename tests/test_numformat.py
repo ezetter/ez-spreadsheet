@@ -307,9 +307,9 @@ def toolbar_buttons(window):
 def test_currency_toolbar_button(window):
     from PySide6.QtTest import QTest
     buttons = toolbar_buttons(window)
-    assert buttons[:2] == [window.autosum_button, window.fill_button]
-    assert [b.text() for b in buttons[2:]] == ["$", "B", "I"]  # no decimal buttons
-    currency = buttons[2]
+    assert buttons[:3] == [window.autosum_button, window.fill_button, window.chart_button]
+    assert [b.text() for b in buttons[3:]] == ["$", "B", "I"]  # no decimal buttons
+    currency = buttons[3]
     assert currency.defaultAction() is window.format_actions["Currency"]  # same action as the menu
     assert window.format_actions["Currency"].text() == "Currency  ($1,234.50)"  # menu text unchanged
     window.model.set_cell(0, 0, "1234.5")
