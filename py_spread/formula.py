@@ -30,7 +30,7 @@ from .errors import (  # noqa: F401 -- re-exported for the rest of the app
     CellError,
     FormulaError,
 )
-from .functions import FUNCTIONS
+from .functions import FUNCTIONS, power
 from .numformat import format_number, parse_formatted  # noqa: F401 -- format_number re-exported
 from .references import column_index, column_name, parse_cell_name
 
@@ -207,7 +207,12 @@ def evaluate(node, sheet) -> float:
     if kind == "neg":
         return -evaluate(node[1], sheet)
     if kind == "call":
-        return _finite(FUNCTIONS[node[1]]([_argument(arg, sheet) for arg in node[2]]))
+        function = FUNCTIONS[node[1]]
+        if function.ranges:
+            return _finite(function.compute([_argument(arg, sheet) for arg in node[2]]))
+        if any(arg[0] == "range" for arg in node[2]):
+            raise FormulaError(VALUE_ERROR)  # takes single numbers, not ranges
+        return _finite(function.compute(*(evaluate(arg, sheet) for arg in node[2])))
     _, op, left, right = node
     a = evaluate(left, sheet)
     b = evaluate(right, sheet)
@@ -221,7 +226,7 @@ def evaluate(node, sheet) -> float:
         elif op == "/":
             result = a / b
         else:
-            result = a ** b
+            result = power(a, b)
     except ZeroDivisionError:
         raise FormulaError(DIV_ZERO_ERROR) from None
     except OverflowError:
@@ -323,6 +328,9 @@ class _Parser:
             self.take()
             args.append(self.argument())
         self.expect(")")
+        function = FUNCTIONS[name]
+        if len(args) < function.min_args or (function.max_args is not None and len(args) > function.max_args):
+            raise FormulaError(PARSE_ERROR)  # wrong number of arguments
         return ("call", name, args)
 
     def argument(self):

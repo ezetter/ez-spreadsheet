@@ -180,6 +180,15 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
   - `MEDIAN` gives the middle value (`#NUM!` if there are none).
   - `STDDEV` gives the sample standard deviation, dividing by n − 1 like
     `STDEV` in other spreadsheets (`#DIV/0!` with fewer than two numbers).
+  - `SIN`, `COS`, and `TAN` take an angle in degrees: `=SIN(30)` is 0.5.
+    Exact angles give exact results (`=SIN(180)` is 0, `=TAN(45)` is 1), and
+    `=TAN(90)` is `#DIV/0!`.
+  - `EXP(x)` is e raised to the power x.
+  - `POW(x, y)` is x raised to the power y, the same as `x^y`.
+
+  These five take single numbers (a cell, a number, or a calculation), not
+  ranges (`#VALUE!`). Giving a function the wrong number of arguments, such
+  as `=POW(2)`, is `#ERROR!`.
 - Empty cells count as 0. Formulas recalculate whenever a cell changes.
 - While typing a formula, clicking a cell right after `=`, an operator, `(`,
   `,`, or `:` inserts its reference. Clicking again replaces the reference just inserted.

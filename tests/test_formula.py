@@ -310,3 +310,73 @@ def test_function_results_are_plain_floats(sheet):
 def test_replace_function(formula, expected):
     names = {"SUM", "MEAN", "MEDIAN", "STDDEV"}
     assert replace_function(formula, names, "MEAN") == expected
+
+
+@pytest.mark.parametrize("formula, expected", [
+    ("=SIN(30)", "0.5"),
+    ("=SIN(90)", "1"),
+    ("=SIN(180)", "0"),
+    ("=SIN(-90)", "-1"),
+    ("=SIN(390)", "0.5"),
+    ("=sin(45)", "0.7071067812"),
+    ("=COS(60)", "0.5"),
+    ("=COS(90)", "0"),
+    ("=COS(270)", "0"),
+    ("=COS(180)", "-1"),
+    ("=TAN(45)", "1"),
+    ("=TAN(-45)", "-1"),
+    ("=TAN(180)", "0"),
+    ("=TAN(60)", "1.732050808"),
+    ("=EXP(0)", "1"),
+    ("=EXP(1)", "2.718281828"),
+    ("=EXP(-1)", "0.3678794412"),
+    ("=POW(2, 10)", "1024"),
+    ("=POW(2, -1)", "0.5"),
+    ("=POW(9, 0.5)", "3"),
+    ("=POW(A1, 2)", "100"),                      # A1 is 10
+    ("=SIN(POW(A1, 2) - 70) * 2", "1"),          # nesting: SIN(30) * 2
+    ("=POW(SUM(A1:A3), 0.5) + EXP(0)", "8.745966692"),
+])
+def test_scalar_functions(sheet, formula, expected):
+    sheet.set_cell(0, 2, formula)
+    assert sheet.display_text(0, 2) == expected
+
+
+def test_exact_angles_give_exact_values(sheet):
+    sheet.set_cell(0, 2, "=SIN(30)")
+    sheet.set_cell(1, 2, "=TAN(45)")
+    sheet.set_cell(2, 2, "=SIN(180)")
+    assert (sheet.value(0, 2), sheet.value(1, 2), sheet.value(2, 2)) == (0.5, 1.0, 0.0)
+
+
+@pytest.mark.parametrize("formula, error", [
+    ("=TAN(90)", "#DIV/0!"),
+    ("=TAN(-270)", "#DIV/0!"),
+    ("=EXP(1000)", "#NUM!"),
+    ("=POW(0, -1)", "#DIV/0!"),
+    ("=POW(-8, 1/3)", "#NUM!"),
+    ("=POW(10, 400)", "#NUM!"),
+    ("=SIN(A1:A3)", "#VALUE!"),
+    ("=POW(B1, 2)", "#VALUE!"),                  # B1 is text
+    ("=SIN()", "#ERROR!"),
+    ("=SIN(1, 2)", "#ERROR!"),
+    ("=POW(2)", "#ERROR!"),
+    ("=POW(1, 2, 3)", "#ERROR!"),
+    ("=EXP", "#NAME?"),
+])
+def test_scalar_function_errors(sheet, formula, error):
+    sheet.set_cell(0, 1, "text")
+    sheet.set_cell(0, 2, formula)
+    assert sheet.display_text(0, 2) == error
+
+
+def test_pow_matches_caret(sheet):
+    for base, exponent in [("2", "8"), ("-2", "3"), ("1.5", "2.5"), ("0", "0")]:
+        sheet.set_cell(5, 3, f"=POW({base}, {exponent})")
+        sheet.set_cell(5, 4, f"=({base})^({exponent})")
+        assert sheet.value(5, 3) == sheet.value(5, 4)
+
+
+def test_empty_cell_argument_is_zero(sheet):
+    sheet.set_cell(0, 2, "=COS(E9)")
+    assert sheet.display_text(0, 2) == "1"
