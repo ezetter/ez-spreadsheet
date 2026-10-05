@@ -232,9 +232,9 @@ cells right next to the current cell and stopping at text or a gap.
 
 ## Fill
 
-The Fill button on the toolbar fills the selected cells. The arrow beside it
-chooses the kind of fill (choosing one runs it straight away), and the button
-repeats the last kind used. Cells are filled down each column, then across
+The Fill button on the toolbar fills the selected cells. The arrow beside it,
+or Edit > Fill, chooses the kind of fill (choosing one runs it straight away),
+and the button repeats the last kind used. Cells are filled down each column, then across
 the columns.
 
 If the first cells of the selection already show what you want, Fill uses

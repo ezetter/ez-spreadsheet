@@ -322,6 +322,7 @@ class MainWindow(QMainWindow):
 
     def _build_edit_menu(self):
         menu = self.menuBar().addMenu("Edit")
+        self.edit_menu = menu
         stack = self.model.undo_stack
         self.undo_action = QAction("Undo", self)
         self.undo_action.setShortcuts(QKeySequence.Undo)
@@ -551,6 +552,11 @@ class MainWindow(QMainWindow):
             group.addAction(action)
             action.triggered.connect(lambda _checked=False, m=mode: self._fill(m))
             self.fill_actions[mode.key] = action
+        # The same actions also make up Edit > Fill.
+        self.edit_menu.addSeparator()
+        fill_menu = self.edit_menu.addMenu("Fill")
+        for action in self.fill_actions.values():
+            fill_menu.addAction(action)
 
         self.fill_button = QToolButton()
         self.fill_button.setDefaultAction(self.fill_action)

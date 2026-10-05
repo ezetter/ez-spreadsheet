@@ -633,3 +633,16 @@ def test_turning_pattern_off_in_dialog_applies_to_cells_later(window):
     select(window, 0, 4, 2, 4)
     fill(window, "random")
     assert window.fill.dialogs.keep_vowels is False  # the dialog opens with it unchecked
+
+
+def test_edit_menu_has_fill(window):
+    edit = [m for m in window.menuBar().actions() if m.text() == "Edit"][0].menu()
+    fill_menu = [a for a in edit.actions() if a.text() == "Fill"][0].menu()
+    assert fill_menu.actions() == list(window.fill_actions.values())  # the same actions
+    assert [a.text() for a in fill_menu.actions()] == ["Random", "Sequence", "Uniform"]
+    window.model.set_cell(0, 0, "7")
+    select(window, 0, 0, 2, 0)
+    fill_menu.actions()[2].trigger()  # Uniform
+    assert column(window, 0, range(3)) == ["7"] * 3
+    assert window.fill_button.text() == "Fill: Uniform"
+    assert fill_menu.actions()[2].isChecked()
