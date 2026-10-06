@@ -12,7 +12,8 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-`requirements.txt` lists what the app needs (PySide6, NumPy, Matplotlib);
+`requirements.txt` lists what the app needs (PySide6, NumPy, Matplotlib, and
+the Anthropic SDK);
 `requirements-dev.txt` adds pytest for the tests.
 
 ## Run
@@ -98,6 +99,29 @@ the chart window switches between line and scatter.
   labels aren't cut off, which overrides that button's margin settings.)
 - Charts redraw as you edit their cells. They aren't saved with the sheet, and
   they close when you open another sheet or start a new one.
+
+## Asking Claude
+
+Select some cells and choose Claude > Ask Claude About Selection… (Cmd+Shift+A,
+also on the secondary-click menu). A window opens where you can ask Claude
+about the data: summarize it, spot trends or outliers, run statistics, or make
+a chart. Answers stream in as Claude writes them, and charts appear in the
+answer with a link to save them. Ask follow-up questions in the same window;
+Claude remembers the conversation and the work it has done.
+
+- Claude gets the selected cells' displayed values as CSV (in the message,
+  and as a file its Python code can read). It runs Python, with pandas, numpy,
+  scipy, and matplotlib, in Anthropic's sandbox to calculate and make charts.
+- It uses Claude Opus 5.5 with the code execution tool. If a request is
+  declined by Claude's safety checks, it's retried automatically on the model
+  Anthropic recommends for that case.
+- The uploaded data expires after an hour and is deleted when you close the
+  window; charts are deleted from Anthropic's storage once downloaded. Stop
+  cancels an answer in progress.
+- It needs a Claude API key, which is billed by Anthropic. Set
+  `ANTHROPIC_API_KEY` in the terminal before starting Py-Spread (for example
+  in `~/.zshrc`), or log in with Anthropic's `ant` tool (`ant auth login`).
+  Without one, the window explains how to set it up.
 
 ## Undo and redo
 

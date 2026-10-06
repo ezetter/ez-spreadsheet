@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
         self._build_edit_menu()
         self._build_insert_menu()
         self._build_format_menu()
+        self._build_claude_menu()
         self._build_toolbar()
 
         self._bar_refs = ReferenceInserter(self.edit_bar)
@@ -374,6 +375,8 @@ class MainWindow(QMainWindow):
         menu.addAction(self.delete_cells_action)
         menu.addSeparator()
         menu.addMenu(self.fill_menu)
+        menu.addSeparator()
+        menu.addAction(self.ask_claude_action)
         self.context_menu = menu
         # Qt selects a right-clicked cell outside the selection, and keeps the
         # selection when it's inside it, as other spreadsheets do.
@@ -383,6 +386,27 @@ class MainWindow(QMainWindow):
     def _show_context_menu(self, pos):
         self._commit_pending_edit()
         self.context_menu.popup(self.view.viewport().mapToGlobal(pos))
+
+    def _build_claude_menu(self):
+        menu = self.menuBar().addMenu("Claude")
+        self.claude_windows = []  # open Ask Claude windows
+        self.ask_claude_action = QAction("Ask Claude About Selection…", self)
+        self.ask_claude_action.setShortcut(QKeySequence("Ctrl+Shift+A"))  # ⌘⇧A on macOS
+        self.ask_claude_action.triggered.connect(lambda _checked=False: self.ask_claude())
+        menu.addAction(self.ask_claude_action)
+
+    def ask_claude(self):
+        """Open a window for asking Claude about the selected cells."""
+        # Imported here so the Anthropic SDK loads only when it's first used.
+        from .claude_window import ClaudeWindow
+
+        self._commit_pending_edit()
+        window = ClaudeWindow(self.model, set(self._selected_cells()), parent=self)
+        window.destroyed.connect(lambda _obj=None, w=window: self.claude_windows.remove(w)
+                                 if w in self.claude_windows else None)
+        self.claude_windows.append(window)
+        window.show()
+        return window
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
