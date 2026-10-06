@@ -282,6 +282,7 @@ class MainWindow(QMainWindow):
         self.view.reference_target = self._reference_target
 
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
+        self._build_context_menu()
         self.view.selectionModel().currentChanged.connect(self._show_current_style)
         self.model.dataChanged.connect(self._show_current_style)
         self.model.modelReset.connect(self._show_current_style)
@@ -344,6 +345,7 @@ class MainWindow(QMainWindow):
         menu.addAction(self.redo_action)
         menu.addSeparator()
 
+        self.clipboard_actions = {}
         for name, shortcut, method in (
             ("Cut", QKeySequence.Cut, "cut"),
             ("Copy", QKeySequence.Copy, "copy"),
@@ -353,6 +355,7 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
             action.triggered.connect(lambda _checked=False, m=method: self._clipboard_action(m))
             menu.addAction(action)
+            self.clipboard_actions[name] = action
         menu.addSeparator()
         self.insert_cells_action = QAction("Insert Cells…", self)
         self.insert_cells_action.triggered.connect(lambda _checked=False: self.insert_cells())
@@ -360,6 +363,26 @@ class MainWindow(QMainWindow):
         self.delete_cells_action = QAction("Delete Cells…", self)
         self.delete_cells_action.triggered.connect(lambda _checked=False: self.delete_cells())
         menu.addAction(self.delete_cells_action)
+
+    def _build_context_menu(self):
+        """The grid's secondary-click menu, made of the Edit menu's actions."""
+        menu = QMenu(self)
+        for action in self.clipboard_actions.values():
+            menu.addAction(action)
+        menu.addSeparator()
+        menu.addAction(self.insert_cells_action)
+        menu.addAction(self.delete_cells_action)
+        menu.addSeparator()
+        menu.addMenu(self.fill_menu)
+        self.context_menu = menu
+        # Qt selects a right-clicked cell outside the selection, and keeps the
+        # selection when it's inside it, as other spreadsheets do.
+        self.view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _show_context_menu(self, pos):
+        self._commit_pending_edit()
+        self.context_menu.popup(self.view.viewport().mapToGlobal(pos))
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
@@ -565,6 +588,7 @@ class MainWindow(QMainWindow):
         # The same actions also make up Edit > Fill.
         self.edit_menu.addSeparator()
         fill_menu = self.edit_menu.addMenu("Fill")
+        self.fill_menu = fill_menu
         for action in self.fill_actions.values():
             fill_menu.addAction(action)
 

@@ -40,6 +40,10 @@ creates the file.
 - Return commits and moves down; Tab commits and moves right; Escape cancels.
 - Delete/Backspace clears the selected cells.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
+- A secondary click (right-click, Control-click, or a two-finger click) on the
+  grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, and
+  Fill. Clicking inside the selection keeps it; clicking elsewhere selects
+  that cell first.
 
 ## Number formats
 
