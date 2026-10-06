@@ -245,8 +245,7 @@ class SheetModel(QAbstractTableModel):
         if shift == "left" and left == 0:
             return "The selection is in the first column, so there's nowhere to shift cells left to."
         move = _shifter(top, left, bottom, right, shift)
-        occupied = set(self._cells) | set(self._formats) | set(self._styles)
-        if any(min(move(*key)) < 0 for key in occupied):
+        if any(min(move(*key)) < 0 for key in self._occupied()):
             edge = "top" if shift == "up" else "left"
             return f"There's no room: cells would be pushed off the {edge} of the sheet."
         return None
@@ -260,23 +259,95 @@ class SheetModel(QAbstractTableModel):
         if problem:
             return problem
         move = _shifter(top, left, bottom, right, shift)
-        occupied = set(self._cells) | set(self._formats) | set(self._styles)
-        destinations = [move(*key) for key in occupied]
+        destinations = [move(*key) for key in self._occupied()]
         if destinations:
             self.ensure_size(max(r for r, _ in destinations) + 1, max(c for _, c in destinations) + 1)
+        self._rearrange(move, None, "Insert Cells")
+        return None
 
-        cells = {move(*key): move_references(text, move) if is_formula(text) else text
-                 for key, text in self._cells.items()}
-        formats = {move(*key): fmt for key, fmt in self._formats.items()}
-        styles = {move(*key): style for key, style in self._styles.items()}
+    def delete_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
+        """Why a block can't be deleted with this shift, or None if it can. The
+        cells that close the gap come from the opposite side, so there must be
+        some: shifting up needs rows below the block, and so on."""
+        if shift == "up" and bottom == self._rows - 1:
+            return "The selection reaches the last row, so there are no cells below to shift up."
+        if shift == "left" and right == self._cols - 1:
+            return "The selection reaches the last column, so there are no cells to its right to shift left."
+        if shift == "down" and top == 0:
+            return "The selection is in the first row, so there are no cells above to shift down."
+        if shift == "right" and left == 0:
+            return "The selection is in the first column, so there are no cells to its left to shift right."
+        return None
+
+    def delete_cells(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
+        """Delete a block of cells and close the gap: cells beyond it move in
+        the direction of `shift` ("up": the cells below move up, and so on),
+        as one undoable step. References to deleted cells become #REF!; ranges
+        shrink. Returns a message (see delete_problem) if it can't be done."""
+        problem = self.delete_problem(top, left, bottom, right, shift)
+        if problem:
+            return problem
+        height, width = bottom - top + 1, right - left + 1
+        vertical = shift in ("up", "down")
+
+        def deleted(row: int, col: int) -> bool:
+            return top <= row <= bottom and left <= col <= right
+
+        def move(row: int, col: int) -> tuple[int, int] | None:
+            if deleted(row, col):
+                return None
+            in_columns, in_rows = left <= col <= right, top <= row <= bottom
+            if shift == "up" and in_columns and row > bottom:
+                return row - height, col
+            if shift == "left" and in_rows and col > right:
+                return row, col - width
+            if shift == "down" and in_columns and row < top:
+                return row + height, col
+            if shift == "right" and in_rows and col < left:
+                return row, col + width
+            return row, col
+
+        def move_range(start, end):
+            # A deleted corner moves to the nearest surviving cell inside the
+            # range, so the range shrinks; it's #REF! if nothing survives.
+            if deleted(*start):
+                start = (bottom + 1, start[1]) if vertical else (start[0], right + 1)
+            if deleted(*end):
+                end = (top - 1, end[1]) if vertical else (end[0], left - 1)
+            if min(end) < 0:
+                return None
+            new_start, new_end = move(*start), move(*end)
+            axis = 0 if vertical else 1
+            if new_start is None or new_end is None or new_start[axis] > new_end[axis]:
+                return None
+            return new_start, new_end
+
+        self._rearrange(move, move_range, "Delete Cells")
+        return None
+
+    def _occupied(self) -> set:
+        """Cells with text, a number format, or a style."""
+        return set(self._cells) | set(self._formats) | set(self._styles)
+
+    def _rearrange(self, move, move_range, description: str) -> None:
+        """Move every cell (with its format and style) to move(row, col), or
+        remove it if that's None, rewriting formulas to follow, as one step."""
+        occupied = self._occupied()
+        cells, formats, styles = {}, {}, {}
+        for key, text in self._cells.items():
+            if (dest := move(*key)) is not None:
+                cells[dest] = move_references(text, move, move_range) if is_formula(text) else text
+        for table, moved in ((self._formats, formats), (self._styles, styles)):
+            for key, value in table.items():
+                if (dest := move(*key)) is not None:
+                    moved[dest] = value
         keys = occupied | set(cells) | set(formats) | set(styles)
         self.set_cells(
             {key: cells.get(key, "") for key in keys},
-            "Insert Cells",
+            description,
             {key: formats.get(key) for key in keys},
             {key: styles.get(key) for key in keys},
         )
-        return None
 
     def ensure_size(self, rows: int, cols: int) -> None:
         """Grow the sheet, if needed, to at least `rows` by `cols`."""

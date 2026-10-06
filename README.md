@@ -152,6 +152,25 @@ asks which way the cells in the way should go: down, right, up, or left.
 - Number formats and bold/italic move with their cells. The whole insert is
   one step that Undo reverses, and the dialog remembers your last choice.
 
+## Deleting cells
+
+Edit > Delete Cells… removes the selected cells and closes the gap. A dialog
+asks which way the remaining cells should move to fill it:
+
+- **Up**: the cells below the selection, in its columns, move up (the
+  default). **Left**: the cells to its right, in its rows, move left.
+- **Down** and **Right** close the gap from the other side: the cells above
+  (or to the left) move toward it.
+- A choice is unavailable (greyed out, with the reason shown when you hover)
+  when there are no cells on that side, such as Down with the selection in the
+  first row. To simply empty cells instead, press Delete.
+- Formulas follow the cells that move. A reference to a deleted cell becomes
+  `#REF!`. Ranges shrink: deleting A3 (shifting up) turns `=SUM(A1:A5)` into
+  `=SUM(A1:A4)`, even when a deleted cell is one of the range's ends. A range
+  that's deleted entirely becomes `#REF!`.
+- Number formats and bold/italic move with their cells. The whole delete is
+  one step that Undo reverses, and the dialog remembers your last choice.
+
 ## CSV import and export
 
 The File menu also has Import CSV… and Export CSV….

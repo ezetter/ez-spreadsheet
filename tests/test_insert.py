@@ -1,7 +1,7 @@
 import pytest
 
 from py_spread.formula import move_references
-from py_spread.insert_dialog import InsertCellsDialog
+from py_spread.shift_dialog import InsertCellsDialog
 from py_spread.model import SheetModel
 from py_spread.numformat import NumberFormat
 from py_spread.textstyle import CellStyle

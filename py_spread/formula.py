@@ -115,12 +115,14 @@ def shift_references(formula: str, d_row: int, d_col: int) -> str:
     return "=" + "".join(pieces)
 
 
-def move_references(formula: str, move) -> str:
+def move_references(formula: str, move, move_range=None) -> str:
     """Rewrite a formula's references for cells that have moved, such as when
-    cells are inserted. `move(row, col)` gives a cell's new (row, col), or None
-    if it has gone off the sheet (that reference becomes #REF!). Unlike
-    shift_references, $ anchors don't matter: a reference follows its cell.
-    References to cells that didn't move keep their text exactly."""
+    cells are inserted or deleted. `move(row, col)` gives a cell's new (row,
+    col), or None if it's gone (that reference becomes #REF!). `move_range`,
+    if given, does the same for a range's two corners at once, returning the
+    new (start, end) or None; otherwise each corner is moved on its own.
+    Unlike shift_references, $ anchors don't matter: a reference follows its
+    cell. References to cells that didn't move keep their text exactly."""
     body = formula[1:]
     try:
         matches = _scan(body)
@@ -128,22 +130,50 @@ def move_references(formula: str, move) -> str:
         return formula
     pieces = []
     pos = 0
-    for match in matches:
+
+    def replace(start: int, end: int, text: str) -> None:
+        nonlocal pos
+        pieces.append(body[pos:start])
+        pieces.append(text)
+        pos = end
+
+    i = 0
+    while i < len(matches):
+        match = matches[i]
         if match.group("ref") is None:
+            i += 1
             continue
-        old = (int(match.group("row")) - 1, column_index(match.group("col")))
+        is_range = (i + 2 < len(matches) and matches[i + 1].group("op") == ":"
+                    and matches[i + 2].group("ref") is not None)
+        if is_range and move_range is not None:
+            last = matches[i + 2]
+            old = (_ref_cell(match), _ref_cell(last))
+            new = move_range(*old)
+            if new is None or min(new[0] + new[1]) < 0:
+                replace(match.start("ref"), last.end("ref"), REF_ERROR)
+            elif new != old:
+                replace(match.start("ref"), last.end("ref"),
+                        f"{_ref_text(match, new[0])}:{_ref_text(last, new[1])}")
+            i += 3
+            continue
+        old = _ref_cell(match)
         new = move(*old)
-        if new == old:
-            continue
-        if new is None or new[0] < 0 or new[1] < 0:
-            moved = REF_ERROR
-        else:
-            moved = f"{match.group('col_anchor')}{column_name(new[1])}{match.group('row_anchor')}{new[0] + 1}"
-        pieces.append(body[pos:match.start("ref")])
-        pieces.append(moved)
-        pos = match.end("ref")
+        if new is None or min(new) < 0:
+            replace(match.start("ref"), match.end("ref"), REF_ERROR)
+        elif new != old:
+            replace(match.start("ref"), match.end("ref"), _ref_text(match, new))
+        i += 1
     pieces.append(body[pos:])
     return "=" + "".join(pieces)
+
+
+def _ref_cell(match: re.Match) -> tuple[int, int]:
+    return int(match.group("row")) - 1, column_index(match.group("col"))
+
+
+def _ref_text(match: re.Match, cell: tuple[int, int]) -> str:
+    """A reference to `cell`, keeping the $ anchors of the reference matched."""
+    return f"{match.group('col_anchor')}{column_name(cell[1])}{match.group('row_anchor')}{cell[0] + 1}"
 
 
 def replace_function(formula: str, names, new_name: str) -> str | None:

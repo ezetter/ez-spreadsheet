@@ -27,7 +27,7 @@ from .clipboard import ClipboardController
 from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
-from .insert_dialog import SHIFT_LABELS, ask_shift
+from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
 from .textstyle import PLAIN
@@ -325,6 +325,7 @@ class MainWindow(QMainWindow):
         menu = self.menuBar().addMenu("Edit")
         self.edit_menu = menu
         self.insert_shift = "down"  # last choice in the Insert Cells dialog
+        self.delete_shift = "up"  # and in the Delete Cells dialog
         stack = self.model.undo_stack
         self.undo_action = QAction("Undo", self)
         self.undo_action.setShortcuts(QKeySequence.Undo)
@@ -356,6 +357,9 @@ class MainWindow(QMainWindow):
         self.insert_cells_action = QAction("Insert Cells…", self)
         self.insert_cells_action.triggered.connect(lambda _checked=False: self.insert_cells())
         menu.addAction(self.insert_cells_action)
+        self.delete_cells_action = QAction("Delete Cells…", self)
+        self.delete_cells_action.triggered.connect(lambda _checked=False: self.delete_cells())
+        menu.addAction(self.delete_cells_action)
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
@@ -657,7 +661,38 @@ class MainWindow(QMainWindow):
         return True
 
     def _ask_insert_shift(self, problems: dict[str, str]) -> str | None:
-        return ask_shift(self, self.insert_shift, problems)
+        return ask_shift(InsertCellsDialog, self, self.insert_shift, problems)
+
+    def delete_cells(self) -> bool:
+        """Ask which way to shift, then delete the selected cells and close the gap."""
+        self._commit_pending_edit()
+        top, left, bottom, right = self.view.selection_bounds()
+        problems = {}  # shifts that can't work here, disabled in the dialog
+        for key in SHIFT_LABELS:
+            problem = self.model.delete_problem(top, left, bottom, right, key)
+            if problem:
+                problems[key] = problem
+        if len(problems) == len(SHIFT_LABELS):
+            self._show_error("Couldn't delete the cells.",
+                             "The selection covers the whole sheet, so there are no cells to fill the gap. "
+                             "To empty the cells, press Delete.")
+            return False
+        shift = self._ask_delete_shift(problems)
+        if shift is None:
+            return False
+        self.delete_shift = shift
+        problem = self.model.delete_cells(top, left, bottom, right, shift)
+        if problem:
+            self._show_error("Couldn't delete the cells.", problem)
+            return False
+        self.view.select_range(top, left, bottom, right)
+        cells = (bottom - top + 1) * (right - left + 1)
+        self._show_status(f"Deleted {cells} cell{'s' if cells != 1 else ''}; "
+                          f"{SHIFT_LABELS[shift].lower()}.")
+        return True
+
+    def _ask_delete_shift(self, problems: dict[str, str]) -> str | None:
+        return ask_shift(DeleteCellsDialog, self, self.delete_shift, problems)
 
     def _history_action(self, method: str):
         # While text is being edited (cell editor or edit bar), undo the typing.

@@ -22,6 +22,8 @@ class Dialogs:
         self.errors = []
         self.insert_shift = "down"  # the Insert Cells dialog's answer; None cancels
         self.insert_problems = None  # the choices it was told to disable
+        self.delete_shift = "up"  # likewise for the Delete Cells dialog
+        self.delete_problems = None
 
 
 @pytest.fixture(autouse=True)
@@ -38,5 +40,11 @@ def dialogs(monkeypatch):
         return dialogs.insert_shift
 
     monkeypatch.setattr(MainWindow, "_ask_insert_shift", ask_insert_shift)
+
+    def ask_delete_shift(window, problems):
+        dialogs.delete_problems = problems
+        return dialogs.delete_shift
+
+    monkeypatch.setattr(MainWindow, "_ask_delete_shift", ask_delete_shift)
     monkeypatch.setattr(MainWindow, "_show_error", lambda window, text, detail: dialogs.errors.append(detail))
     return dialogs
