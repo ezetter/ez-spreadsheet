@@ -74,6 +74,9 @@ class SequenceFill:
     descending: bool = False
     across_first: bool = False  # fill across each row before moving down
     floats: bool = False  # write whole values as floats too (3.0, not 3)
+    # With one cell selected: how many cells to fill from it, down (or
+    # across, with across_first). None fills the selected cells.
+    cells: int | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,7 @@ class LetterSequence:
     step: int = 1
     descending: bool = False
     across_first: bool = False
+    cells: int | None = None  # as for SequenceFill
 
 
 @dataclass(frozen=True)
@@ -344,7 +348,26 @@ class FillController(QObject):
             params = self._ask(len(cells))
             if params is None:
                 return  # cancelled
-        self.message.emit(self._fill(cells, params))
+        line = self._line_of_cells(cells, params)
+        self.message.emit(self._fill(line or cells, params))
+        if line:
+            rows = [row for row, _ in line]
+            cols = [col for _, col in line]
+            self.view.select_range(min(rows), min(cols), max(rows), max(cols))
+
+    def _line_of_cells(self, cells, params) -> set | None:
+        """For a sequence given a number of cells while one cell is selected:
+        that many cells from it, down a column or (with across_first) along a
+        row, growing the sheet if they run past its edge. Otherwise None."""
+        count = getattr(params, "cells", None)
+        if count is None or len(cells) != 1:
+            return None
+        (row, col), = cells
+        if params.across_first:
+            self.model.ensure_size(row + 1, col + count)
+            return {(row, col + i) for i in range(count)}
+        self.model.ensure_size(row + count, col + 1)
+        return {(row + i, col) for i in range(count)}
 
     def _ask(self, count: int):
         key = self.mode.key

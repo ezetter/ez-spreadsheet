@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QRadioButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -185,21 +186,45 @@ class RandomDialog(_FillDialog):
             self.show_note("", error=False)
 
 
+MAX_FILL_CELLS = 100_000
+DEFAULT_FILL_CELLS = 10
+
+
 class SequenceDialog(_FillDialog):
+    """Sequence settings. With several cells selected, they're the cells
+    filled; with one, Num. cells says how many to fill from it, down or across
+    as the order says."""
+
     def __init__(self, parent=None, initial: SequenceFill | LetterSequence | None = None, cell_count: int = 1):
         super().__init__(parent, "Fill with a Sequence")
         self.cell_count = cell_count
-        initial = initial or SequenceFill(1, max(cell_count, 2))
+        if cell_count > 1:
+            count = cell_count
+        else:
+            count = (initial.cells if initial and initial.cells else None) or DEFAULT_FILL_CELLS
+        initial = initial or SequenceFill(1, max(count, 2))
         self.lower = self.number_field("Lower bound:", initial.lower, BOUND_HINT)
         self.upper = self.number_field("Upper bound:", initial.upper, BOUND_HINT)
         self.step = self.number_field(
-            "Step:", initial.step, placeholder=f"Blank: spread over the {cell_count} cells (1 for letters)")
+            "Step:", initial.step, placeholder="Blank: spread evenly over the cells (1 for letters)")
+        self.cells = QSpinBox()
+        self.cells.setRange(1, MAX_FILL_CELLS)
+        self.cells.setValue(count)
+        self.cells.setEnabled(cell_count == 1)
+        if cell_count > 1:
+            self.cells.setToolTip("Set by the selected cells")
+        self.cells.valueChanged.connect(self.update_state)
+        self.form.addRow("Num. cells:", self.cells)
         self.ascending, self.descending = self.choice(
             "Direction:", ["Ascending", "Descending"], 1 if initial.descending else 0)
         self.down_first, self.across_first = self.choice(
             "Order:", ["Down columns, then across", "Across rows, then down"],
             1 if initial.across_first else 0)
         self.update_state()
+
+    def _count(self) -> int:
+        """How many cells will be filled."""
+        return self.cells.value()
 
     def _read(self) -> SequenceFill | LetterSequence | str:
         """The settings, or a message saying what's wrong with them."""
@@ -213,14 +238,16 @@ class SequenceDialog(_FillDialog):
             if step is None:
                 return "The step must be a number, or blank."
         descending, across_first = self.descending.isChecked(), self.across_first.isChecked()
+        cells = self._count() if self.cells.isEnabled() else None
         if isinstance(lower, str):
             if step is not None and not is_whole(step):
                 return "For letters, the step must be a whole number."
-            params = LetterSequence(lower, upper, 1 if step is None else int(step), descending, across_first)
+            params = LetterSequence(lower, upper, 1 if step is None else int(step), descending,
+                                    across_first, cells)
             return check_letter_sequence(params) or params
         # As with numbers in cells, typing 1.0 rather than 1 asks for floats.
         floats = any(written_as_float(f.text()) for f in (self.lower, self.upper, self.step))
-        params = SequenceFill(lower, upper, step, descending, across_first, floats)
+        params = SequenceFill(lower, upper, step, descending, across_first, floats, cells)
         return check_sequence(params) or params
 
     def params(self) -> SequenceFill | LetterSequence | None:
@@ -232,18 +259,19 @@ class SequenceDialog(_FillDialog):
         if isinstance(result, str):
             self.show_note(result, error=True)
             return
+        count = self._count()
         if isinstance(result, LetterSequence):
-            values = letter_sequence_values(result, self.cell_count)
-            text = f"Fills {self.cell_count} cells: {_preview(values)}"
+            values = letter_sequence_values(result, count)
+            text = f"Fills {count} cells: {_preview(values)}"
             cycle = letter_cycle(result)
-            if cycle < self.cell_count:
+            if cycle < count:
                 text += f". Starts over after {values[cycle - 1]}."
             self.show_note(text, error=False)
             return
-        values = sequence_values(result, self.cell_count)
-        text = f"Fills {len(values)} of {self.cell_count} cells: {_preview(values)}"
-        if len(values) < self.cell_count:
-            text += f". The sequence ends there; {self.cell_count - len(values)} cells stay unchanged."
+        values = sequence_values(result, count)
+        text = f"Fills {len(values)} of {count} cells: {_preview(values)}"
+        if len(values) < count:
+            text += f". The sequence ends there; {count - len(values)} cells stay unchanged."
         self.show_note(text, error=False)
 
 

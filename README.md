@@ -280,14 +280,21 @@ last:
   unchecking **Keep consonants and vowels in place** picks any letter in each
   position instead. That choice is remembered, and also applies to patterns
   taken from the cells.
-- **Sequence:** lower and upper bounds, a step, ascending or descending, and
-  the fill order (down columns first, or across rows first). Leave the step
-  blank to spread the values evenly over the selected cells. Whole-number
-  values are written as integers, unless a bound or step was typed as
-  floating point. With letter bounds the step is a whole number (blank means
-  1), and the sequence starts over when it runs out instead of stopping. If the step reaches the far bound before
-  the cells run out, the remaining cells are left as they are. The dialog
-  previews the values.
+- **Sequence:** lower and upper bounds, a step, the number of cells, ascending
+  or descending, and the fill order (down columns first, or across rows
+  first). Leave the step blank to spread the values evenly over the cells.
+  Whole-number values are written as integers, unless a bound or step was
+  typed as floating point. If the step reaches the far bound before the cells
+  run out, the remaining cells are left as they are. With letter bounds the
+  step is a whole number (blank means 1), and the sequence starts over when it
+  runs out instead of stopping. The dialog previews the values.
+
+  **Num. cells** is the number of cells to fill. With several cells selected,
+  it's set by the selection and can't be changed. With one cell selected, the
+  sequence starts there and fills that many cells: down the column with "Down
+  columns, then across", or along the row with "Across rows, then down". The
+  filled cells are then selected, and the sheet grows if they run past its
+  edge.
 - **Uniform:** the value to use: a number, text, or formula.
 
 ## Tests

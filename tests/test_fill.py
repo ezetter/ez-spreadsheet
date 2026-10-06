@@ -646,3 +646,90 @@ def test_edit_menu_has_fill(window):
     assert column(window, 0, range(3)) == ["7"] * 3
     assert window.fill_button.text() == "Fill: Uniform"
     assert fill_menu.actions()[2].isChecked()
+
+
+# --- Num. cells ---
+
+def test_num_cells_disabled_with_a_selection(app):
+    dialog = SequenceDialog(cell_count=6)
+    assert not dialog.cells.isEnabled()
+    assert dialog.cells.value() == 6
+    dialog.lower.setText("1")
+    dialog.upper.setText("6")
+    assert dialog.params().cells is None  # the selection decides
+
+
+def test_num_cells_with_one_cell(app):
+    dialog = SequenceDialog(cell_count=1)
+    assert dialog.cells.isEnabled()
+    assert dialog.cells.value() == 10
+    dialog.lower.setText("0")
+    dialog.upper.setText("1")
+    dialog.step.setText("")
+    dialog.cells.setValue(5)
+    assert dialog.params() == SequenceFill(0, 1, cells=5)
+    assert dialog.note.text() == "Fills 5 of 5 cells: 0, 0.25, … 1"
+    dialog.step.setText("0.5")
+    assert "Fills 3 of 5 cells" in dialog.note.text()
+
+
+def test_num_cells_remembered(app):
+    dialog = SequenceDialog(initial=SequenceFill(1, 3, cells=3), cell_count=1)
+    assert dialog.cells.value() == 3
+
+
+def test_num_cells_for_letters(app):
+    dialog = SequenceDialog(cell_count=1)
+    dialog.lower.setText("A")
+    dialog.upper.setText("C")
+    dialog.step.setText("")
+    dialog.cells.setValue(4)
+    dialog.across_first.setChecked(True)
+    assert dialog.params() == LetterSequence("A", "C", across_first=True, cells=4)
+    assert dialog.note.text() == "Fills 4 cells: A, B, C, A. Starts over after C."
+
+
+def test_num_cells_fills_down_from_one_cell(window):
+    window.fill.dialogs.answer = SequenceFill(1, 5, cells=5)
+    select(window, 2, 1, 2, 1)
+    fill(window, "sequence")
+    assert column(window, 1, range(2, 7)) == ["1", "2", "3", "4", "5"]
+    assert window.model.get_cell(7, 1) == ""
+    assert selected(window) == [(r, 1) for r in range(2, 7)]
+
+
+def test_num_cells_fills_across_from_one_cell(window):
+    window.fill.dialogs.answer = SequenceFill(10, 30, cells=3, across_first=True)
+    select(window, 0, 0, 0, 0)
+    fill(window, "sequence")
+    assert [window.model.get_cell(0, c) for c in range(4)] == ["10", "20", "30", ""]
+    assert window.model.get_cell(1, 0) == ""
+
+
+def test_num_cells_letters_from_one_cell(window):
+    window.fill.dialogs.answer = LetterSequence("A", "C", cells=4)
+    select(window, 0, 3, 0, 3)
+    fill(window, "sequence")
+    assert column(window, 3, range(4)) == ["A", "B", "C", "A"]
+
+
+def test_num_cells_grows_the_sheet(window):
+    model = window.model
+    window.fill.dialogs.answer = SequenceFill(1, 20, cells=20)
+    last = model.rowCount() - 1
+    select(window, last - 4, 0, last - 4, 0)
+    fill(window, "sequence")
+    assert model.rowCount() == last - 4 + 20
+    assert model.get_cell(model.rowCount() - 1, 0) == "20"
+
+
+def test_num_cells_is_one_undo_step(window):
+    window.fill.dialogs.answer = SequenceFill(1, 4, cells=4)
+    select(window, 0, 0, 0, 0)
+    fill(window, "sequence")
+    window.undo_action.trigger()
+    assert window.model.sheet_data().cells == {}
+
+
+def selected(window):
+    return sorted((i.row(), i.column()) for i in window.view.selectedIndexes())
