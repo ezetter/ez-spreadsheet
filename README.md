@@ -102,16 +102,25 @@ the chart window switches between line and scatter.
 
 ## Asking Claude
 
-Select some cells and choose Claude > Ask Claude About Selection… (Cmd+Shift+A,
-also on the secondary-click menu). A window opens where you can ask Claude
-about the data: summarize it, spot trends or outliers, run statistics, or make
-a chart. Answers stream in as Claude writes them, and charts appear in the
-answer with a link to save them. Ask follow-up questions in the same window;
-Claude remembers the conversation and the work it has done.
+Select some cells and choose Claude > Ask Claude… (Cmd+Shift+A, also on the
+secondary-click menu). In the window that opens you can ask Claude about the
+data, such as summarizing it, spotting trends or outliers, running statistics,
+or making a chart, or ask it to fill the sheet. Answers stream in as Claude
+writes them, and charts appear in the answer with a link to save them. Ask
+follow-up questions in the same window; Claude remembers the conversation and
+the work it has done.
 
 - Claude gets the selected cells' displayed values as CSV (in the message,
   and as a file its Python code can read). It runs Python, with pandas, numpy,
   scipy, and matplotlib, in Anthropic's sandbox to calculate and make charts.
+- **Filling the sheet:** ask for data and Claude writes it in, for example
+  "Fill a row with degrees 0 to 360 in steps of 10, with their cosines, sines,
+  and cosines squared in the rows below." Unless you say where, it starts at
+  the top-left of your selection. When values follow from other cells it
+  writes Py-Spread formulas (such as `=COS(A1)`), so the sheet stays live. It
+  can read any part of the sheet first, and is told not to overwrite data you
+  haven't asked it to. Each fill is one step that Undo reverses ("Undo Claude
+  Fill"), and the filled cells are selected so you can see them.
 - It uses Claude Opus 5.5 with the code execution tool. If a request is
   declined by Claude's safety checks, it's retried automatically on the model
   Anthropic recommends for that case.

@@ -390,18 +390,19 @@ class MainWindow(QMainWindow):
     def _build_claude_menu(self):
         menu = self.menuBar().addMenu("Claude")
         self.claude_windows = []  # open Ask Claude windows
-        self.ask_claude_action = QAction("Ask Claude About Selection…", self)
+        self.ask_claude_action = QAction("Ask Claude…", self)
         self.ask_claude_action.setShortcut(QKeySequence("Ctrl+Shift+A"))  # ⌘⇧A on macOS
         self.ask_claude_action.triggered.connect(lambda _checked=False: self.ask_claude())
         menu.addAction(self.ask_claude_action)
 
     def ask_claude(self):
-        """Open a window for asking Claude about the selected cells."""
+        """Open a window for asking Claude about the selected cells, or for
+        having it fill the sheet."""
         # Imported here so the Anthropic SDK loads only when it's first used.
         from .claude_window import ClaudeWindow
 
         self._commit_pending_edit()
-        window = ClaudeWindow(self.model, set(self._selected_cells()), parent=self)
+        window = ClaudeWindow(self.model, set(self._selected_cells()), parent=self, view=self.view)
         window.destroyed.connect(lambda _obj=None, w=window: self.claude_windows.remove(w)
                                  if w in self.claude_windows else None)
         self.claude_windows.append(window)

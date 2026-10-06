@@ -9,7 +9,16 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
 from py_spread import claude
-from py_spread.claude import CREDENTIALS_HELP, ClaudeSession, describe_error, selection_csv
+from py_spread.claude import (
+    CREDENTIALS_HELP,
+    READ_TOOL,
+    WRITE_TOOL,
+    ClaudeSession,
+    SheetAccess,
+    ToolInputError,
+    describe_error,
+    selection_csv,
+)
 from py_spread.model import SheetModel
 
 
@@ -23,8 +32,12 @@ def code_started():
     return Obj(type="content_block_start", content_block=Obj(type="server_tool_use"))
 
 
-def message(text="", stop_reason="end_turn", files=(), container="container_1", category=None):
-    content = []
+def tool_use(name, tool_id="toolu_1", **args):
+    return Obj(type="tool_use", id=tool_id, name=name, input=args)
+
+
+def message(text="", stop_reason="end_turn", files=(), container="container_1", category=None, tools=()):
+    content = list(tools)
     if files:
         content.append(Obj(type="bash_code_execution_tool_result",
                            content=Obj(type="bash_code_execution_result",
@@ -96,6 +109,7 @@ class Recorder:
     def file(self, n, d): self.files.append((n, d))
     def finished(self, note): self.finished_notes.append(note)
     def failed(self, m): self.failures.append(m)
+    def run_on_sheet(self, task): return task()
 
 
 @pytest.fixture
@@ -317,7 +331,7 @@ def test_menu_and_context_menu(main_window):
 def test_menu_opens_window_for_selection(main_window):
     main_window.view.select_range(0, 0, 1, 1)
     window = main_window.ask_claude()
-    assert window.windowTitle() == "Ask Claude About A1:B2"
+    assert window.windowTitle() == "Ask Claude: A1:B2"
     assert window.csv_text == "x,y\n1,2\n"
     assert main_window.claude_windows == [window]
 
@@ -375,3 +389,164 @@ def test_empty_question_is_ignored(main_window):
     window = open_claude_window(main_window, client)
     window.ask_button.click()
     assert not window.busy and client.requests == []
+
+
+
+# --- Reading and writing the sheet ---
+
+def test_tools_offered_only_with_a_sheet(model):
+    client = FakeClient([FakeStream([], message("x")), FakeStream([], message("y"))])
+    ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1))).ask("q", Recorder())
+    with_sheet = ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(model))
+    with_sheet.ask("q", Recorder())
+    assert [t["name"] for t in client.requests[0]["tools"]] == ["code_execution"]
+    assert [t["name"] for t in client.requests[1]["tools"]] == ["code_execution", "read_cells", "write_cells"]
+    assert WRITE_TOOL["eager_input_streaming"] and READ_TOOL["eager_input_streaming"]
+
+
+def test_write_with_formulas(app):
+    model = SheetModel(rows=10, cols=6)
+    written = []
+    sheet = SheetAccess(model, on_write=lambda *bounds: written.append(bounds))
+    result = sheet.write("B2", [["Degrees", "Cosine"], ["0", "=COS(B3)"], ["60", "=COS(B4)"], ["90", "=FOO(1)"]])
+    assert model.get_cell(3, 2) == "=COS(B4)" and model.display_text(3, 2) == "0.5"
+    assert written == [(1, 1, 4, 2)]
+    assert result.startswith("Wrote 4 rows by 2 columns to B2:C5.")
+    assert "1 cells show errors: C5 #NAME?" in result
+    assert "Degrees,Cosine\n0,1\n60,0.5" in result
+    assert model.undo_stack.undoText() == "Claude Fill"
+    model.undo_stack.undo()
+    assert model.sheet_data().cells == {}
+
+
+def test_write_grows_sheet(app):
+    model = SheetModel(rows=5, cols=2)
+    SheetAccess(model).write("A4", [["1", "2", "3"], ["4"]])
+    assert (model.rowCount(), model.columnCount()) == (5, 3)
+    assert model.get_cell(3, 2) == "3" and model.get_cell(4, 1) == ""
+
+
+def test_read(app):
+    model = SheetModel(rows=10, cols=6)
+    model.set_cells({(0, 0): "x", (1, 0): "2", (1, 1): "=A2*3"})
+    text = SheetAccess(model).read("A1:B2")
+    assert text == "A1:B2 as displayed:\nx,\n2,6\nFormulas:\nB2: =A2*3"
+    assert SheetAccess(model).read("C3").endswith("No formulas.")
+
+
+@pytest.mark.parametrize("call, message_part", [
+    (lambda s: s.read("nonsense"), "isn't a cell name"),
+    (lambda s: s.read("A1:Z99"), "The sheet is 10 rows by 6 columns"),
+    (lambda s: s.write("A1", []), "nothing to write"),
+    (lambda s: s.write("1A", [["x"]]), "isn't a cell name"),
+])
+def test_sheet_errors(app, call, message_part):
+    with pytest.raises(ToolInputError, match=message_part):
+        call(SheetAccess(SheetModel(rows=10, cols=6)))
+
+
+def test_write_tool_loop(model):
+    target = SheetModel(rows=40, cols=6)
+    write = tool_use("write_cells", start="A1", rows=[["Degrees", "Cosine"], ["0", "=COS(A2)"]])
+    client = FakeClient([
+        FakeStream([text_event("Filling.")], message("Filling.", stop_reason="tool_use", tools=[write])),
+        FakeStream([text_event("Done: A1:B2.")], message("Done: A1:B2.")),
+    ])
+    session = ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(target))
+    listener = Recorder()
+    session.ask("Fill degrees and cosines", listener)
+    assert target.get_cell(1, 1) == "=COS(A2)" and target.display_text(1, 1) == "1"
+    second = client.requests[1]["messages"]
+    assert [m["role"] for m in second] == ["user", "assistant", "user"]
+    result = second[2]["content"][0]
+    assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1"
+    assert result["content"].startswith("Wrote 2 rows by 2 columns to A1:B2.")
+    assert "Writing to the sheet…" in listener.statuses
+    assert any("Wrote 2 rows" in t and "Undo" in t for t in listener.texts)
+    assert listener.finished_notes == [""]
+
+
+def test_bad_tool_input_is_reported_to_claude(model):
+    bad = [tool_use("write_cells", "t1", start=5, rows=[["x"]]),
+           tool_use("write_cells", "t2", start="A1", rows="x"),
+           tool_use("read_cells", "t3", range=None),
+           tool_use("delete_everything", "t4"),
+           tool_use("write_cells", "t5", start="A1", rows=[[{"x": 1}]])]
+    client = FakeClient([FakeStream([], message(stop_reason="tool_use", tools=bad)),
+                         FakeStream([], message("Sorry."))])
+    target = SheetModel(rows=10, cols=6)
+    session = ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(target))
+    session.ask("q", Recorder())
+    results = client.requests[1]["messages"][2]["content"]
+    assert [r["is_error"] for r in results] == [True] * 5
+    assert target.sheet_data().cells == {}
+
+
+def test_stray_numbers_are_accepted(model):
+    target = SheetModel(rows=10, cols=6)
+    write = tool_use("write_cells", start="A1", rows=[[1, 2.5, None, "x"]])
+    client = FakeClient([FakeStream([], message(stop_reason="tool_use", tools=[write])),
+                         FakeStream([], message("ok"))])
+    ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(target)).ask("q", Recorder())
+    assert [target.get_cell(0, c) for c in range(4)] == ["1", "2.5", "", "x"]
+
+
+def test_unparseable_tool_input_is_retried(model):
+    class Broken(FakeStream):
+        def __iter__(self):
+            raise ValueError("Unable to parse tool parameter JSON")
+            yield
+
+    client = FakeClient([Broken([], None), FakeStream([text_event("ok")], message("ok"))])
+    session = ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(model))
+    listener = Recorder()
+    session.ask("q", listener)
+    assert listener.finished_notes == [""] and len(client.requests) == 2
+
+
+def test_cut_off_tool_call_is_not_run(model):
+    write = tool_use("write_cells", start="A1", rows=[["partial"]])
+    client = FakeClient([FakeStream([], message(stop_reason="max_tokens", tools=[write]))])
+    target = SheetModel(rows=10, cols=6)
+    session = ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(target))
+    listener = Recorder()
+    session.ask("q", listener)
+    assert target.sheet_data().cells == {}
+    assert "cut off" in listener.finished_notes[0]
+    assert [m["role"] for m in session.messages] == ["user"]  # the cut-off turn is left out
+
+
+def test_stopping_mid_tools_leaves_a_valid_conversation(model):
+    write = tool_use("write_cells", start="A1", rows=[["x"]])
+    client = FakeClient([FakeStream([], message(stop_reason="tool_use", tools=[write]))])
+    target = SheetModel(rows=10, cols=6)
+    listener = Recorder()
+    session = ClaudeSession(client, *selection_csv(model, block(1, 1, 1, 1)), SheetAccess(target))
+
+    def stop_while_running(block, lst):  # Stop pressed as the tool call comes in
+        session.cancel()
+        raise claude._Cancelled
+
+    session._run_tool = stop_while_running
+    session.ask("q", listener)
+    assert listener.finished_notes == ["Stopped."]
+    roles = [m["role"] for m in session.messages]
+    assert roles == ["user", "assistant", "user"]
+    assert session.messages[2]["content"][0]["tool_use_id"] == "toolu_1"
+    assert session.messages[2]["content"][0]["is_error"]
+
+
+def test_window_fill_runs_on_gui_thread_and_selects(main_window):
+    write = tool_use("write_cells", start="D2", rows=[["Angle", "Sine"], ["30", "=SIN(D3)"]])
+    client = FakeClient([FakeStream([], message(stop_reason="tool_use", tools=[write])),
+                         FakeStream([text_event("Filled D2:E3.")], message("Filled D2:E3."))])
+    window = open_claude_window(main_window, client)
+    window.view = main_window.view
+    ask(window, "Fill angles and sines")
+    model = main_window.model
+    assert model.get_cell(2, 4) == "=SIN(D3)" and model.display_text(2, 4) == "0.5"
+    selected = sorted((i.row(), i.column()) for i in main_window.view.selectedIndexes())
+    assert selected == [(1, 3), (1, 4), (2, 3), (2, 4)]
+    assert "Wrote 2 rows by 2 columns to D2:E3." in window.transcript.toPlainText()
+    main_window.undo_action.trigger()
+    assert model.get_cell(2, 4) == ""

@@ -34,7 +34,7 @@ def selected(window):
 def test_menu_items(window):
     texts = [a.text() for a in window.context_menu.actions()]
     assert texts == ["Cut", "Copy", "Paste", "", "Insert Cells…", "Delete Cells…", "", "Fill", "",
-                     "Ask Claude About Selection…"]
+                     "Ask Claude…"]
     actions = window.context_menu.actions()
     assert actions[0] is window.clipboard_actions["Cut"]  # the Edit menu's own actions
     assert actions[4] is window.insert_cells_action
