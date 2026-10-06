@@ -636,11 +636,16 @@ class MainWindow(QMainWindow):
     def insert_cells(self) -> bool:
         """Ask which way to shift, then insert blank cells in place of the selection."""
         self._commit_pending_edit()
-        shift = self._ask_insert_shift()
+        top, left, bottom, right = self.view.selection_bounds()
+        problems = {}  # shifts that can't work here, disabled in the dialog
+        for key in SHIFT_LABELS:
+            problem = self.model.insert_problem(top, left, bottom, right, key)
+            if problem:
+                problems[key] = problem
+        shift = self._ask_insert_shift(problems)
         if shift is None:
             return False
         self.insert_shift = shift
-        top, left, bottom, right = self.view.selection_bounds()
         problem = self.model.insert_cells(top, left, bottom, right, shift)
         if problem:
             self._show_error("Couldn't insert the cells.", problem)
@@ -651,8 +656,8 @@ class MainWindow(QMainWindow):
                           f"{SHIFT_LABELS[shift].lower()}.")
         return True
 
-    def _ask_insert_shift(self) -> str | None:
-        return ask_shift(self, self.insert_shift)
+    def _ask_insert_shift(self, problems: dict[str, str]) -> str | None:
+        return ask_shift(self, self.insert_shift, problems)
 
     def _history_action(self, method: str):
         # While text is being edited (cell editor or edit bar), undo the typing.

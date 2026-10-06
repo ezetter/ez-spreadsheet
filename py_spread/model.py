@@ -235,30 +235,33 @@ class SheetModel(QAbstractTableModel):
         self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
 
+    def insert_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
+        """Why blank cells can't be inserted in place of a block with this
+        shift, or None if they can. Shifting up or left fails when the block
+        is at the top or left of the sheet, or when anything would be pushed
+        off it; shifting down or right always works (the sheet grows)."""
+        if shift == "up" and top == 0:
+            return "The selection is in the first row, so there's nowhere to shift cells up to."
+        if shift == "left" and left == 0:
+            return "The selection is in the first column, so there's nowhere to shift cells left to."
+        move = _shifter(top, left, bottom, right, shift)
+        occupied = set(self._cells) | set(self._formats) | set(self._styles)
+        if any(min(move(*key)) < 0 for key in occupied):
+            edge = "top" if shift == "up" else "left"
+            return f"There's no room: cells would be pushed off the {edge} of the sheet."
+        return None
+
     def insert_cells(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
         """Insert blank cells in place of a block, shifting the cells there and
         beyond `shift` ("down", "right", "up", or "left") by the block's size,
         as one undoable step. Formulas follow the cells they refer to. Returns
-        a message if it can't be done (cells would be pushed off the sheet)."""
-        height, width = bottom - top + 1, right - left + 1
-
-        def move(row: int, col: int) -> tuple[int, int]:
-            in_columns, in_rows = left <= col <= right, top <= row <= bottom
-            if shift == "down" and in_columns and row >= top:
-                return row + height, col
-            if shift == "right" and in_rows and col >= left:
-                return row, col + width
-            if shift == "up" and in_columns and row <= bottom:
-                return row - height, col
-            if shift == "left" and in_rows and col <= right:
-                return row, col - width
-            return row, col
-
+        a message (see insert_problem) if it can't be done."""
+        problem = self.insert_problem(top, left, bottom, right, shift)
+        if problem:
+            return problem
+        move = _shifter(top, left, bottom, right, shift)
         occupied = set(self._cells) | set(self._formats) | set(self._styles)
         destinations = [move(*key) for key in occupied]
-        if any(row < 0 or col < 0 for row, col in destinations):
-            edge = "top" if shift == "up" else "left"
-            return f"There's no room: cells would be pushed off the {edge} of the sheet."
         if destinations:
             self.ensure_size(max(r for r, _ in destinations) + 1, max(c for _, c in destinations) + 1)
 
@@ -419,6 +422,27 @@ class SheetModel(QAbstractTableModel):
             return evaluate(ast, self._formula_sheet)
         except FormulaError as e:
             return CellError(e.code)
+
+
+def _shifter(top: int, left: int, bottom: int, right: int, shift: str):
+    """Where each cell goes when blank cells are inserted in place of a block:
+    the block and the cells beyond it in the direction of the shift move by
+    the block's height (or width)."""
+    height, width = bottom - top + 1, right - left + 1
+
+    def move(row: int, col: int) -> tuple[int, int]:
+        in_columns, in_rows = left <= col <= right, top <= row <= bottom
+        if shift == "down" and in_columns and row >= top:
+            return row + height, col
+        if shift == "right" and in_rows and col >= left:
+            return row, col + width
+        if shift == "up" and in_columns and row <= bottom:
+            return row - height, col
+        if shift == "left" and in_rows and col <= right:
+            return row, col - width
+        return row, col
+
+    return move
 
 
 def _changes(table: dict, updates: dict | None) -> tuple[dict, dict]:

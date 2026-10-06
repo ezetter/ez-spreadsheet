@@ -90,7 +90,7 @@ def test_moved_formulas_keep_pointing_at_the_same_cells(model):
 
 def test_reference_pushed_off_becomes_ref_error(model):
     model.set_cell(5, 3, "=A1+1")              # A1 is empty, so the shift is allowed
-    model.insert_cells(0, 0, 1, 0, "up")
+    assert model.insert_cells(2, 0, 3, 0, "up") is None  # A3:A4 up by two: rows 1-2 go off
     assert model.get_cell(5, 3) == "=#REF!+1"
 
 
@@ -158,10 +158,44 @@ def test_cancel_changes_nothing(window, dialogs):
 
 def test_no_room_shows_error(window, dialogs):
     load(window.model, DATA)
-    window.view.select_range(0, 0, 0, 0)
-    dialogs.insert_shift = "up"
+    window.view.select_range(1, 0, 1, 0)  # A2: shifting up would push a1 off the top
+    dialogs.insert_shift = "up"           # (the dialog disables this; the model checks anyway)
     assert not window.insert_cells()
     assert dialogs.errors and "no room" in dialogs.errors[0]
+
+
+@pytest.mark.parametrize("bounds, data, disabled", [
+    ((0, 1, 0, 2), [], {"up"}),                         # first row
+    ((1, 0, 2, 0), [], {"left"}),                       # first column
+    ((0, 0, 0, 0), [], {"up", "left"}),                 # A1
+    ((3, 3, 4, 4), [], set()),                          # room everywhere, nothing in the way
+    ((3, 3, 4, 4), [(0, 3)], {"up"}),                   # D1 would be pushed off the top
+    ((3, 3, 4, 4), [(3, 0)], {"left"}),                 # A4 would be pushed off the left
+    ((3, 3, 4, 4), [(0, 0)], set()),                    # A1 isn't in the way of either
+])
+def test_impossible_shifts_are_disabled(window, dialogs, bounds, data, disabled):
+    window.model.set_cells({cell: "x" for cell in data})
+    window.view.select_range(*bounds)
+    dialogs.insert_shift = None
+    window.insert_cells()
+    assert set(dialogs.insert_problems) == disabled
+
+
+def test_formats_count_as_in_the_way(window, dialogs):
+    window.model.set_styles({(0, 2): CellStyle(bold=True)}, "Bold")  # C1, empty but bold
+    window.view.select_range(2, 2, 2, 2)
+    dialogs.insert_shift = None
+    window.insert_cells()
+    assert set(dialogs.insert_problems) == {"up"}
+
+
+def test_dialog_disables_problem_choices(app):
+    dialog = InsertCellsDialog(shift="up", problems={"up": "first row", "left": "first column"})
+    assert not dialog.buttons["up"].isEnabled()
+    assert dialog.buttons["up"].toolTip() == "first row"
+    assert not dialog.buttons["left"].isEnabled()
+    assert dialog.buttons["down"].isEnabled() and dialog.buttons["right"].isEnabled()
+    assert dialog.shift() == "down"  # the remembered choice isn't available, so the first that is
 
 
 def test_dialog(app):

@@ -142,9 +142,10 @@ asks which way the cells in the way should go: down, right, up, or left.
   selected columns, down by the selection's height. **Right** moves the
   selected cells and everything to their right, in the selected rows, right by
   its width. The sheet grows if needed.
-- **Up** and **Left** work the same way toward the top or left edge. If that
-  would push anything (text, a format, or a style) off the sheet, nothing is
-  changed and a message says so.
+- **Up** and **Left** work the same way toward the top or left edge. They're
+  unavailable (greyed out in the dialog, with the reason shown when you hover)
+  when the selection is in the first row or column, or when shifting would
+  push anything (text, a format, or a style) off the sheet.
 - Formulas follow the cells they refer to: with numbers in A1:A5, inserting a
   cell at A3 turns `=SUM(A1:A5)` into `=SUM(A1:A6)`. This applies to `$`
   references too. A reference to a cell pushed off the sheet becomes `#REF!`.

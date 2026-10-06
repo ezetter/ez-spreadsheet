@@ -21,6 +21,7 @@ class Dialogs:
         self.save_prompts = 0
         self.errors = []
         self.insert_shift = "down"  # the Insert Cells dialog's answer; None cancels
+        self.insert_problems = None  # the choices it was told to disable
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,10 @@ def dialogs(monkeypatch):
         return dialogs.save_answer
 
     monkeypatch.setattr(MainWindow, "_ask_to_save", ask_to_save)
-    monkeypatch.setattr(MainWindow, "_ask_insert_shift", lambda window: dialogs.insert_shift)
+    def ask_insert_shift(window, problems):
+        dialogs.insert_problems = problems
+        return dialogs.insert_shift
+
+    monkeypatch.setattr(MainWindow, "_ask_insert_shift", ask_insert_shift)
     monkeypatch.setattr(MainWindow, "_show_error", lambda window, text, detail: dialogs.errors.append(detail))
     return dialogs
