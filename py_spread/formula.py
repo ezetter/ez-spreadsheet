@@ -115,6 +115,37 @@ def shift_references(formula: str, d_row: int, d_col: int) -> str:
     return "=" + "".join(pieces)
 
 
+def move_references(formula: str, move) -> str:
+    """Rewrite a formula's references for cells that have moved, such as when
+    cells are inserted. `move(row, col)` gives a cell's new (row, col), or None
+    if it has gone off the sheet (that reference becomes #REF!). Unlike
+    shift_references, $ anchors don't matter: a reference follows its cell.
+    References to cells that didn't move keep their text exactly."""
+    body = formula[1:]
+    try:
+        matches = _scan(body)
+    except FormulaError:
+        return formula
+    pieces = []
+    pos = 0
+    for match in matches:
+        if match.group("ref") is None:
+            continue
+        old = (int(match.group("row")) - 1, column_index(match.group("col")))
+        new = move(*old)
+        if new == old:
+            continue
+        if new is None or new[0] < 0 or new[1] < 0:
+            moved = REF_ERROR
+        else:
+            moved = f"{match.group('col_anchor')}{column_name(new[1])}{match.group('row_anchor')}{new[0] + 1}"
+        pieces.append(body[pos:match.start("ref")])
+        pieces.append(moved)
+        pos = match.end("ref")
+    pieces.append(body[pos:])
+    return "=" + "".join(pieces)
+
+
 def replace_function(formula: str, names, new_name: str) -> str | None:
     """If a formula (with its leading '=') is a single call to one of `names`,
     such as =SUM(A1:A9), return it calling `new_name` instead, with the

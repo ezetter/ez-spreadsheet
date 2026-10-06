@@ -12,6 +12,7 @@ from .formula import (
     evaluate,
     format_number,
     is_formula,
+    move_references,
     ordered_references,
     parse,
     parse_number,
@@ -22,6 +23,7 @@ from .textstyle import PLAIN, CellStyle
 from .references import column_name
 from .storage import SheetData
 
+SHIFTS = ("down", "right", "up", "left")
 DEFAULT_ROWS = 1000
 DEFAULT_COLS = 52
 UNDO_LIMIT = 1000
@@ -232,6 +234,46 @@ class SheetModel(QAbstractTableModel):
         self._inferred_formats.clear()
         self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
+
+    def insert_cells(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
+        """Insert blank cells in place of a block, shifting the cells there and
+        beyond `shift` ("down", "right", "up", or "left") by the block's size,
+        as one undoable step. Formulas follow the cells they refer to. Returns
+        a message if it can't be done (cells would be pushed off the sheet)."""
+        height, width = bottom - top + 1, right - left + 1
+
+        def move(row: int, col: int) -> tuple[int, int]:
+            in_columns, in_rows = left <= col <= right, top <= row <= bottom
+            if shift == "down" and in_columns and row >= top:
+                return row + height, col
+            if shift == "right" and in_rows and col >= left:
+                return row, col + width
+            if shift == "up" and in_columns and row <= bottom:
+                return row - height, col
+            if shift == "left" and in_rows and col <= right:
+                return row, col - width
+            return row, col
+
+        occupied = set(self._cells) | set(self._formats) | set(self._styles)
+        destinations = [move(*key) for key in occupied]
+        if any(row < 0 or col < 0 for row, col in destinations):
+            edge = "top" if shift == "up" else "left"
+            return f"There's no room: cells would be pushed off the {edge} of the sheet."
+        if destinations:
+            self.ensure_size(max(r for r, _ in destinations) + 1, max(c for _, c in destinations) + 1)
+
+        cells = {move(*key): move_references(text, move) if is_formula(text) else text
+                 for key, text in self._cells.items()}
+        formats = {move(*key): fmt for key, fmt in self._formats.items()}
+        styles = {move(*key): style for key, style in self._styles.items()}
+        keys = occupied | set(cells) | set(formats) | set(styles)
+        self.set_cells(
+            {key: cells.get(key, "") for key in keys},
+            "Insert Cells",
+            {key: formats.get(key) for key in keys},
+            {key: styles.get(key) for key in keys},
+        )
+        return None
 
     def ensure_size(self, rows: int, cols: int) -> None:
         """Grow the sheet, if needed, to at least `rows` by `cols`."""

@@ -133,6 +133,24 @@ Saves go to a temporary file that then replaces the original, so a failed save
 never leaves a half-written file. New files get your normal default
 permissions; saving over a file keeps its existing permissions.
 
+## Inserting cells
+
+Edit > Insert Cells… puts blank cells in place of the selection. A dialog
+asks which way the cells in the way should go: down, right, up, or left.
+
+- **Down** moves the selected cells and everything below them, in the
+  selected columns, down by the selection's height. **Right** moves the
+  selected cells and everything to their right, in the selected rows, right by
+  its width. The sheet grows if needed.
+- **Up** and **Left** work the same way toward the top or left edge. If that
+  would push anything (text, a format, or a style) off the sheet, nothing is
+  changed and a message says so.
+- Formulas follow the cells they refer to: with numbers in A1:A5, inserting a
+  cell at A3 turns `=SUM(A1:A5)` into `=SUM(A1:A6)`. This applies to `$`
+  references too. A reference to a cell pushed off the sheet becomes `#REF!`.
+- Number formats and bold/italic move with their cells. The whole insert is
+  one step that Undo reverses, and the dialog remembers your last choice.
+
 ## CSV import and export
 
 The File menu also has Import CSV… and Export CSV….
