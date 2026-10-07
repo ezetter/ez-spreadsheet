@@ -38,7 +38,7 @@ from .textstyle import PLAIN
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
-FILE_FILTER = f"Py-Spread Sheets (*{EXTENSION})"
+FILE_FILTER = f"EzSheet Sheets (*{EXTENSION})"
 COLUMN_WIDTH = 100  # default sizes at 100% zoom
 ROW_HEIGHT = 24
 ZOOM_LEVELS = (50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300)  # percent
@@ -1142,7 +1142,7 @@ class MainWindow(QMainWindow):
         self.file_path = path
         self.setWindowFilePath(path or "")
         name = os.path.basename(path) if path else "Untitled"
-        self.setWindowTitle(f"{name}[*] — Py-Spread")
+        self.setWindowTitle(f"{name}[*] — EzSheet")
 
     def _dialog_dir(self) -> str:
         if self.file_path:

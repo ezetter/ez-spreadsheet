@@ -175,7 +175,7 @@ def test_header_shows_name(model):
 
 
 def test_column_names_saved_and_loaded(tmp_path):
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(0, 2): "1"}, names={"x": (0, 1)}, column_names={"t": 2})
     save_sheet(path, sheet)
     assert json.loads(open(path).read())["column_names"] == {"t": "C"}
@@ -183,8 +183,8 @@ def test_column_names_saved_and_loaded(tmp_path):
 
 
 def test_conflicting_names_in_file(tmp_path):
-    path = tmp_path / "bad.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 6, "rows": 10, "columns": 5,
+    path = tmp_path / "bad.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 6, "rows": 10, "columns": 5,
                                 "cells": {}, "names": {"t5": "A1"}, "column_names": {"t": "C"}}))
     with pytest.raises(SheetFileError, match="don't work together"):
         load_sheet(str(path))

@@ -138,7 +138,7 @@ def test_replace_names(model):
 # --- Saving ---
 
 def test_names_saved_and_loaded(tmp_path):
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(1, 1): "3"}, names={"r": (1, 1), "gone": None})
     save_sheet(path, sheet)
     assert json.loads(open(path).read())["names"] == {"gone": None, "r": "B2"}
@@ -147,15 +147,15 @@ def test_names_saved_and_loaded(tmp_path):
 
 @pytest.mark.parametrize("bad", [{"sum": "A1"}, {"2r": "B2"}, {"a": "A1", "b": "A1"}, {"r": "nowhere"}])
 def test_bad_names_in_file(tmp_path, bad):
-    path = tmp_path / "bad.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 5, "rows": 10, "columns": 5,
+    path = tmp_path / "bad.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 5, "rows": 10, "columns": 5,
                                 "cells": {}, "names": bad}))
     with pytest.raises(SheetFileError):
         load_sheet(str(path))
 
 
 def test_loading_restores_names(app, tmp_path):
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     save_sheet(path, SheetData(10, 5, {(1, 1): "4", (0, 0): "=r^2"}, names={"r": (1, 1)}))
     model = SheetModel()
     model.load_sheet_data(load_sheet(path))

@@ -1,10 +1,10 @@
-"""Reading and writing sheets as .pysheet files.
+"""Reading and writing sheets as .ezs files.
 
-A .pysheet file is JSON holding each non-empty cell's raw text (formulas
+A .ezs file is JSON holding each non-empty cell's raw text (formulas
 included) keyed by its A1 name, and the unit SIN, COS, and TAN take angles in:
 
     {
-      "format": "py-spread",
+      "format": "ezsheet",
       "version": 6,
       "rows": 1000,
       "columns": 52,
@@ -29,9 +29,9 @@ from .numformat import NumberFormat
 from .textstyle import CellStyle
 from .references import cell_name, column_index, column_name, parse_cell_name
 
-FORMAT = "py-spread"
+FORMAT = "ezsheet"
 VERSION = 6  # 2 added number formats; 3 bold and italic; 4 the angle unit; 5 cell names; 6 column names
-EXTENSION = ".pysheet"
+EXTENSION = ".ezs"
 
 
 class SheetFileError(Exception):
@@ -117,13 +117,13 @@ def load_sheet(path: str) -> SheetData:
     except OSError as e:
         raise SheetFileError(f"Couldn't open {path}: {e.strerror or e}") from e
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise SheetFileError(f"{path} isn't a Py-Spread sheet (it isn't valid JSON).") from e
+        raise SheetFileError(f"{path} isn't an EzSheet sheet (it isn't valid JSON).") from e
 
     if not isinstance(document, dict) or document.get("format") != FORMAT:
-        raise SheetFileError(f"{path} isn't a Py-Spread sheet.")
+        raise SheetFileError(f"{path} isn't an EzSheet sheet.")
     version = document.get("version")
     if not isinstance(version, int) or version > VERSION:
-        raise SheetFileError(f"{path} was saved by a newer version of Py-Spread.")
+        raise SheetFileError(f"{path} was saved by a newer version of EzSheet.")
 
     rows = document.get("rows")
     cols = document.get("columns")

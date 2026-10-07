@@ -124,7 +124,7 @@ def test_choosing_the_current_unit_is_not_a_step(sheet):
 # --- Files ---
 
 def test_unit_is_saved_and_loaded(tmp_path):
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(0, 0): "=SIN(PI)"}, angle_unit=RADIANS)
     save_sheet(path, sheet)
     assert json.loads(open(path).read())["angles"] == "radians"
@@ -132,16 +132,16 @@ def test_unit_is_saved_and_loaded(tmp_path):
 
 
 def test_files_without_a_unit_are_degrees(tmp_path):
-    path = tmp_path / "old.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 3, "rows": 10, "columns": 5,
+    path = tmp_path / "old.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 3, "rows": 10, "columns": 5,
                                 "cells": {"A1": "=SIN(30)"}}))
     assert load_sheet(str(path)).angle_unit == DEGREES
 
 
 @pytest.mark.parametrize("angles", ["gradians", "RADIANS", None, 1])
 def test_bad_unit_in_file(tmp_path, angles):
-    path = tmp_path / "bad.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 4, "rows": 10, "columns": 5,
+    path = tmp_path / "bad.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 4, "rows": 10, "columns": 5,
                                 "angles": angles, "cells": {}}))
     with pytest.raises(SheetFileError):
         load_sheet(str(path))
@@ -201,7 +201,7 @@ def test_toolbar_button_toggles_and_undo_follows(window):
 
 
 def test_save_and_open_keep_the_unit(window, tmp_path):
-    path = str(tmp_path / "trig.pysheet")
+    path = str(tmp_path / "trig.ezs")
     window.model.set_cell(0, 0, "=SIN(PI/2)")
     window.set_angle_unit(RADIANS)
     assert window.save_to(path)

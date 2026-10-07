@@ -1,4 +1,4 @@
-# Py-Spread
+# EzSheet
 
 A desktop spreadsheet written in Python with PySide6 (Qt), using NumPy for
 calculations and Matplotlib for charts.
@@ -28,7 +28,7 @@ Or activate the environment first (`source .venv/bin/activate`), after which
 To open a saved sheet directly:
 
 ```bash
-.venv/bin/python -m py_spread budget.pysheet
+.venv/bin/python -m py_spread budget.ezs
 ```
 
 If the file doesn't exist yet, you get an empty sheet with that name, and Save
@@ -58,9 +58,9 @@ isn't saved with the sheet.
 
 ## Dark mode
 
-Py-Spread follows the Mac's light or dark appearance. To override it, choose
+EzSheet follows the Mac's light or dark appearance. To override it, choose
 View > Appearance > Light or Dark (or Match System to follow the Mac again);
-the choice is remembered the next time you open Py-Spread. Everything
+the choice is remembered the next time you open EzSheet. Everything
 switches: the grid (with soft grid lines in either mode), toolbar, menus,
 dialogs, the Ask Claude window, and open charts, which redraw with a dark
 background and brighter line colors.
@@ -136,7 +136,7 @@ the work it has done.
   "Fill a row with degrees 0 to 360 in steps of 10, with their cosines, sines,
   and cosines squared in the rows below." Unless you say where, it starts at
   the top-left of your selection. When values follow from other cells it
-  writes Py-Spread formulas (such as `=COS(A1)`), so the sheet stays live. It
+  writes EzSheet formulas (such as `=COS(A1)`), so the sheet stays live. It
   can read any part of the sheet first, and is told not to overwrite data you
   haven't asked it to. Each fill is one step that Undo reverses ("Undo Claude
   Fill"), and the filled cells are selected so you can see them.
@@ -147,7 +147,7 @@ the work it has done.
   window; charts are deleted from Anthropic's storage once downloaded. Stop
   cancels an answer in progress.
 - It needs a Claude API key, which is billed by Anthropic. Set
-  `ANTHROPIC_API_KEY` in the terminal before starting Py-Spread (for example
+  `ANTHROPIC_API_KEY` in the terminal before starting EzSheet (for example
   in `~/.zshrc`), or log in with Anthropic's `ant` tool (`ant auth login`).
   Without one, the window explains how to set it up.
 
@@ -170,13 +170,13 @@ The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As
 (Cmd+Shift+S). The window title shows the file name, and you're asked before
 unsaved changes are discarded by New, Open, or closing the window.
 
-Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
+Sheets are saved as `.ezs` files: JSON holding each cell's raw text
 (formulas, not their results) under its cell name, the angle unit for `SIN`,
 `COS`, and `TAN`, and any number formats and bold/italic styles, e.g.
 
 ```json
 {
-  "format": "py-spread",
+  "format": "ezsheet",
   "version": 6,
   "rows": 1000,
   "columns": 52,
@@ -331,7 +331,7 @@ is copied elsewhere. The cell bar shows a named cell as, for example, `B2 (r)`.
   `Pi`).
 - A name can look like a cell reference, such as `A1`. Then a bare `A1` in a
   formula means the name, and the cell is written with a `$`: `$A1`, `A$1`,
-  or `$A$1`. Ranges (`A1:A9`) always mean cells. When Py-Spread writes a cell
+  or `$A$1`. Ranges (`A1:A9`) always mean cells. When EzSheet writes a cell
   reference for you (pasting, inserting or deleting cells, clicking a cell
   while typing a formula, AutoSum) and it would be spelled like a name, it
   adds the `$` so the reference still means the cell.

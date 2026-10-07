@@ -140,7 +140,7 @@ def test_circular_reference_does_not_break_formats(model):
 # --- Saving ---
 
 def test_formats_saved_and_loaded(tmp_path):
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(0, 0): "5"}, {(0, 0): CURRENCY, (3, 3): NumberFormat("number", 1, False)})
     save_sheet(path, sheet)
     document = json.loads(open(path).read())
@@ -149,15 +149,15 @@ def test_formats_saved_and_loaded(tmp_path):
 
 
 def test_version_1_files_still_open(tmp_path):
-    path = tmp_path / "old.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 1, "rows": 10, "columns": 5,
+    path = tmp_path / "old.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 1, "rows": 10, "columns": 5,
                                 "cells": {"A1": "x"}}))
     assert load_sheet(str(path)) == SheetData(10, 5, {(0, 0): "x"})
 
 
 def test_bad_format_in_file(tmp_path):
-    path = tmp_path / "bad.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 2, "rows": 10, "columns": 5,
+    path = tmp_path / "bad.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 2, "rows": 10, "columns": 5,
                                 "cells": {}, "formats": {"A1": {"kind": "percent"}}}))
     with pytest.raises(SheetFileError):
         load_sheet(str(path))
@@ -291,7 +291,7 @@ def test_csv_round_trip_keeps_dollars(window, tmp_path):
 def test_save_and_open_keeps_formats(window, tmp_path):
     window.model.set_cell(0, 0, "5")
     window.model.set_formats({(0, 0): CURRENCY}, "Currency Format")
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     window.save_to(path)
     other = MainWindow()
     other.open_path(path)

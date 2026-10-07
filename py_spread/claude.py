@@ -43,7 +43,7 @@ MAX_READ_CELLS = 10_000  # per read_cells call
 PREVIEW_ROWS = 5  # rows of a write shown back to Claude, to check its formulas
 
 FORMULA_LANGUAGE = """\
-Py-Spread's formulas start with = and use + - * / ^ and parentheses. ^ binds \
+EzSheet's formulas start with = and use + - * / ^ and parentheses. ^ binds \
 tighter than unary minus (-2^2 is -4) and is right-associative. References \
 look like A1 or $A$1; ranges like A1:B9 can only be function arguments. The \
 only functions are SUM, MEAN, MEDIAN, and STDDEV (sample standard deviation), \
@@ -63,7 +63,7 @@ doesn't start with = is stored as typed; numbers may include a dollar sign and \
 thousands separators ($1,234.50), and keep that style."""
 
 SYSTEM_PROMPT = f"""\
-You're a data analyst helping someone who is using Py-Spread, a desktop \
+You're a data analyst helping someone who is using EzSheet, a desktop \
 spreadsheet. They've selected some cells and either asked about them or asked \
 you to put something in the sheet.
 
@@ -121,7 +121,7 @@ WRITE_TOOL = {
     "description": (
         "Write a block of cells into the sheet, starting at `start` and filling rightward and "
         "downward: rows[0] goes in start's row, rows[1] in the row below, and so on. Each "
-        "value is a string: a number, text, or a Py-Spread formula starting with =. An empty "
+        "value is a string: a number, text, or an EzSheet formula starting with =. An empty "
         "string empties that cell. The write takes effect immediately as one step the user can "
         "undo. Returns the range written, any cells showing errors, and the first rows as "
         f"displayed. At most {MAX_WRITE_CELLS:,} cells per call."
@@ -143,8 +143,8 @@ WRITE_TOOL = {
 }
 
 CREDENTIALS_HELP = (
-    "Py-Spread couldn't find Claude API credentials.\n\n"
-    "Set your API key in the terminal before starting Py-Spread, for example by adding "
+    "EzSheet couldn't find Claude API credentials.\n\n"
+    "Set your API key in the terminal before starting EzSheet, for example by adding "
     "`export ANTHROPIC_API_KEY=...` to `~/.zshrc`, then open a new terminal and run "
     "`.venv/bin/python -m py_spread`. Or install Anthropic's `ant` command-line tool and "
     "run `ant auth login`. You can create an API key at platform.claude.com."
@@ -413,7 +413,7 @@ class ClaudeSession:
                     if message.stop_reason == "max_tokens" else "")
             listener.finished(note)
             return
-        listener.finished("Claude was still working when Py-Spread stopped waiting. "
+        listener.finished("Claude was still working when EzSheet stopped waiting. "
                           "Ask it to continue if you want more.")
 
     def _stream_turn(self, listener: Listener):

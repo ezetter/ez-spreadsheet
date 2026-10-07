@@ -20,7 +20,7 @@ SETTINGS_KEY = "appearance"
 
 def settings() -> QSettings:
     """Where app preferences are kept (not per sheet)."""
-    return QSettings("Py-Spread", "Py-Spread")
+    return QSettings("EzSheet", "EzSheet")
 
 
 def saved_appearance() -> str:

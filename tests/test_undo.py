@@ -191,7 +191,7 @@ def test_undo_fill(window):
 def test_undo_back_to_saved_state_is_unmodified(window, tmp_path):
     model = window.model
     model.set_cell(0, 0, "saved")
-    assert window.save_to(str(tmp_path / "s.pysheet"))
+    assert window.save_to(str(tmp_path / "s.ezs"))
     assert not window.isWindowModified()
     model.set_cell(0, 0, "changed")
     assert window.isWindowModified()
@@ -217,7 +217,7 @@ def test_cmd_z_while_typing_undoes_text_not_cells(window, app):
 
 def test_open_clears_history(window, tmp_path):
     from py_spread.storage import save_sheet
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     save_sheet(path, SheetData(1000, 52, {(0, 0): "file"}))
     window.model.set_cell(0, 0, "x")
     window.setWindowModified(False)

@@ -53,7 +53,7 @@ def test_style_is_undoable(model):
 
 
 def test_styles_saved_and_loaded(tmp_path):
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(0, 0): "x"}, styles={(0, 0): BOLD, (2, 3): CellStyle(True, True)})
     save_sheet(path, sheet)
     document = json.loads(open(path).read())
@@ -63,8 +63,8 @@ def test_styles_saved_and_loaded(tmp_path):
 
 
 def test_bad_style_in_file(tmp_path):
-    path = tmp_path / "bad.pysheet"
-    path.write_text(json.dumps({"format": "py-spread", "version": 3, "rows": 10, "columns": 5,
+    path = tmp_path / "bad.ezs"
+    path.write_text(json.dumps({"format": "ezsheet", "version": 3, "rows": 10, "columns": 5,
                                 "cells": {}, "styles": {"A1": {"underline": True}}}))
     with pytest.raises(SheetFileError):
         load_sheet(str(path))
@@ -186,7 +186,7 @@ def test_fill_copies_first_cells_style(window):
 def test_save_and_open_keeps_styles(window, tmp_path):
     window.model.set_cell(0, 0, "x")
     window.model.set_styles({(0, 0): BOLD}, "Bold")
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     window.save_to(path)
     other = MainWindow()
     other.open_path(path)

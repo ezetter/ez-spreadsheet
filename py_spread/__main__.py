@@ -8,11 +8,11 @@ from .window import MainWindow
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="py_spread", description="A Python spreadsheet.")
-    parser.add_argument("file", nargs="?", help="a .pysheet file to open, or to create when first saved")
+    parser.add_argument("file", nargs="?", help="a .ezs file to open, or to create when first saved")
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Py-Spread")
+    app.setApplicationName("EzSheet")
     window = MainWindow()
     window.show()
     if args.file:

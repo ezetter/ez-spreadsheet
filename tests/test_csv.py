@@ -144,7 +144,7 @@ def test_import_then_save_keeps_bigger_size(window, tmp_path):
     from py_spread.storage import load_sheet
     data = b"\n".join(b"x" for _ in range(1500)) + b"\n"
     window.import_csv_from(write_bytes(tmp_path, data))
-    sheet_path = str(tmp_path / "big.pysheet")
+    sheet_path = str(tmp_path / "big.ezs")
     window.save_to(sheet_path)
     assert load_sheet(sheet_path).rows == 1500
 

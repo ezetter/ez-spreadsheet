@@ -180,7 +180,7 @@ def test_opening_a_sheet_closes_charts(window, tmp_path, app):
     fill(window, DATA)
     window.view.select_range(0, 0, 3, 1)
     window.make_chart()
-    path = str(tmp_path / "s.pysheet")
+    path = str(tmp_path / "s.ezs")
     save_sheet(path, SheetData(10, 5))
     window.setWindowModified(False)
     window.open_path(path)
