@@ -57,7 +57,7 @@ def test_styles_saved_and_loaded(tmp_path):
     sheet = SheetData(10, 5, {(0, 0): "x"}, styles={(0, 0): BOLD, (2, 3): CellStyle(True, True)})
     save_sheet(path, sheet)
     document = json.loads(open(path).read())
-    assert document["version"] == 4
+    assert document["version"] == 5
     assert document["styles"] == {"A1": {"bold": True}, "D3": {"bold": True, "italic": True}}
     assert load_sheet(path) == sheet
 

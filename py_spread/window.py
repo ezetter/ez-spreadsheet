@@ -8,6 +8,7 @@ from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -29,6 +30,7 @@ from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
+from .names_dialog import NameCellDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
@@ -313,6 +315,7 @@ class MainWindow(QMainWindow):
         self.view.cell_delegate.editor_created.connect(self._on_editor_created)
         self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
+        self.model.names_changed.connect(self._show_current_name)
         self.model.contents_changed.connect(lambda: self.setWindowModified(True))
         # Undoing back to the saved state makes the sheet unmodified again.
         # (Bound methods, not lambdas: Qt disconnects them when the window is
@@ -398,6 +401,7 @@ class MainWindow(QMainWindow):
         menu.addAction(self.delete_cells_action)
         menu.addSeparator()
         menu.addMenu(self.fill_menu)
+        menu.addAction(self.name_cell_action)
         menu.addSeparator()
         menu.addAction(self.ask_claude_action)
         self.context_menu = menu
@@ -586,6 +590,47 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, u=unit: self.set_angle_unit(u))
             menu.addAction(action)
             self.angle_actions[unit] = action
+
+        menu.addSeparator()
+        self.name_cell_action = QAction("Name Cell…", self)
+        self.name_cell_action.triggered.connect(lambda _checked=False: self.name_cell())
+        menu.addAction(self.name_cell_action)
+        self.names_action = QAction("Names…", self)
+        self.names_action.triggered.connect(lambda _checked=False: self.edit_names())
+        menu.addAction(self.names_action)
+
+    def name_cell(self) -> bool:
+        """Name the current cell, so formulas can use the name in place of
+        its reference (=PI*r^2). Its current name can be changed or removed."""
+        self._commit_pending_edit()
+        index = self.view.currentIndex()
+        name = self._ask_cell_name(index.row(), index.column())
+        if name is None:
+            return False
+        problem = self.model.name_cell(index.row(), index.column(), name)
+        if problem:  # (the dialog checks first; this is a safeguard)
+            self._show_error("Couldn't name the cell.", problem)
+            return False
+        return True
+
+    def _ask_cell_name(self, row: int, col: int) -> str | None:
+        """The name chosen in the Name Cell dialog, or None if cancelled."""
+        dialog = NameCellDialog(self.model, row, col, self)
+        return dialog.chosen_name() if dialog.exec() == QDialog.Accepted else None
+
+    def edit_names(self) -> bool:
+        """Show every cell name, to rename, redefine, add, or delete."""
+        self._commit_pending_edit()
+        chosen = self._ask_names()
+        if chosen is None:
+            return False
+        self.model.replace_names(chosen, "Edit Names")
+        return True
+
+    def _ask_names(self) -> dict | None:
+        """The names as left in the Names dialog, or None if cancelled."""
+        dialog = NamesDialog(self.model, self)
+        return dialog.chosen_names() if dialog.exec() == QDialog.Accepted else None
 
     def set_angle_unit(self, unit: str):
         """Make SIN, COS, and TAN take angles in `unit` (DEGREES or RADIANS)."""
@@ -1122,13 +1167,19 @@ class MainWindow(QMainWindow):
                 and top_left.column() <= current.column() <= bottom_right.column()):
             self._refresh_bar(current)
 
+    def _show_current_name(self):
+        if not self.edit_bar.hasFocus():  # don't clobber text being typed in the bar
+            self._refresh_bar(self.view.currentIndex())
+
     def _refresh_bar(self, index):
         self._bar_refs.reset()
         if not index.isValid():
             self.cell_label.setText("")
             self.edit_bar.setText("")
             return
-        self.cell_label.setText(cell_name(index.row(), index.column()))
+        name = self.model.name_of(index.row(), index.column())
+        reference = cell_name(index.row(), index.column())
+        self.cell_label.setText(f"{reference} ({name})" if name else reference)
         self.edit_bar.setText(self.model.get_cell(index.row(), index.column()))
 
     def _store_edit_bar(self):

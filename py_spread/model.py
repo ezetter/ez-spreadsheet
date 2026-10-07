@@ -19,9 +19,10 @@ from .formula import (
     references,
 )
 from .functions import DEGREES
+from . import names
 from .numformat import NumberFormat, format_value, parse_formatted
 from .textstyle import PLAIN, CellStyle
-from .references import column_name
+from .references import cell_name, column_name
 from .storage import SheetData
 
 SHIFTS = ("down", "right", "up", "left")
@@ -32,8 +33,8 @@ UNDO_LIMIT = 1000
 
 class _CellsCommand(QUndoCommand):
     """One undoable change: the raw text, number formats, and text styles of
-    some cells, before and after, each as a (texts, formats, styles) tuple of
-    dicts."""
+    some cells, and cell names, before and after, each as a (texts, formats,
+    styles, names) tuple of dicts."""
 
     def __init__(self, model, before: tuple, after: tuple, description: str):
         super().__init__(description)
@@ -78,6 +79,8 @@ class SheetModel(QAbstractTableModel):
 
     # Emitted when cell contents are edited (not when a whole sheet is loaded).
     contents_changed = Signal()
+    # Emitted when cell names are added, changed, or removed (or a sheet is loaded).
+    names_changed = Signal()
     # Emitted with the (row, col) cells an undo or redo changed.
     history_applied = Signal(list)
     # Emitted with the angle unit when it's switched or a sheet is loaded.
@@ -97,6 +100,9 @@ class SheetModel(QAbstractTableModel):
         self._formats: dict[tuple[int, int], NumberFormat] = {}
         # Bold and italic, for cells that aren't plain.
         self._styles: dict[tuple[int, int], CellStyle] = {}
+        # Cell names, by names.key(name): (the name as typed, the (row, col) it
+        # names, or None if that cell was deleted).
+        self._names: dict[str, tuple[str, tuple[int, int] | None]] = {}
         # Formats formula cells take from the cells they refer to. Cleared on every edit.
         self._inferred_formats: dict[tuple[int, int], NumberFormat | None] = {}
         # What SIN, COS, and TAN take angles in: DEGREES or RADIANS.
@@ -161,11 +167,13 @@ class SheetModel(QAbstractTableModel):
 
     def set_cells(self, writes: dict[tuple[int, int], object], description: str = "Edit",
                   formats: dict[tuple[int, int], NumberFormat | None] | None = None,
-                  styles: dict[tuple[int, int], CellStyle | None] | None = None) -> None:
+                  styles: dict[tuple[int, int], CellStyle | None] | None = None,
+                  names: dict[str, tuple | None] | None = None) -> None:
         """Set many cells' text, and optionally their number formats and text
-        styles (None removes one), as one undoable step, recalculating and
-        notifying views a single time. `description` names the step in the
-        Undo menu."""
+        styles, and cell names (each keyed by names.key(name), as (name,
+        cell) entries), where None removes one, as one undoable step,
+        recalculating and notifying views a single time. `description` names
+        the step in the Undo menu."""
         before, after = {}, {}
         for key, value in writes.items():
             text = "" if value is None else str(value)
@@ -176,10 +184,11 @@ class SheetModel(QAbstractTableModel):
         formats_before, formats_after = _changes(self._formats, formats)
         styles_before, styles_after = _changes(self._styles, {
             key: None if style == PLAIN else style for key, style in (styles or {}).items()})
-        if after or formats_after or styles_after:
+        names_before, names_after = _changes(self._names, names)
+        if after or formats_after or styles_after or names_after:
             self.undo_stack.push(_CellsCommand(
-                self, (before, formats_before, styles_before),
-                (after, formats_after, styles_after), description))
+                self, (before, formats_before, styles_before, names_before),
+                (after, formats_after, styles_after, names_after), description))
 
     def set_formats(self, formats: dict[tuple[int, int], NumberFormat | None], description: str) -> None:
         self.set_cells({}, description, formats)
@@ -211,7 +220,8 @@ class SheetModel(QAbstractTableModel):
         if self._formula_keys:
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
 
-    def _apply(self, texts: dict, formats: dict, styles: dict, from_history: bool = False) -> None:
+    def _apply(self, texts: dict, formats: dict, styles: dict, names: dict,
+               from_history: bool = False) -> None:
         changed = {key for key, text in texts.items() if self._store(key, text)}
         for table, updates in ((self._formats, formats), (self._styles, styles)):
             for key, value in updates.items():
@@ -221,6 +231,24 @@ class SheetModel(QAbstractTableModel):
                     else:
                         table[key] = value
                     changed.add(key)
+        renamed = False
+        for name_key, entry in names.items():
+            old = self._names.get(name_key)
+            if old != entry:
+                # The cells named before and after count as changed, for selecting.
+                for named in (old, entry):
+                    if named is not None and named[1] is not None:
+                        changed.add(named[1])
+                if entry is None:
+                    del self._names[name_key]
+                else:
+                    self._names[name_key] = entry
+                renamed = True
+        if renamed:
+            self._parsed.clear()  # formulas resolve names when parsed
+            self.names_changed.emit()
+            if not changed:
+                changed = {(0, 0)}  # a name of a deleted cell: still refresh
         if not changed:
             return
         changed = sorted(changed)
@@ -257,7 +285,8 @@ class SheetModel(QAbstractTableModel):
 
     def sheet_data(self) -> SheetData:
         return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats),
-                         dict(self._styles), self._angle_unit)
+                         dict(self._styles), self._angle_unit,
+                         {name: cell for name, cell in self._names.values()})
 
     def load_sheet_data(self, sheet: SheetData) -> None:
         """Replace the whole sheet, including its size."""
@@ -269,12 +298,14 @@ class SheetModel(QAbstractTableModel):
         self._formats = dict(sheet.formats)
         self._styles = dict(sheet.styles)
         self._angle_unit = sheet.angle_unit
+        self._names = {names.key(name): (name, cell) for name, cell in sheet.names.items()}
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
         self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
         self.angle_unit_changed.emit(self._angle_unit)
+        self.names_changed.emit()
 
     def insert_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
         """Why blank cells can't be inserted in place of a block with this
@@ -383,12 +414,62 @@ class SheetModel(QAbstractTableModel):
                 if (dest := move(*key)) is not None:
                     moved[dest] = value
         keys = occupied | set(cells) | set(formats) | set(styles)
+        # Names follow their cells; a deleted cell's name is kept, as #REF!.
+        moved_names = {name_key: (name, move(*cell) if cell else None)
+                       for name_key, (name, cell) in self._names.items()}
         self.set_cells(
             {key: cells.get(key, "") for key in keys},
             description,
             {key: formats.get(key) for key in keys},
             {key: styles.get(key) for key in keys},
+            moved_names,
         )
+
+    # --- Cell names ---
+
+    def cell_names(self) -> dict[str, tuple[int, int] | None]:
+        """Every name, as typed, and the cell it names (None: deleted)."""
+        return {name: cell for name, cell in sorted(self._names.values(), key=lambda e: e[0].upper())}
+
+    def name_of(self, row: int, col: int) -> str | None:
+        """The cell's name, if it has one."""
+        return next((name for name, cell in self._names.values() if cell == (row, col)), None)
+
+    def name_problem(self, name: str, cell: tuple[int, int]) -> str | None:
+        """Why `cell` can't be given `name`, or None if it can."""
+        problem = names.syntax_problem(name)
+        if problem:
+            return problem
+        existing = self._names.get(names.key(name))
+        if existing and existing[1] != cell:
+            where = cell_name(*existing[1]) if existing[1] else "a deleted cell"
+            return f"{existing[0]} already names {where}."
+        return None
+
+    def name_cell(self, row: int, col: int, name: str) -> str | None:
+        """Give the cell `name`, replacing any name it had; an empty name
+        removes its name. One undoable step. Returns a problem, if any."""
+        name = name.strip()
+        current = self.name_of(row, col)
+        if name:
+            problem = self.name_problem(name, (row, col))
+            if problem:
+                return problem
+        changes = {}
+        if current:
+            changes[names.key(current)] = None
+        if name:
+            changes[names.key(name)] = (name, (row, col))
+        description = "Remove Name" if not name else ("Rename Cell" if current else "Name Cell")
+        self.set_cells({}, description, names=changes)
+        return None
+
+    def replace_names(self, new_names: dict[str, tuple[int, int] | None], description: str) -> None:
+        """Make the sheet's names exactly `new_names` (name -> cell), as one
+        undoable step. The caller checks them first (see name_problem)."""
+        changes = {name_key: None for name_key in self._names}
+        changes.update({names.key(name): (name, cell) for name, cell in new_names.items()})
+        self.set_cells({}, description, names=changes)
 
     def ensure_size(self, rows: int, cols: int) -> None:
         """Grow the sheet, if needed, to at least `rows` by `cols`."""
@@ -481,7 +562,7 @@ class SheetModel(QAbstractTableModel):
     def _parse(self, key):
         if key not in self._parsed:
             try:
-                ast = parse(self._cells[key][1:])
+                ast = parse(self._cells[key][1:], {k: cell for k, (_, cell) in self._names.items()})
                 self._parsed[key] = (ast, *references(ast))
             except FormulaError as e:
                 self._parsed[key] = (CellError(e.code), set(), [])

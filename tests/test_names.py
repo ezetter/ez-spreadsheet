@@ -1,0 +1,264 @@
+import json
+
+import pytest
+
+from py_spread import names
+from py_spread.model import SheetModel
+from py_spread.names_dialog import DELETED, NameCellDialog, NamesDialog
+from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from py_spread.window import MainWindow
+
+
+@pytest.fixture
+def model(app):
+    model = SheetModel(rows=20, cols=6)
+    model.set_cell(1, 1, "3")  # B2
+    return model
+
+
+# --- Rules ---
+
+@pytest.mark.parametrize("name, problem", [
+    ("r", None), ("tax_rate", None), ("_x", None), ("Radius2b", None),
+    ("", "Enter a name"),
+    ("2r", "must start with a letter"),
+    ("my rate", "must start with a letter"),
+    ("x1", "looks like a cell reference"),
+    ("AB12", "looks like a cell reference"),
+    ("sum", "is a function"),
+    ("Pi", "is a constant"),
+    ("a" * 65, "at most 64"),
+])
+def test_syntax(name, problem):
+    found = names.syntax_problem(name)
+    assert (found is None) if problem is None else (problem in found)
+
+
+# --- In formulas ---
+
+def test_name_in_formula(model):
+    assert model.name_cell(1, 1, "r") is None
+    model.set_cell(0, 0, "=PI*r^2")
+    assert model.value(0, 0) == pytest.approx(3.141592653589793 * 9)
+    model.set_cell(1, 1, "2")  # recalculates through the name
+    assert model.value(0, 0) == pytest.approx(3.141592653589793 * 4)
+
+
+def test_names_are_case_insensitive(model):
+    model.name_cell(1, 1, "Rate")
+    model.set_cell(0, 0, "=rate*RATE")
+    assert model.display_text(0, 0) == "9"
+    assert "already names B2" in model.name_problem("RATE", (4, 4))
+
+
+def test_name_is_a_fixed_reference_when_copied(app):
+    from py_spread.window import MainWindow
+    window = MainWindow()
+    model = window.model
+    model.set_cells({(1, 1): "3", (0, 0): "=r*2"})
+    model.name_cell(1, 1, "r")
+    window.view.select_range(0, 0, 0, 0)
+    window.clipboard.copy()
+    window.view.select_range(5, 3, 5, 3)
+    window.clipboard.paste()
+    assert model.get_cell(5, 3) == "=r*2" and model.display_text(5, 3) == "6"
+    window.setWindowModified(False)
+
+
+def test_unknown_name_is_name_error(model):
+    model.set_cell(0, 0, "=nothing+1")
+    assert model.display_text(0, 0) == "#NAME?"
+
+
+def test_name_can_be_used_in_functions(model):
+    model.set_cells({(2, 1): "5"})
+    model.name_cell(2, 1, "b")
+    model.name_cell(1, 1, "a")
+    model.set_cell(0, 0, "=SUM(a, b) + POW(b, 2)")
+    assert model.display_text(0, 0) == "33"
+
+
+def test_one_name_per_cell_and_renaming(model):
+    model.set_cell(0, 0, "=r+1")
+    model.name_cell(1, 1, "r")
+    assert model.name_cell(1, 1, "radius") is None
+    assert model.cell_names() == {"radius": (1, 1)}
+    assert model.display_text(0, 0) == "#NAME?"  # the old name is gone
+    model.name_cell(1, 1, "")
+    assert model.cell_names() == {} and model.name_of(1, 1) is None
+
+
+def test_reusing_a_name_is_refused(model):
+    model.name_cell(1, 1, "r")
+    assert "already names B2" in model.name_cell(4, 4, "r")
+    assert model.cell_names() == {"r": (1, 1)}
+
+
+def test_naming_is_undoable(model):
+    model.set_cell(0, 0, "=r*10")
+    model.name_cell(1, 1, "r")
+    assert model.display_text(0, 0) == "30"
+    assert model.undo_stack.undoText() == "Name Cell"
+    model.undo_stack.undo()
+    assert model.cell_names() == {} and model.display_text(0, 0) == "#NAME?"
+    model.undo_stack.redo()
+    assert model.display_text(0, 0) == "30"
+
+
+def test_names_move_with_inserted_cells(model):
+    model.set_cell(0, 3, "=r*2")
+    model.name_cell(1, 1, "r")
+    model.insert_cells(0, 1, 0, 1, "down")  # B2 moves to B3
+    assert model.cell_names() == {"r": (2, 1)}
+    assert model.display_text(0, 3) == "6"
+    model.undo_stack.undo()
+    assert model.cell_names() == {"r": (1, 1)}
+
+
+def test_deleting_the_named_cell_gives_ref_error(model):
+    model.set_cell(0, 3, "=r*2")
+    model.name_cell(1, 1, "r")
+    model.delete_cells(1, 1, 1, 1, "up")
+    assert model.cell_names() == {"r": None}
+    assert model.display_text(0, 3) == "#REF!"
+
+
+def test_replace_names(model):
+    model.set_cells({(2, 2): "10", (0, 0): "=a+b"})
+    model.name_cell(1, 1, "a")
+    model.replace_names({"a": (2, 2), "b": (1, 1)}, "Edit Names")
+    assert model.display_text(0, 0) == "13"
+    model.undo_stack.undo()
+    assert model.cell_names() == {"a": (1, 1)}
+
+
+# --- Saving ---
+
+def test_names_saved_and_loaded(tmp_path):
+    path = str(tmp_path / "s.pysheet")
+    sheet = SheetData(10, 5, {(1, 1): "3"}, names={"r": (1, 1), "gone": None})
+    save_sheet(path, sheet)
+    assert json.loads(open(path).read())["names"] == {"gone": None, "r": "B2"}
+    assert load_sheet(path) == sheet
+
+
+@pytest.mark.parametrize("bad", [{"x1": "A1"}, {"r": "A1", "R": "B2"}, {"a": "A1", "b": "A1"}, {"r": "nowhere"}])
+def test_bad_names_in_file(tmp_path, bad):
+    path = tmp_path / "bad.pysheet"
+    path.write_text(json.dumps({"format": "py-spread", "version": 5, "rows": 10, "columns": 5,
+                                "cells": {}, "names": bad}))
+    with pytest.raises(SheetFileError):
+        load_sheet(str(path))
+
+
+def test_loading_restores_names(app, tmp_path):
+    path = str(tmp_path / "s.pysheet")
+    save_sheet(path, SheetData(10, 5, {(1, 1): "4", (0, 0): "=r^2"}, names={"r": (1, 1)}))
+    model = SheetModel()
+    model.load_sheet_data(load_sheet(path))
+    assert model.display_text(0, 0) == "16"
+
+
+# --- Dialogs ---
+
+def test_name_cell_dialog(model):
+    dialog = NameCellDialog(model, 1, 1)
+    ok = dialog.buttons.button(dialog.buttons.StandardButton.Ok)
+    assert not ok.isEnabled()
+    dialog.name.setText("x1")
+    assert not ok.isEnabled() and "cell reference" in dialog.note.text()
+    dialog.name.setText("radius")
+    assert ok.isEnabled() and dialog.chosen_name() == "radius"
+
+
+def test_name_cell_dialog_existing_name(model):
+    model.name_cell(1, 1, "r")
+    model.name_cell(2, 2, "taken")
+    dialog = NameCellDialog(model, 1, 1)
+    assert dialog.name.text() == "r"
+    dialog.name.setText("")
+    assert "removes the name r" in dialog.note.text()
+    dialog.name.setText("taken")
+    assert "already names C3" in dialog.note.text()
+
+
+def test_names_dialog_lists_and_edits(model):
+    model.set_cell(2, 2, "7")
+    model.name_cell(1, 1, "r")
+    model.name_cell(2, 2, "h")
+    dialog = NamesDialog(model)
+    rows = [[dialog.table.item(r, c).text() for c in range(3)] for r in range(dialog.table.rowCount())]
+    assert rows == [["h", "C3", "7"], ["r", "B2", "3"]]
+    dialog.table.item(1, NamesDialog.CELL).setText("C3")
+    assert "C3 has two names" in dialog.note.text()
+    dialog.table.item(1, NamesDialog.CELL).setText("D1")
+    assert dialog.table.item(1, NamesDialog.VALUE).text() == ""
+    dialog.table.selectRow(0)
+    dialog.delete_selected()
+    assert dialog.chosen_names() == {"r": (0, 3)}
+
+
+def test_names_dialog_add_and_duplicates(model):
+    model.name_cell(1, 1, "r")
+    dialog = NamesDialog(model)
+    dialog.add_name()
+    assert "Enter a name" in dialog.note.text()
+    row = dialog.table.rowCount() - 1
+    dialog.table.item(row, NamesDialog.NAME).setText("R")
+    dialog.table.item(row, NamesDialog.CELL).setText("E5")
+    assert "used twice" in dialog.note.text()
+    dialog.table.item(row, NamesDialog.NAME).setText("s")
+    assert dialog.chosen_names() == {"r": (1, 1), "s": (4, 4)}
+
+
+def test_names_dialog_shows_deleted(model):
+    model.name_cell(1, 1, "r")
+    model.delete_cells(1, 1, 1, 1, "up")
+    dialog = NamesDialog(model)
+    assert dialog.table.item(0, NamesDialog.CELL).text() == DELETED
+    assert "deleted" in dialog.note.text()
+    assert dialog.chosen_names() == {"r": None}
+
+
+# --- In the window ---
+
+@pytest.fixture
+def window(app):
+    window = MainWindow()
+    window.show()
+    yield window
+    window.setWindowModified(False)
+    window.close()
+
+
+def test_menus(window):
+    formulas = [m for m in window.menuBar().actions() if m.text() == "Formulas"][0].menu()
+    texts = [a.text() for a in formulas.actions()]
+    assert "Name Cell…" in texts and "Names…" in texts
+    assert window.name_cell_action in window.context_menu.actions()
+
+
+def test_naming_from_the_window(window, monkeypatch):
+    window.model.set_cell(1, 1, "3")
+    window.view.select_range(1, 1, 1, 1)
+    monkeypatch.setattr(window, "_ask_cell_name", lambda row, col: "r")
+    assert window.name_cell()
+    assert window.model.cell_names() == {"r": (1, 1)}
+    assert window.cell_label.text() == "B2 (r)"
+    window.model.undo_stack.undo()
+    assert window.cell_label.text() == "B2"
+
+
+def test_cancelled_dialogs_change_nothing(window, monkeypatch):
+    monkeypatch.setattr(window, "_ask_cell_name", lambda row, col: None)
+    monkeypatch.setattr(window, "_ask_names", lambda: None)
+    assert not window.name_cell() and not window.edit_names()
+    assert not window.model.undo_stack.canUndo()
+
+
+def test_editing_names_from_the_window(window, monkeypatch):
+    window.model.set_cells({(0, 0): "2", (5, 0): "=k*3"})
+    monkeypatch.setattr(window, "_ask_names", lambda: {"k": (0, 0)})
+    window.edit_names()
+    assert window.model.display_text(5, 0) == "6"
+    assert window.undo_action.text() == "Undo Edit Names"

@@ -177,7 +177,7 @@ Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
 ```json
 {
   "format": "py-spread",
-  "version": 4,
+  "version": 5,
   "rows": 1000,
   "columns": 52,
   "angles": "degrees",
@@ -316,6 +316,30 @@ to the other.
   `=SIN(A1*PI/180)`.
 - Ask Claude is told which unit the sheet uses, and again if you switch, so
   the formulas it writes take the right one.
+
+## Cell names
+
+A cell can have a name that formulas use in place of its reference. Select a
+cell and choose Formulas > Name Cell… (also on the secondary-click menu),
+then type a name such as `r`. With B2 named `r`, `=PI*r^2` works like
+`=PI*$B$2^2`: a name always means the same cell, even when a formula using it
+is copied elsewhere. The cell bar shows a named cell as, for example, `B2 (r)`.
+
+- Names are case-insensitive (`r` and `R` are the same), start with a letter
+  or underscore, and contain only letters, digits, and underscores. A name
+  can't look like a cell reference (`x1` is column X, row 1), or be a
+  function or constant name (`SUM`, `PI`).
+- Each name names one cell, and a cell has one name: using a name another
+  cell already has is refused. Naming a cell again renames it; clearing the
+  name removes it.
+- Formulas > Names… lists every name with its cell and value. Rename a name,
+  give it a different cell, add a name, or delete one; the changes apply
+  together when you click OK.
+- Formulas using a name that doesn't exist show `#NAME?`. Inserting or
+  deleting cells moves names with their cells; a name whose cell is deleted
+  shows `#REF!` until you give it a new cell.
+- Naming changes can be undone, and names are saved with the sheet. Claude
+  knows about them too, so it can use them in formulas it writes.
 
 ## AutoSum (Σ)
 

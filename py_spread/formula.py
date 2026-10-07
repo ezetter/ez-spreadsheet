@@ -196,13 +196,17 @@ def replace_function(formula: str, names, new_name: str) -> str | None:
     return "=" + body[: name.start("name")] + new_name + body[name.end("name"):]
 
 
-def parse(text: str):
+def parse(text: str, names: dict | None = None):
     """Parse a formula body (without the leading '=') into an AST of tuples:
     ("num", value), ("ref", row, col), ("range", top, left, bottom, right),
     ("err", code), ("neg", operand), ("bin", op, left, right),
     ("call", name, [args]).
+
+    `names` maps cell names (in upper case) to the (row, col) they name, or
+    to None if that cell was deleted (#REF!). A name becomes a reference to
+    its cell.
     """
-    return _Parser(tokenize(text)).parse()
+    return _Parser(tokenize(text), names or {}).parse()
 
 
 def references(node) -> tuple[set[tuple[int, int]], list[tuple[int, int, int, int]]]:
@@ -318,8 +322,9 @@ def _argument(node, sheet) -> list:
 
 
 class _Parser:
-    def __init__(self, tokens):
+    def __init__(self, tokens, names: dict):
         self.tokens = tokens
+        self.names = names
         self.pos = 0
 
     def peek(self) -> str | None:
@@ -387,8 +392,11 @@ class _Parser:
             raise FormulaError(PARSE_ERROR)
 
     def named(self, name: str):
-        """A constant or a function call."""
+        """A cell name, a constant, or a function call."""
         name = name.upper()
+        if name in self.names and self.peek() != "(":
+            cell = self.names[name]
+            return ("err", REF_ERROR) if cell is None else ("ref", *cell)
         if name not in CONSTANTS:
             return self.call(name)
         if self.peek() == "(":

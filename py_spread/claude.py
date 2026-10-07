@@ -50,7 +50,9 @@ only functions are SUM, MEAN, MEDIAN, and STDDEV (sample standard deviation), \
 which take ranges, cells, and numbers; SIN, COS, and TAN, which take an angle \
 in the sheet's angle unit, degrees or radians (you're told which, and told \
 again if they switch it); EXP(x), e to the power x; and POW(x, y), x to the \
-power y. PI is the constant pi (=2*PI*A1). There are no other functions: no \
+power y. PI is the constant pi (=2*PI*A1). Cells can have names, such as r \
+for B2; a formula can use a name in place of that cell's reference (=PI*r^2), \
+and read_cells lists the sheet's names. There are no other functions: no \
 SQRT, LN, ABS, IF, or text functions (use x^0.5 for a square root). Text that \
 doesn't start with = is stored as typed; numbers may include a dollar sign and \
 thousands separators ($1,234.50), and keep that style."""
@@ -203,6 +205,10 @@ class SheetAccess:
             text += "Formulas:\n" + "\n".join(formulas)
         else:
             text += "No formulas."
+        cell_names = {name: cell for name, cell in model.cell_names().items() if cell}
+        if cell_names:
+            text += "\nNamed cells in the sheet: " + ", ".join(
+                f"{name} = {cell_name(*cell)}" for name, cell in cell_names.items())
         return text
 
     def write(self, start: str, rows: list[list[str]]) -> str:

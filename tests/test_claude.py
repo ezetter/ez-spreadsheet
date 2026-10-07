@@ -550,3 +550,11 @@ def test_window_fill_runs_on_gui_thread_and_selects(main_window):
     assert "Wrote 2 rows by 2 columns to D2:E3." in window.transcript.toPlainText()
     main_window.undo_action.trigger()
     assert model.get_cell(2, 4) == ""
+
+
+def test_read_lists_cell_names(app):
+    model = SheetModel(rows=10, cols=6)
+    model.set_cell(1, 1, "3")
+    model.name_cell(1, 1, "r")
+    assert SheetAccess(model).read("A1").endswith("Named cells in the sheet: r = B2")
+    assert "=PI*r^2" in claude.SYSTEM_PROMPT
