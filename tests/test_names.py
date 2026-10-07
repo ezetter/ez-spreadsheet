@@ -23,8 +23,7 @@ def model(app):
     ("", "Enter a name"),
     ("2r", "must start with a letter"),
     ("my rate", "must start with a letter"),
-    ("x1", "looks like a cell reference"),
-    ("AB12", "looks like a cell reference"),
+    ("x1", None), ("A1", None), ("AB12", None),   # names may look like cell references
     ("sum", "is a function"),
     ("Pi", "is a constant"),
     ("a" * 65, "at most 64"),
@@ -44,11 +43,15 @@ def test_name_in_formula(model):
     assert model.value(0, 0) == pytest.approx(3.141592653589793 * 4)
 
 
-def test_names_are_case_insensitive(model):
-    model.name_cell(1, 1, "Rate")
-    model.set_cell(0, 0, "=rate*RATE")
-    assert model.display_text(0, 0) == "9"
-    assert "already names B2" in model.name_problem("RATE", (4, 4))
+def test_names_are_case_sensitive(model):
+    model.set_cell(2, 1, "10")
+    assert model.name_cell(1, 1, "r") is None
+    assert model.name_cell(2, 1, "R") is None  # a different name
+    model.set_cell(0, 0, "=r+R")
+    assert model.display_text(0, 0) == "13"
+    model.set_cell(0, 1, "=rate")
+    assert model.display_text(0, 1) == "#NAME?"
+    assert "already names B2" in model.name_problem("r", (4, 4))
 
 
 def test_name_is_a_fixed_reference_when_copied(app):
@@ -142,7 +145,7 @@ def test_names_saved_and_loaded(tmp_path):
     assert load_sheet(path) == sheet
 
 
-@pytest.mark.parametrize("bad", [{"x1": "A1"}, {"r": "A1", "R": "B2"}, {"a": "A1", "b": "A1"}, {"r": "nowhere"}])
+@pytest.mark.parametrize("bad", [{"sum": "A1"}, {"2r": "B2"}, {"a": "A1", "b": "A1"}, {"r": "nowhere"}])
 def test_bad_names_in_file(tmp_path, bad):
     path = tmp_path / "bad.pysheet"
     path.write_text(json.dumps({"format": "py-spread", "version": 5, "rows": 10, "columns": 5,
@@ -165,8 +168,8 @@ def test_name_cell_dialog(model):
     dialog = NameCellDialog(model, 1, 1)
     ok = dialog.buttons.button(dialog.buttons.StandardButton.Ok)
     assert not ok.isEnabled()
-    dialog.name.setText("x1")
-    assert not ok.isEnabled() and "cell reference" in dialog.note.text()
+    dialog.name.setText("Sum")
+    assert not ok.isEnabled() and "is a function" in dialog.note.text()
     dialog.name.setText("radius")
     assert ok.isEnabled() and dialog.chosen_name() == "radius"
 
@@ -204,7 +207,7 @@ def test_names_dialog_add_and_duplicates(model):
     dialog.add_name()
     assert "Enter a name" in dialog.note.text()
     row = dialog.table.rowCount() - 1
-    dialog.table.item(row, NamesDialog.NAME).setText("R")
+    dialog.table.item(row, NamesDialog.NAME).setText("r")
     dialog.table.item(row, NamesDialog.CELL).setText("E5")
     assert "used twice" in dialog.note.text()
     dialog.table.item(row, NamesDialog.NAME).setText("s")
@@ -262,3 +265,64 @@ def test_editing_names_from_the_window(window, monkeypatch):
     window.edit_names()
     assert window.model.display_text(5, 0) == "6"
     assert window.undo_action.text() == "Undo Edit Names"
+
+
+
+# --- Names spelled like cells ---
+
+@pytest.fixture
+def a1_named(app):
+    """A1 holds 100; the name A1 means C5, which holds 7."""
+    model = SheetModel(rows=20, cols=6)
+    model.set_cells({(0, 0): "100", (4, 2): "7"})
+    assert model.name_cell(4, 2, "A1") is None
+    return model
+
+
+@pytest.mark.parametrize("formula, expected", [
+    ("=A1", "7"),            # bare: the name
+    ("=$A1", "100"),         # any $: the cell
+    ("=A$1", "100"),
+    ("=$A$1", "100"),
+    ("=a1", "100"),          # names are case-sensitive, so a1 is the cell
+    ("=SUM(A1:A1)", "100"),  # ranges are always cells
+    ("=SUM(A1)", "7"),       # a single argument is the name
+])
+def test_name_spelled_like_a_cell(a1_named, formula, expected):
+    a1_named.set_cell(9, 5, formula)
+    assert a1_named.display_text(9, 5) == expected
+
+
+def test_copying_keeps_names_and_escapes_collisions(app):
+    window = MainWindow()
+    model = window.model
+    model.set_cells({(0, 0): "100", (4, 2): "7", (1, 1): "=A2+A1"})  # B2: A2 is a cell, A1 the name
+    model.name_cell(4, 2, "A1")
+    window.view.select_range(1, 1, 1, 1)
+    window.clipboard.copy()
+    window.view.select_range(0, 1, 0, 1)  # one row up: A2 becomes A1, which is a name
+    window.clipboard.paste()
+    assert model.get_cell(0, 1) == "=$A1+A1"   # so the cell gets a $; the name stays put
+    assert model.display_text(0, 1) == "107"
+    window.setWindowModified(False)
+
+
+def test_inserting_cells_keeps_names_and_escapes_collisions(a1_named):
+    model = a1_named
+    model.set_cells({(3, 3): "=A2*A1"})          # D4: cell A2 times name A1
+    model.delete_cells(0, 0, 0, 0, "up")          # A2 moves up to A1
+    assert model.get_cell(3, 3) == "=$A1*A1"
+
+
+def test_clicking_a_shadowed_cell_inserts_it_with_a_dollar(app):
+    window = MainWindow()
+    window.model.name_cell(4, 2, "B2")
+    assert window.model.reference_text(1, 1) == "$B2"
+    assert window.model.reference_text(1, 2) == "C2"
+    window.setWindowModified(False)
+
+
+def test_autosum_single_cell_escapes_collision(a1_named):
+    from py_spread.autosum import aggregate_formula
+    assert aggregate_formula("SUM", [(0, 0, 0, 0)], a1_named.name_set()) == "=SUM($A1)"
+    assert aggregate_formula("SUM", [(0, 0, 2, 0)], a1_named.name_set()) == "=SUM(A1:A3)"

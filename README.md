@@ -325,10 +325,16 @@ then type a name such as `r`. With B2 named `r`, `=PI*r^2` works like
 `=PI*$B$2^2`: a name always means the same cell, even when a formula using it
 is copied elsewhere. The cell bar shows a named cell as, for example, `B2 (r)`.
 
-- Names are case-insensitive (`r` and `R` are the same), start with a letter
-  or underscore, and contain only letters, digits, and underscores. A name
-  can't look like a cell reference (`x1` is column X, row 1), or be a
-  function or constant name (`SUM`, `PI`).
+- Names are case-sensitive (`r` and `R` are different names), start with a
+  letter or underscore, and contain only letters, digits, and underscores. A
+  name can't be a function or constant name in any capitalization (`sum`,
+  `Pi`).
+- A name can look like a cell reference, such as `A1`. Then a bare `A1` in a
+  formula means the name, and the cell is written with a `$`: `$A1`, `A$1`,
+  or `$A$1`. Ranges (`A1:A9`) always mean cells. When Py-Spread writes a cell
+  reference for you (pasting, inserting or deleting cells, clicking a cell
+  while typing a formula, AutoSum) and it would be spelled like a name, it
+  adds the `$` so the reference still means the cell.
 - Each name names one cell, and a cell has one name: using a name another
   cell already has is refused. Naming a cell again renames it; clearing the
   name removes it.

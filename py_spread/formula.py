@@ -85,21 +85,26 @@ def tokenize(text: str) -> list[tuple[str, str]]:
     return [(_token_kind(m), m.group(_token_kind(m))) for m in _scan(text)]
 
 
-def shift_references(formula: str, d_row: int, d_col: int) -> str:
+def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     """Move the relative references in a formula (with its leading '=') by an offset,
     as when the formula is pasted elsewhere. $-anchored parts stay put, and a
     reference pushed off the top or left of the sheet becomes #REF!. Text that
     doesn't tokenize is returned unchanged.
+
+    A bare reference spelled like one of the cell `names` is that name, which
+    doesn't move; a shifted reference that would be spelled like a name gets
+    a $ so it still means the cell (see names.cell_text).
     """
     body = formula[1:]
     try:
         matches = _scan(body)
     except FormulaError:
         return formula
+    endpoints = _range_endpoints(matches)
     pieces = []
     pos = 0
-    for match in matches:
-        if match.group("ref") is None:
+    for i, match in enumerate(matches):
+        if match.group("ref") is None or (i not in endpoints and _is_name(match, names)):
             continue
         col = column_index(match.group("col"))
         row = int(match.group("row")) - 1
@@ -110,7 +115,7 @@ def shift_references(formula: str, d_row: int, d_col: int) -> str:
         if row < 0 or col < 0:
             shifted = REF_ERROR
         else:
-            shifted = f"{match.group('col_anchor')}{column_name(col)}{match.group('row_anchor')}{row + 1}"
+            shifted = _ref_text(match, (row, col), () if i in endpoints else names)
         pieces.append(body[pos:match.start("ref")])
         pieces.append(shifted)
         pos = match.end("ref")
@@ -118,19 +123,22 @@ def shift_references(formula: str, d_row: int, d_col: int) -> str:
     return "=" + "".join(pieces)
 
 
-def move_references(formula: str, move, move_range=None) -> str:
+def move_references(formula: str, move, move_range=None, names=()) -> str:
     """Rewrite a formula's references for cells that have moved, such as when
     cells are inserted or deleted. `move(row, col)` gives a cell's new (row,
     col), or None if it's gone (that reference becomes #REF!). `move_range`,
     if given, does the same for a range's two corners at once, returning the
     new (start, end) or None; otherwise each corner is moved on its own.
     Unlike shift_references, $ anchors don't matter: a reference follows its
-    cell. References to cells that didn't move keep their text exactly."""
+    cell. References to cells that didn't move keep their text exactly.
+    Cell `names` are handled as in shift_references: names don't move (their
+    definitions do), and a moved reference spelled like a name gets a $."""
     body = formula[1:]
     try:
         matches = _scan(body)
     except FormulaError:
         return formula
+    endpoints = _range_endpoints(matches)
     pieces = []
     pos = 0
 
@@ -159,12 +167,16 @@ def move_references(formula: str, move, move_range=None) -> str:
                         f"{_ref_text(match, new[0])}:{_ref_text(last, new[1])}")
             i += 3
             continue
+        if i not in endpoints and _is_name(match, names):
+            i += 1
+            continue
         old = _ref_cell(match)
         new = move(*old)
         if new is None or min(new) < 0:
             replace(match.start("ref"), match.end("ref"), REF_ERROR)
         elif new != old:
-            replace(match.start("ref"), match.end("ref"), _ref_text(match, new))
+            replace(match.start("ref"), match.end("ref"),
+                    _ref_text(match, new, () if i in endpoints else names))
         i += 1
     pieces.append(body[pos:])
     return "=" + "".join(pieces)
@@ -174,9 +186,26 @@ def _ref_cell(match: re.Match) -> tuple[int, int]:
     return int(match.group("row")) - 1, column_index(match.group("col"))
 
 
-def _ref_text(match: re.Match, cell: tuple[int, int]) -> str:
-    """A reference to `cell`, keeping the $ anchors of the reference matched."""
-    return f"{match.group('col_anchor')}{column_name(cell[1])}{match.group('row_anchor')}{cell[0] + 1}"
+def _ref_text(match: re.Match, cell: tuple[int, int], names=()) -> str:
+    """A reference to `cell`, keeping the $ anchors of the reference matched.
+    A bare one spelled like one of the `names` gets a $ before its column."""
+    text = f"{match.group('col_anchor')}{column_name(cell[1])}{match.group('row_anchor')}{cell[0] + 1}"
+    return "$" + text if text in names else text
+
+
+def _is_name(match: re.Match, names) -> bool:
+    """Whether a reference token is really a cell name (bare, spelled like one)."""
+    return "$" not in match.group("ref") and match.group("ref") in names
+
+
+def _range_endpoints(matches: list) -> set[int]:
+    """Indexes of the reference tokens that are a range's corners (A1 in
+    A1:B9). Those always mean cells, never names."""
+    endpoints = set()
+    for i, match in enumerate(matches):
+        if match.group("op") == ":":
+            endpoints.update({i - 1, i + 1})
+    return endpoints
 
 
 def replace_function(formula: str, names, new_name: str) -> str | None:
@@ -202,9 +231,10 @@ def parse(text: str, names: dict | None = None):
     ("err", code), ("neg", operand), ("bin", op, left, right),
     ("call", name, [args]).
 
-    `names` maps cell names (in upper case) to the (row, col) they name, or
-    to None if that cell was deleted (#REF!). A name becomes a reference to
-    its cell.
+    `names` maps cell names (exactly as spelled) to the (row, col) they name,
+    or to None if that cell was deleted (#REF!). A name becomes a reference
+    to its cell. A bare reference spelled like a name (A1) is the name; with
+    a $ ($A1) it's the cell. Range corners are always cells.
     """
     return _Parser(tokenize(text), names or {}).parse()
 
@@ -376,6 +406,8 @@ class _Parser:
         if kind == "number":
             return ("num", float(text))
         if kind == "ref":
+            if "$" not in text and text in self.names:
+                return self._name_node(text)  # a name spelled like a cell; $A1 is the cell
             return ("ref", *parse_cell_name(text))
         if kind == "error":
             return ("err", text)
@@ -392,17 +424,21 @@ class _Parser:
             raise FormulaError(PARSE_ERROR)
 
     def named(self, name: str):
-        """A cell name, a constant, or a function call."""
-        name = name.upper()
+        """A cell name (matched exactly), a constant, or a function call
+        (matched in any case)."""
         if name in self.names and self.peek() != "(":
-            cell = self.names[name]
-            return ("err", REF_ERROR) if cell is None else ("ref", *cell)
+            return self._name_node(name)
+        name = name.upper()
         if name not in CONSTANTS:
             return self.call(name)
         if self.peek() == "(":
             self.take()
             self.expect(")")
         return ("num", CONSTANTS[name])
+
+    def _name_node(self, name: str):
+        cell = self.names[name]
+        return ("err", REF_ERROR) if cell is None else ("ref", *cell)
 
     def call(self, name: str):
         if name not in FUNCTIONS or self.peek() != "(":

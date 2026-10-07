@@ -96,7 +96,8 @@ class ClipboardController:
                 row = block[src_r]
                 text = row[src_c] if src_c < len(row) else ""
                 if clip and not cut and is_formula(text):
-                    text = shift_references(text, top + r - (clip.top + src_r), left + c - (clip.left + src_c))
+                    text = shift_references(text, top + r - (clip.top + src_r), left + c - (clip.left + src_c),
+                                            self.model.name_set())
                 writes[(top + r, left + c)] = text
                 if clip:
                     formats[(top + r, left + c)] = clip.formats[src_r][src_c]

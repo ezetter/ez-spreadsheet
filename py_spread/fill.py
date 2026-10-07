@@ -406,7 +406,8 @@ class FillController(QObject):
             for cell in ordered:
                 if is_formula(text):
                     # Like pasting: references move with each cell.
-                    writes[cell] = shift_references(text, cell[0] - source[0], cell[1] - source[1])
+                    writes[cell] = shift_references(text, cell[0] - source[0], cell[1] - source[1],
+                                                    self.model.name_set())
                 else:
                     writes[cell] = text
             self._write(writes)

@@ -214,7 +214,7 @@ class SheetView(QTableView):
         index = self.indexAt(event.position().toPoint())
         if event.button() != Qt.LeftButton or target is None or not index.isValid() or not target.accepts():
             return False
-        target.insert(cell_name(index.row(), index.column()))
+        target.insert(self.model().reference_text(index.row(), index.column()))
         target.edit.setFocus()
         self._swallow_mouse = True
         return True

@@ -52,7 +52,10 @@ in the sheet's angle unit, degrees or radians (you're told which, and told \
 again if they switch it); EXP(x), e to the power x; and POW(x, y), x to the \
 power y. PI is the constant pi (=2*PI*A1). Cells can have names, such as r \
 for B2; a formula can use a name in place of that cell's reference (=PI*r^2), \
-and read_cells lists the sheet's names. There are no other functions: no \
+and read_cells lists the sheet's names. Names are case-sensitive and can look \
+like cell references: if a cell is named A1, a bare A1 in a formula means \
+that name, and $A1, A$1, or $A$1 mean cell A1. Ranges (A1:B9) always mean \
+cells. There are no other functions: no \
 SQRT, LN, ABS, IF, or text functions (use x^0.5 for a square root). Text that \
 doesn't start with = is stored as typed; numbers may include a dollar sign and \
 thousands separators ($1,234.50), and keep that style."""

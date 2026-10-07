@@ -408,7 +408,8 @@ class SheetModel(QAbstractTableModel):
         cells, formats, styles = {}, {}, {}
         for key, text in self._cells.items():
             if (dest := move(*key)) is not None:
-                cells[dest] = move_references(text, move, move_range) if is_formula(text) else text
+                cells[dest] = (move_references(text, move, move_range, self.name_set())
+                               if is_formula(text) else text)
         for table, moved in ((self._formats, formats), (self._styles, styles)):
             for key, value in table.items():
                 if (dest := move(*key)) is not None:
@@ -426,6 +427,15 @@ class SheetModel(QAbstractTableModel):
         )
 
     # --- Cell names ---
+
+    def name_set(self) -> set[str]:
+        """Every name, exactly as spelled."""
+        return {name for name, _ in self._names.values()}
+
+    def reference_text(self, row: int, col: int) -> str:
+        """How to write the cell in a formula: B2, or $B2 if a name is
+        spelled B2 (a bare B2 would mean the name)."""
+        return names.cell_text(cell_name(row, col), self.name_set())
 
     def cell_names(self) -> dict[str, tuple[int, int] | None]:
         """Every name, as typed, and the cell it names (None: deleted)."""

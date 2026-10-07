@@ -23,6 +23,7 @@ from PySide6.QtCore import QObject, Signal
 
 from .formula import is_formula, replace_function
 from .references import cell_name
+from .names import cell_text
 
 
 @dataclass(frozen=True)
@@ -78,15 +79,17 @@ def _runs(rows: list[int]) -> list[tuple[int, int]]:
     return runs
 
 
-def range_name(bounds: tuple[int, int, int, int]) -> str:
+def range_name(bounds: tuple[int, int, int, int], names=()) -> str:
+    """A1:B9, or one cell's reference; a single cell spelled like one of the
+    cell `names` gets a $ so it still means the cell. (Ranges always do.)"""
     top, left, bottom, right = bounds
     if (top, left) == (bottom, right):
-        return cell_name(top, left)
+        return cell_text(cell_name(top, left), names)
     return f"{cell_name(top, left)}:{cell_name(bottom, right)}"
 
 
-def aggregate_formula(function: str, ranges) -> str:
-    return f"={function}(" + ", ".join(range_name(r) for r in ranges) + ")"
+def aggregate_formula(function: str, ranges, names=()) -> str:
+    return f"={function}(" + ", ".join(range_name(r, names) for r in ranges) + ")"
 
 
 def run_above(model, row: int, col: int):
@@ -187,7 +190,7 @@ class AutoSumController(QObject):
         for row, col in targets:
             run = run_above(self.model, row, col) or run_left(self.model, row, col)
             if run is not None:
-                writes[(row, col)] = aggregate_formula(self.aggregate.function, [run])
+                writes[(row, col)] = aggregate_formula(self.aggregate.function, [run], self.model.name_set())
         if not writes:
             self.message.emit(
                 f"Nothing to {self.aggregate.label.lower()}: select some numbers, "
@@ -226,7 +229,8 @@ class AutoSumController(QObject):
         if self._per_column():
             writes = self._per_column_formulas(row, col)
         else:
-            writes = {(row, col): aggregate_formula(self.aggregate.function, cell_ranges(self._cells))}
+            writes = {(row, col): aggregate_formula(self.aggregate.function, cell_ranges(self._cells),
+                                                         self.model.name_set())}
         if any(target in self._cells for target in writes) or (row, col) in self._cells:
             self.message.emit("Pick a cell outside the selected ones. Esc cancels.")
             return
@@ -249,5 +253,6 @@ class AutoSumController(QObject):
             if target_col >= self.model.columnCount():
                 continue
             if any(isinstance(self.model.value(*cell), float) for cell in cells):
-                writes[(row, target_col)] = aggregate_formula(self.aggregate.function, cell_ranges(cells))
+                writes[(row, target_col)] = aggregate_formula(self.aggregate.function, cell_ranges(cells),
+                                                                     self.model.name_set())
         return writes
