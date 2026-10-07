@@ -27,6 +27,18 @@ class Dialogs:
 
 
 @pytest.fixture(autouse=True)
+def preferences(monkeypatch, tmp_path):
+    """Keep tests away from the user's real saved preferences."""
+    from PySide6.QtCore import QSettings
+
+    from py_spread import appearance
+
+    path = str(tmp_path / "preferences.ini")
+    monkeypatch.setattr(appearance, "settings", lambda: QSettings(path, QSettings.IniFormat))
+    return path
+
+
+@pytest.fixture(autouse=True)
 def dialogs(monkeypatch):
     dialogs = Dialogs()
 

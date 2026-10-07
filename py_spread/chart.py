@@ -9,12 +9,15 @@ labels on the x axis. Empty or non-numeric y cells leave gaps.
 import math
 from dataclasses import dataclass
 
+import matplotlib.style
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from .appearance import is_dark
 from .references import cell_name, column_name
 
 CHART_KINDS = {"line": "Line", "scatter": "Scatter"}
@@ -103,7 +106,8 @@ class ChartToolbar(NavigationToolbar2QT):
 
 class ChartWindow(QWidget):
     """A window showing a chart of some cells. It redraws when the sheet
-    changes, and its kind can be switched between line and scatter."""
+    changes or the app switches between light and dark, and its kind can be
+    switched between line and scatter."""
 
     def __init__(self, model, cells, kind: str = "line", parent=None):
         super().__init__(parent, Qt.Window)
@@ -114,7 +118,7 @@ class ChartWindow(QWidget):
 
         self.figure = Figure(layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.axes = self.figure.add_subplot()
+        self.axes = None  # made afresh by each redraw, in the light or dark style
         self.kind_box = QComboBox()
         for key, label in CHART_KINDS.items():
             self.kind_box.addItem(label, key)
@@ -144,12 +148,24 @@ class ChartWindow(QWidget):
 
     def redraw(self, *_args) -> None:
         self.setWindowTitle(f"{CHART_KINDS[self.kind]} Chart of {self.range_name}")
-        try:
-            data = chart_data(self.model, self.cells)
-        except ChartError as e:
-            self.axes.clear()
-            self.problem.setText(str(e))
-        else:
-            draw(self.axes, data, self.kind)
-            self.problem.setText("")
+        palette = self.palette()
+        self.figure.clear()
+        # Matplotlib styles apply as things are created, so the axes are made
+        # inside the style, then given the window's own background colors.
+        with matplotlib.style.context("dark_background" if is_dark(palette) else "default"):
+            self.axes = self.figure.add_subplot()
+            try:
+                data = chart_data(self.model, self.cells)
+            except ChartError as e:
+                self.problem.setText(str(e))
+            else:
+                draw(self.axes, data, self.kind)
+                self.problem.setText("")
+        self.figure.set_facecolor(palette.color(QPalette.Window).name())
+        self.axes.set_facecolor(palette.color(QPalette.Base).name())
         self.canvas.draw_idle()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.PaletteChange:  # switched between light and dark
+            self.redraw()

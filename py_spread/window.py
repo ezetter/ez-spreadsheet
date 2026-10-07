@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .appearance import APPEARANCES, GridStyle, apply_appearance, saved_appearance
 from .autosum import AGGREGATES, Aggregate, AutoSumController
 from .clipboard import ClipboardController
 from .csvfile import read_csv, write_csv
@@ -135,6 +136,8 @@ class SheetView(QTableView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._grid_style = GridStyle()  # kept: setStyle doesn't take ownership
+        self.setStyle(self._grid_style)
         self.setEditTriggers(
             QAbstractItemView.DoubleClicked
             | QAbstractItemView.EditKeyPressed
@@ -445,6 +448,25 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, s=slot: s())
             menu.addAction(action)
             self.zoom_actions[name] = action
+
+        # Appearance: follow the Mac, or always light or dark (remembered).
+        menu.addSeparator()
+        appearance_menu = menu.addMenu("Appearance")
+        group = QActionGroup(self)
+        self.appearance_actions = {}
+        for key, (label, _scheme) in APPEARANCES.items():
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda _checked=False, k=key: self.set_appearance(k))
+            group.addAction(action)
+            appearance_menu.addAction(action)
+            self.appearance_actions[key] = action
+        self.set_appearance(saved_appearance(), save=False)
+
+    def set_appearance(self, key: str, save: bool = True) -> None:
+        """Match the Mac's appearance ("system"), or always use "light" or "dark"."""
+        apply_appearance(key, save)
+        self.appearance_actions[key].setChecked(True)
 
     def zoom_in(self):
         self.set_zoom(next((z for z in ZOOM_LEVELS if z > self.zoom), self.zoom))

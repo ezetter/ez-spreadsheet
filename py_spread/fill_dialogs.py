@@ -34,6 +34,7 @@ from .fill import (
     sequence_values,
     written_as_float,
 )
+from .appearance import error_color
 from .formula import format_number, parse_number
 
 
@@ -86,7 +87,7 @@ class _FillDialog(QDialog):
 
     def show_note(self, text: str, error: bool) -> None:
         self.note.setText(text)
-        self.note.setStyleSheet("color: #c0392b;" if error else "")
+        self.note.setStyleSheet(f"color: {error_color(self.palette())};" if error else "")
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(not error)
 
     def update_state(self, *_args) -> None:

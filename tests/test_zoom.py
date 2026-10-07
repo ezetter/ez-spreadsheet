@@ -26,7 +26,7 @@ def size(widget):
 
 def test_view_menu(window):
     menu = [m for m in window.menuBar().actions() if m.text() == "View"][0].menu()
-    assert [a.text() for a in menu.actions()] == ["Zoom In", "Zoom Out", "Actual Size"]
+    assert [a.text() for a in menu.actions()] == ["Zoom In", "Zoom Out", "Actual Size", "", "Appearance"]
     zoom_in_keys = [k.toString() for k in window.zoom_actions["Zoom In"].shortcuts()]
     assert "Ctrl++" in zoom_in_keys and "Ctrl+=" in zoom_in_keys  # Cmd+ with or without Shift
     assert window.zoom_actions["Zoom Out"].shortcuts()[0] == QKeySequence(QKeySequence.ZoomOut)

@@ -56,6 +56,15 @@ Columns or rows you've resized keep their size relative to the others. The
 Mac menu bar, chart windows, and Ask Claude windows aren't zoomed, and zoom
 isn't saved with the sheet.
 
+## Dark mode
+
+Py-Spread follows the Mac's light or dark appearance. To override it, choose
+View > Appearance > Light or Dark (or Match System to follow the Mac again);
+the choice is remembered the next time you open Py-Spread. Everything
+switches: the grid (with soft grid lines in either mode), toolbar, menus,
+dialogs, the Ask Claude window, and open charts, which redraw with a dark
+background and brighter line colors.
+
 ## Number formats
 
 Numbers can be typed with a dollar sign and thousands separators: `$1,234.50`,
