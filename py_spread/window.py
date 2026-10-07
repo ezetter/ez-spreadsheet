@@ -36,6 +36,9 @@ from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
 FILE_FILTER = f"Py-Spread Sheets (*{EXTENSION})"
+COLUMN_WIDTH = 100  # default sizes at 100% zoom
+ROW_HEIGHT = 24
+ZOOM_LEVELS = (50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300)  # percent
 CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
 
 # A clicked cell reference can be inserted after any of these characters.
@@ -139,8 +142,9 @@ class SheetView(QTableView):
         )
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectItems)
-        self.horizontalHeader().setDefaultSectionSize(100)
-        self.verticalHeader().setDefaultSectionSize(24)
+        self.horizontalHeader().setDefaultSectionSize(COLUMN_WIDTH)
+        self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
+        self.verticalHeader().setMinimumSectionSize(8)  # room to zoom out
 
         self.cell_delegate = CellDelegate(self)
         self.cell_delegate.return_pressed.connect(lambda: self.move_current(1, 0))
@@ -239,6 +243,18 @@ class SheetView(QTableView):
         self.setCurrentIndex(self.model().index(row, col))
 
 
+def _rescale_header(header, base_size: int, old_zoom: int, new_zoom: int) -> None:
+    """Scale a header's sections from one zoom to another. Sections the user
+    resized keep their size relative to the default."""
+    old_default = header.defaultSectionSize()
+    new_default = max(1, round(base_size * new_zoom / 100))
+    custom = {i: header.sectionSize(i) for i in range(header.count())
+              if header.sectionSize(i) != old_default}
+    header.setDefaultSectionSize(new_default)  # (this resets every section to the default)
+    for i, size in custom.items():
+        header.resizeSection(i, max(1, round(size * new_zoom / old_zoom)))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -278,6 +294,7 @@ class MainWindow(QMainWindow):
         self._build_format_menu()
         self._build_formulas_menu()
         self._build_claude_menu()
+        self._build_view_menu()
         self._build_toolbar()
         self.model.angle_unit_changed.connect(self._show_angle_unit)
 
@@ -411,6 +428,57 @@ class MainWindow(QMainWindow):
         self.claude_windows.append(window)
         window.show()
         return window
+
+    def _build_view_menu(self):
+        menu = self.menuBar().addMenu("View")
+        self.zoom = 100  # percent
+        self._zoom_base_fonts = None  # each zoomable widget's font at 100%, saved on first zoom
+        self.zoom_actions = {}
+        for name, shortcuts, slot in (
+            # ⌘= as well as ⌘+, so Shift isn't needed for the + key
+            ("Zoom In", [QKeySequence(QKeySequence.ZoomIn), QKeySequence("Ctrl+=")], self.zoom_in),
+            ("Zoom Out", [QKeySequence(QKeySequence.ZoomOut)], self.zoom_out),
+            ("Actual Size", [QKeySequence("Ctrl+0")], lambda: self.set_zoom(100)),
+        ):
+            action = QAction(name, self)
+            action.setShortcuts(shortcuts)
+            action.triggered.connect(lambda _checked=False, s=slot: s())
+            menu.addAction(action)
+            self.zoom_actions[name] = action
+
+    def zoom_in(self):
+        self.set_zoom(next((z for z in ZOOM_LEVELS if z > self.zoom), self.zoom))
+
+    def zoom_out(self):
+        self.set_zoom(next((z for z in reversed(ZOOM_LEVELS) if z < self.zoom), self.zoom))
+
+    def set_zoom(self, percent: int) -> None:
+        """Scale the grid (text, rows, columns, headers), the cell bar, the
+        toolbar, and the status bar to `percent` of their normal size."""
+        if self._zoom_base_fonts is None:
+            self._zoom_base_fonts = {widget: QFont(widget.font()) for widget in self._zoomable_widgets()}
+        old, self.zoom = self.zoom, percent
+        for widget, base in self._zoom_base_fonts.items():
+            font = QFont(base)
+            if base.pointSizeF() > 0:
+                font.setPointSizeF(base.pointSizeF() * percent / 100)
+            else:
+                font.setPixelSize(max(1, round(base.pixelSize() * percent / 100)))
+            widget.setFont(font)
+        _rescale_header(self.view.horizontalHeader(), COLUMN_WIDTH, old, percent)
+        _rescale_header(self.view.verticalHeader(), ROW_HEIGHT, old, percent)
+        for action, limit in ((self.zoom_actions["Zoom In"], ZOOM_LEVELS[-1]),
+                              (self.zoom_actions["Zoom Out"], ZOOM_LEVELS[0])):
+            action.setEnabled(percent != limit)
+        self.statusBar().showMessage(f"Zoom {percent}%", 2000)
+
+    def _zoomable_widgets(self) -> list:
+        """Widgets whose font sets their size. (The menu bar is the Mac's own,
+        so it isn't zoomed.)"""
+        toolbar_widgets = [self.toolbar.widgetForAction(action) for action in self.toolbar.actions()
+                           if not action.isSeparator()]
+        return [self.view, self.view.horizontalHeader(), self.view.verticalHeader(),
+                self.cell_label, self.edit_bar, self.statusBar(), *toolbar_widgets]
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
@@ -560,6 +628,7 @@ class MainWindow(QMainWindow):
 
     def _build_toolbar(self):
         toolbar = self.addToolBar("Tools")
+        self.toolbar = toolbar
         toolbar.setMovable(False)
         self.autosum_action = QAction(self)
         self.autosum_action.setCheckable(True)  # stays pressed while waiting for a click

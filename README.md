@@ -46,6 +46,16 @@ creates the file.
   Fill. Clicking inside the selection keeps it; clicking elsewhere selects
   that cell first.
 
+## Zoom
+
+View > Zoom In (Cmd+Plus, or Cmd+= without Shift), Zoom Out (Cmd+Minus), and
+Actual Size (Cmd+0) scale the grid's text, row heights, column widths, and
+headers, along with the cell bar, the toolbar, and the status bar. Zoom goes
+from 50% to 300% in the usual steps, and the status bar shows the level.
+Columns or rows you've resized keep their size relative to the others. The
+Mac menu bar, chart windows, and Ask Claude windows aren't zoomed, and zoom
+isn't saved with the sheet.
+
 ## Number formats
 
 Numbers can be typed with a dollar sign and thousands separators: `$1,234.50`,
