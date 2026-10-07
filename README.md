@@ -135,8 +135,9 @@ the work it has done.
 ## Undo and redo
 
 Undo (Cmd+Z) and Redo (Cmd+Shift+Z) are in the Edit menu. Every change to
-cells can be undone: typing, the bar above the grid, paste, cut and paste,
-clearing, AutoSum, and Fill. Each is one step, and the menu names it (for
+the sheet can be undone: typing, the bar above the grid, paste, cut and paste,
+clearing, AutoSum, Fill, and switching between degrees and radians. Each is
+one step, and the menu names it (for
 example "Undo Paste" or "Undo Sequence Fill"). Undoing or redoing selects the
 cells that changed. While you're typing in a cell or the bar, Cmd+Z undoes
 the typing instead.
@@ -151,15 +152,16 @@ The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As
 unsaved changes are discarded by New, Open, or closing the window.
 
 Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
-(formulas, not their results) under its cell name, plus any number formats
-and bold/italic styles, e.g.
+(formulas, not their results) under its cell name, the angle unit for `SIN`,
+`COS`, and `TAN`, and any number formats and bold/italic styles, e.g.
 
 ```json
 {
   "format": "py-spread",
-  "version": 3,
+  "version": 4,
   "rows": 1000,
   "columns": 52,
+  "angles": "degrees",
   "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
   "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}},
   "styles": {"A1": {"bold": true}, "B1": {"bold": true}}
@@ -255,15 +257,21 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
   - `MEDIAN` gives the middle value (`#NUM!` if there are none).
   - `STDDEV` gives the sample standard deviation, dividing by n − 1 like
     `STDEV` in other spreadsheets (`#DIV/0!` with fewer than two numbers).
-  - `SIN`, `COS`, and `TAN` take an angle in degrees: `=SIN(30)` is 0.5.
-    Exact angles give exact results (`=SIN(180)` is 0, `=TAN(45)` is 1), and
-    `=TAN(90)` is `#DIV/0!`.
+  - `SIN`, `COS`, and `TAN` take an angle in degrees, or in radians if the
+    sheet is set to radians (see [Degrees or radians](#degrees-or-radians)):
+    `=SIN(30)` is 0.5 in degrees, as is `=SIN(PI/6)` in radians. Exact angles
+    give exact results (`=SIN(180)` is 0 and `=TAN(45)` is 1, or in radians
+    `=SIN(PI)` is 0 and `=TAN(PI/4)` is 1), and `=TAN(90)` (or `=TAN(PI/2)`)
+    is `#DIV/0!`.
   - `EXP(x)` is e raised to the power x.
   - `POW(x, y)` is x raised to the power y, the same as `x^y`.
 
   These five take single numbers (a cell, a number, or a calculation), not
   ranges (`#VALUE!`). Giving a function the wrong number of arguments, such
   as `=POW(2)`, is `#ERROR!`.
+- `PI` is the constant π (3.14159…), usable anywhere a number is:
+  `=2*PI*A1`. It's case-insensitive, and `PI()`, as other spreadsheets write
+  it, works too. (`PI2` is still a cell reference, to column PI, row 2.)
 - Empty cells count as 0. Formulas recalculate whenever a cell changes.
 - While typing a formula, clicking a cell right after `=`, an operator, `(`,
   `,`, or `:` inserts its reference. Clicking again replaces the reference just inserted.
@@ -271,6 +279,24 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
 - Errors: `#ERROR!` (bad formula), `#VALUE!` (text used as a number),
   `#DIV/0!`, `#NUM!` (overflow or no real result), `#REF!` (off the sheet),
   `#CIRC!` (circular reference), `#NAME?` (unknown function).
+
+## Degrees or radians
+
+The Formulas menu chooses what `SIN`, `COS`, and `TAN` take angles in:
+**Angles in Degrees** (the default) or **Angles in Radians**. The DEG/RAD
+button at the right of the toolbar shows which is in use; clicking it switches
+to the other.
+
+- Switching recalculates every formula at once. It's one step that Undo
+  reverses ("Undo Angles in Radians") and counts as an unsaved change.
+- The choice belongs to the sheet: it's saved in the file, so a sheet shows
+  the same results wherever it's opened. Opening a sheet uses its unit, and
+  sheets saved before this option existed open in degrees.
+- New starts the next sheet with the same unit as the current one.
+- To use degrees typed in cells while the sheet is in radians, convert them:
+  `=SIN(A1*PI/180)`.
+- Ask Claude is told which unit the sheet uses, and again if you switch, so
+  the formulas it writes take the right one.
 
 ## AutoSum (Σ)
 

@@ -1,4 +1,5 @@
-"""Parsing and evaluation of formulas such as =(A1+B2)*2^3 or =SUM(A1:A9, C4).
+"""Parsing and evaluation of formulas such as =(A1+B2)*2^3, =SUM(A1:A9, C4),
+or =2*PI*A1.
 
 Grammar (lowest to highest precedence):
 
@@ -6,11 +7,13 @@ Grammar (lowest to highest precedence):
     term    := unary (('*' | '/') unary)*
     unary   := ('+' | '-') unary | power
     power   := primary ('^' unary)?
-    primary := NUMBER | REF | '#REF!' | NAME '(' args ')' | '(' expr ')'
+    primary := NUMBER | REF | '#REF!' | CONSTANT ('(' ')')? | NAME '(' args ')'
+             | '(' expr ')'
     args    := arg (',' arg)*
     arg     := REF ':' REF | expr
 
-Ranges (A1:B9) appear only as function arguments.
+Ranges (A1:B9) appear only as function arguments. A constant such as PI may
+be followed by empty parentheses, PI(), as in other spreadsheets.
 
 Exponentiation follows mathematical convention: it binds tighter than unary
 minus (-2^2 = -4) and is right-associative (2^3^2 = 512).
@@ -30,7 +33,7 @@ from .errors import (  # noqa: F401 -- re-exported for the rest of the app
     CellError,
     FormulaError,
 )
-from .functions import FUNCTIONS, power
+from .functions import CONSTANTS, FUNCTIONS, power
 from .numformat import format_number, parse_formatted  # noqa: F401 -- format_number re-exported
 from .references import column_index, column_name, parse_cell_name
 
@@ -256,7 +259,8 @@ def to_number(value) -> float:
 def evaluate(node, sheet) -> float:
     """Evaluate an AST against `sheet`, which provides `cell(row, col)` and
     `cells_in(top, left, bottom, right)` returning cell values (None, float,
-    str, or CellError) and raising FormulaError(REF_ERROR) off the sheet.
+    str, or CellError) and raising FormulaError(REF_ERROR) off the sheet, and
+    `angle_unit`, which SIN, COS, and TAN take angles in (DEGREES or RADIANS).
     """
     kind = node[0]
     if kind == "num":
@@ -273,7 +277,10 @@ def evaluate(node, sheet) -> float:
             return _finite(function.compute([_argument(arg, sheet) for arg in node[2]]))
         if any(arg[0] == "range" for arg in node[2]):
             raise FormulaError(VALUE_ERROR)  # takes single numbers, not ranges
-        return _finite(function.compute(*(evaluate(arg, sheet) for arg in node[2])))
+        args = [evaluate(arg, sheet) for arg in node[2]]
+        if function.angle:
+            args.append(sheet.angle_unit)
+        return _finite(function.compute(*args))
     _, op, left, right = node
     a = evaluate(left, sheet)
     b = evaluate(right, sheet)
@@ -368,7 +375,7 @@ class _Parser:
         if kind == "error":
             return ("err", text)
         if kind == "name":
-            return self.call(text)
+            return self.named(text)
         if text == "(":
             node = self.expr()
             self.expect(")")
@@ -379,8 +386,17 @@ class _Parser:
         if self.take()[1] != text:
             raise FormulaError(PARSE_ERROR)
 
-    def call(self, name: str):
+    def named(self, name: str):
+        """A constant or a function call."""
         name = name.upper()
+        if name not in CONSTANTS:
+            return self.call(name)
+        if self.peek() == "(":
+            self.take()
+            self.expect(")")
+        return ("num", CONSTANTS[name])
+
+    def call(self, name: str):
         if name not in FUNCTIONS or self.peek() != "(":
             raise FormulaError(NAME_ERROR)
         self.take()

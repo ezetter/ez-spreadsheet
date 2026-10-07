@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from py_spread.formula import (
@@ -10,10 +12,14 @@ from py_spread.formula import (
     replace_function,
     shift_references,
 )
+from py_spread.references import column_index
+from py_spread.functions import DEGREES
 from py_spread.model import SheetModel
 
 
 class EmptySheet:
+    angle_unit = DEGREES
+
     def cell(self, row, col):
         return None
 
@@ -180,6 +186,41 @@ def test_unknown_names(text):
     with pytest.raises(FormulaError) as e:
         calc(text)
     assert e.value.code == "#NAME?"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("PI", math.pi),
+    ("pi", math.pi),
+    ("Pi()", math.pi),          # as typed in other spreadsheets
+    ("2*PI", 2 * math.pi),
+    ("-PI^2", -math.pi ** 2),
+    ("PI()/ 2", math.pi / 2),
+    ("SUM(PI, 1)", math.pi + 1),
+])
+def test_pi(text, expected):
+    assert calc(text) == expected
+
+
+@pytest.mark.parametrize("text, code", [
+    ("PI(1)", "#ERROR!"),
+    ("PI(", "#ERROR!"),
+    ("PI PI", "#ERROR!"),
+    ("PIE", "#NAME?"),
+])
+def test_pi_mistakes(text, code):
+    with pytest.raises(FormulaError) as e:
+        calc(text)
+    assert e.value.code == code
+
+
+def test_pi_with_digits_is_a_cell_reference():
+    assert parse("PI2") == ("ref", 1, column_index("PI"))
+
+
+def test_pi_in_a_cell_shows_ten_digits(sheet):
+    sheet.set_cell(0, 2, "=PI")
+    assert sheet.display_text(0, 2) == "3.141592654"
+    assert sheet.value(0, 2) == math.pi
 
 
 def test_parse_sum():

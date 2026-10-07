@@ -48,11 +48,12 @@ tighter than unary minus (-2^2 is -4) and is right-associative. References \
 look like A1 or $A$1; ranges like A1:B9 can only be function arguments. The \
 only functions are SUM, MEAN, MEDIAN, and STDDEV (sample standard deviation), \
 which take ranges, cells, and numbers; SIN, COS, and TAN, which take an angle \
-in DEGREES; EXP(x), e to the power x; and POW(x, y), x to the power y. There \
-are no others: no PI, SQRT, LN, ABS, IF, or text functions (use x^0.5 for a \
-square root, and type pi as 3.141592653589793). Text that doesn't start with \
-= is stored as typed; numbers may include a dollar sign and thousands \
-separators ($1,234.50), and keep that style."""
+in the sheet's angle unit, degrees or radians (you're told which, and told \
+again if they switch it); EXP(x), e to the power x; and POW(x, y), x to the \
+power y. PI is the constant pi (=2*PI*A1). There are no other functions: no \
+SQRT, LN, ABS, IF, or text functions (use x^0.5 for a square root). Text that \
+doesn't start with = is stored as typed; numbers may include a dollar sign and \
+thousands separators ($1,234.50), and keep that style."""
 
 SYSTEM_PROMPT = f"""\
 You're a data analyst helping someone who is using Py-Spread, a desktop \
@@ -177,6 +178,9 @@ class SheetAccess:
         self.model = model
         self.on_write = on_write
 
+    def angle_unit(self) -> str:
+        return self.model.angle_unit
+
     def read(self, range_text: str) -> str:
         top, left, bottom, right = _parse_range(range_text)
         if (bottom - top + 1) * (right - left + 1) > MAX_READ_CELLS:
@@ -282,6 +286,7 @@ class ClaudeSession:
         self.csv_text = csv_text
         self.description = description
         self.sheet = sheet  # None: Claude can't read or write the sheet
+        self.told_angle_unit = None  # the angle unit Claude was last told
         self.messages = []  # the conversation, appended to and never edited
         self.container_id = None
         self.upload_id = None
@@ -323,6 +328,16 @@ class ClaudeSession:
         return [CODE_EXECUTION] + ([READ_TOOL, WRITE_TOOL] if self.sheet else [])
 
     def _question_content(self, question: str, listener: Listener):
+        # Tell Claude the angle unit at the start, and again if it's switched,
+        # so the trig formulas it writes take the right unit.
+        unit = listener.run_on_sheet(self.sheet.angle_unit) if self.sheet else None
+        if unit != self.told_angle_unit:
+            question = f"The sheet takes angles in {unit}.\n\n{question}"
+        content = self._content(question, listener)
+        self.told_angle_unit = unit
+        return content
+
+    def _content(self, question: str, listener: Listener):
         if self.messages:
             return question  # a follow-up: the data is already in the conversation
         if self.upload_id is None:  # (it's kept if a first question failed)

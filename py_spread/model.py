@@ -1,5 +1,5 @@
 """Sheet data model: sparse storage of raw cell text and number formats behind
-a Qt table model."""
+a Qt table model, plus the unit its trig functions take angles in."""
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QFont, QUndoCommand, QUndoStack
@@ -18,6 +18,7 @@ from .formula import (
     parse_number,
     references,
 )
+from .functions import DEGREES
 from .numformat import NumberFormat, format_value, parse_formatted
 from .textstyle import PLAIN, CellStyle
 from .references import column_name
@@ -51,6 +52,22 @@ class _CellsCommand(QUndoCommand):
         self.model._apply(*self.before, from_history=True)
 
 
+class _AngleUnitCommand(QUndoCommand):
+    """One undoable switch of the unit SIN, COS, and TAN take angles in."""
+
+    def __init__(self, model, unit: str):
+        super().__init__(f"Angles in {unit.capitalize()}")
+        self.model = model
+        self.before = model.angle_unit
+        self.after = unit
+
+    def redo(self):
+        self.model._apply_angle_unit(self.after)
+
+    def undo(self):
+        self.model._apply_angle_unit(self.before)
+
+
 class SheetModel(QAbstractTableModel):
     """Holds the raw text of each non-empty cell, keyed by (row, col), and each
     cell's explicit number format and text style, if it has them.
@@ -63,6 +80,8 @@ class SheetModel(QAbstractTableModel):
     contents_changed = Signal()
     # Emitted with the (row, col) cells an undo or redo changed.
     history_applied = Signal(list)
+    # Emitted with the angle unit when it's switched or a sheet is loaded.
+    angle_unit_changed = Signal(str)
 
     def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
         super().__init__(parent)
@@ -80,6 +99,8 @@ class SheetModel(QAbstractTableModel):
         self._styles: dict[tuple[int, int], CellStyle] = {}
         # Formats formula cells take from the cells they refer to. Cleared on every edit.
         self._inferred_formats: dict[tuple[int, int], NumberFormat | None] = {}
+        # What SIN, COS, and TAN take angles in: DEGREES or RADIANS.
+        self._angle_unit = DEGREES
         self._formula_sheet = _FormulaSheet(self)
         # Every edit goes through set_cells and lands here as one undo step.
         self.undo_stack = QUndoStack(self)
@@ -173,6 +194,23 @@ class SheetModel(QAbstractTableModel):
         """The cell's explicit format, if it has one."""
         return self._formats.get((row, col))
 
+    @property
+    def angle_unit(self) -> str:
+        return self._angle_unit
+
+    def set_angle_unit(self, unit: str) -> None:
+        """Switch the unit SIN, COS, and TAN take angles in, as one undoable step."""
+        if unit != self._angle_unit:
+            self.undo_stack.push(_AngleUnitCommand(self, unit))
+
+    def _apply_angle_unit(self, unit: str) -> None:
+        self._angle_unit = unit
+        self._values.clear()
+        self.angle_unit_changed.emit(unit)
+        self.contents_changed.emit()
+        if self._formula_keys:
+            self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
+
     def _apply(self, texts: dict, formats: dict, styles: dict, from_history: bool = False) -> None:
         changed = {key for key, text in texts.items() if self._store(key, text)}
         for table, updates in ((self._formats, formats), (self._styles, styles)):
@@ -218,7 +256,8 @@ class SheetModel(QAbstractTableModel):
         return True
 
     def sheet_data(self) -> SheetData:
-        return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats), dict(self._styles))
+        return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats),
+                         dict(self._styles), self._angle_unit)
 
     def load_sheet_data(self, sheet: SheetData) -> None:
         """Replace the whole sheet, including its size."""
@@ -229,11 +268,13 @@ class SheetModel(QAbstractTableModel):
         self._formula_keys = {key for key, text in self._cells.items() if is_formula(text)}
         self._formats = dict(sheet.formats)
         self._styles = dict(sheet.styles)
+        self._angle_unit = sheet.angle_unit
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
         self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
+        self.angle_unit_changed.emit(self._angle_unit)
 
     def insert_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
         """Why blank cells can't be inserted in place of a block with this
@@ -537,6 +578,10 @@ class _FormulaSheet:
 
     def __init__(self, model: SheetModel):
         self.model = model
+
+    @property
+    def angle_unit(self) -> str:
+        return self.model.angle_unit
 
     def _check(self, row: int, col: int) -> None:
         if not (0 <= row < self.model.rowCount() and 0 <= col < self.model.columnCount()):

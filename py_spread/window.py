@@ -27,6 +27,7 @@ from .clipboard import ClipboardController
 from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
+from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
@@ -275,8 +276,10 @@ class MainWindow(QMainWindow):
         self._build_edit_menu()
         self._build_insert_menu()
         self._build_format_menu()
+        self._build_formulas_menu()
         self._build_claude_menu()
         self._build_toolbar()
+        self.model.angle_unit_changed.connect(self._show_angle_unit)
 
         self._bar_refs = ReferenceInserter(self.edit_bar)
         self._grid_refs = None  # ReferenceInserter for the open in-cell editor
@@ -482,6 +485,34 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, n=name, a=attribute: self._toggle_style(n, a))
             menu.addAction(action)
             self.format_actions[name] = action
+    def _build_formulas_menu(self):
+        menu = self.menuBar().addMenu("Formulas")
+        group = QActionGroup(self)  # one of them is checked: the sheet's angle unit
+        self.angle_actions = {}
+        for unit in ANGLE_UNITS:
+            action = QAction(f"Angles in {unit.capitalize()}", self)
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, u=unit: self.set_angle_unit(u))
+            menu.addAction(action)
+            self.angle_actions[unit] = action
+
+    def set_angle_unit(self, unit: str):
+        """Make SIN, COS, and TAN take angles in `unit` (DEGREES or RADIANS)."""
+        self._commit_pending_edit()
+        self.model.set_angle_unit(unit)
+
+    def _toggle_angle_unit(self):
+        self.set_angle_unit(RADIANS if self.model.angle_unit == DEGREES else DEGREES)
+
+    def _show_angle_unit(self, *_args):
+        unit = self.model.angle_unit
+        other = RADIANS if unit == DEGREES else DEGREES
+        self.angle_actions[unit].setChecked(True)
+        self.angle_button_action.setIconText("DEG" if unit == DEGREES else "RAD")
+        self.angle_button_action.setToolTip(f"SIN, COS, and TAN take angles in {unit}. "
+                                            f"Click to use {other}.")
+
     def _toggle_style(self, name: str, attribute: str):
         """Like other spreadsheets: if the current cell already has the style,
         remove it from the selected cells; otherwise give it to them."""
@@ -565,6 +596,7 @@ class MainWindow(QMainWindow):
         self._build_fill_button(toolbar)
         self._build_chart_button(toolbar)
         self._add_currency_button(toolbar)
+        self._add_angle_button(toolbar)
         self.statusBar()  # create it now so the window doesn't resize on the first message
 
     def _add_currency_button(self, toolbar):
@@ -595,6 +627,14 @@ class MainWindow(QMainWindow):
             font.setBold(name == "Bold")
             font.setItalic(name == "Italic")
             button.setFont(font)
+
+    def _add_angle_button(self, toolbar):
+        """A toolbar button showing the angle unit, DEG or RAD, that switches it."""
+        toolbar.addSeparator()
+        self.angle_button_action = QAction(self)
+        self.angle_button_action.triggered.connect(lambda _checked=False: self._toggle_angle_unit())
+        toolbar.addAction(self.angle_button_action)
+        self._show_angle_unit()
 
     def _build_fill_button(self, toolbar):
         self.fill_action = QAction(self)
@@ -771,7 +811,7 @@ class MainWindow(QMainWindow):
 
     def new_file(self) -> None:
         if self.maybe_save():
-            self._load(SheetData(DEFAULT_ROWS, DEFAULT_COLS), None)
+            self._load(self._empty_sheet(), None)
 
     def open_file(self) -> None:
         if not self.maybe_save():
@@ -795,8 +835,12 @@ class MainWindow(QMainWindow):
         path = os.path.abspath(path)
         if os.path.exists(path) or not os.path.isdir(os.path.dirname(path)):
             return self.open_path(path)  # reports a bad folder as an error
-        self._load(SheetData(DEFAULT_ROWS, DEFAULT_COLS), path)
+        self._load(self._empty_sheet(), path)
         return True
+
+    def _empty_sheet(self) -> SheetData:
+        """A new sheet, taking angles in the same unit as the current one."""
+        return SheetData(DEFAULT_ROWS, DEFAULT_COLS, angle_unit=self.model.angle_unit)
 
     def save(self) -> bool:
         if self.file_path is None:

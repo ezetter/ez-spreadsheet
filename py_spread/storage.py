@@ -1,15 +1,18 @@
 """Reading and writing sheets as .pysheet files.
 
 A .pysheet file is JSON holding each non-empty cell's raw text (formulas
-included) keyed by its A1 name:
+included) keyed by its A1 name, and the unit SIN, COS, and TAN take angles in:
 
     {
       "format": "py-spread",
-      "version": 1,
+      "version": 4,
       "rows": 1000,
       "columns": 52,
+      "angles": "degrees",
       "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"}
     }
+
+Number formats and text styles, if any, follow under "formats" and "styles".
 """
 
 import json
@@ -18,12 +21,13 @@ import tempfile
 from dataclasses import dataclass, field
 
 from . import numformat, textstyle
+from .functions import ANGLE_UNITS, DEGREES
 from .numformat import NumberFormat
 from .textstyle import CellStyle
 from .references import cell_name, parse_cell_name
 
 FORMAT = "py-spread"
-VERSION = 3  # 2 added number formats; 3 added bold and italic
+VERSION = 4  # 2 added number formats; 3 added bold and italic; 4 added the angle unit
 EXTENSION = ".pysheet"
 
 
@@ -38,6 +42,7 @@ class SheetData:
     cells: dict[tuple[int, int], str] = field(default_factory=dict)
     formats: dict[tuple[int, int], NumberFormat] = field(default_factory=dict)
     styles: dict[tuple[int, int], CellStyle] = field(default_factory=dict)
+    angle_unit: str = DEGREES
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -47,6 +52,7 @@ def save_sheet(path: str, sheet: SheetData) -> None:
         "version": VERSION,
         "rows": sheet.rows,
         "columns": sheet.cols,
+        "angles": sheet.angle_unit,
         "cells": {cell_name(row, col): text for (row, col), text in ordered},
     }
     if sheet.formats:
@@ -109,11 +115,14 @@ def load_sheet(path: str) -> SheetData:
     cells = document.get("cells", {})
     formats = document.get("formats", {})  # absent before version 2
     styles = document.get("styles", {})  # absent before version 3
+    angle_unit = document.get("angles", DEGREES)  # absent before version 4
     if not (_positive_int(rows) and _positive_int(cols) and isinstance(cells, dict)
             and isinstance(formats, dict) and isinstance(styles, dict)):
         raise SheetFileError(f"{path} is damaged: bad sheet size, or cell, format, or style table.")
+    if angle_unit not in ANGLE_UNITS:
+        raise SheetFileError(f"{path} is damaged: angles must be degrees or radians.")
 
-    sheet = SheetData(rows, cols)
+    sheet = SheetData(rows, cols, angle_unit=angle_unit)
     for name, text in cells.items():
         row, col = _cell_key(path, name)
         if not isinstance(text, str):
