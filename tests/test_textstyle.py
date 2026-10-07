@@ -7,7 +7,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QToolBar
 
 from py_spread.model import SheetModel
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from py_spread.storage import VERSION, SheetData, SheetFileError, load_sheet, save_sheet
 from py_spread.textstyle import PLAIN, CellStyle, from_json, to_json
 from py_spread.window import MainWindow
 
@@ -57,7 +57,7 @@ def test_styles_saved_and_loaded(tmp_path):
     sheet = SheetData(10, 5, {(0, 0): "x"}, styles={(0, 0): BOLD, (2, 3): CellStyle(True, True)})
     save_sheet(path, sheet)
     document = json.loads(open(path).read())
-    assert document["version"] == 5
+    assert document["version"] == VERSION
     assert document["styles"] == {"A1": {"bold": True}, "D3": {"bold": True, "italic": True}}
     assert load_sheet(path) == sheet
 

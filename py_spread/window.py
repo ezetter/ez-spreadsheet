@@ -30,7 +30,7 @@ from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
-from .names_dialog import NameCellDialog, NamesDialog
+from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
@@ -402,6 +402,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addMenu(self.fill_menu)
         menu.addAction(self.name_cell_action)
+        menu.addAction(self.name_column_action)
         menu.addSeparator()
         menu.addAction(self.ask_claude_action)
         self.context_menu = menu
@@ -409,6 +410,9 @@ class MainWindow(QMainWindow):
         # selection when it's inside it, as other spreadsheets do.
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_context_menu)
+        header = self.view.horizontalHeader()
+        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._show_header_menu)
 
     def _show_context_menu(self, pos):
         self._commit_pending_edit()
@@ -595,6 +599,9 @@ class MainWindow(QMainWindow):
         self.name_cell_action = QAction("Name Cell…", self)
         self.name_cell_action.triggered.connect(lambda _checked=False: self.name_cell())
         menu.addAction(self.name_cell_action)
+        self.name_column_action = QAction("Name Column…", self)
+        self.name_column_action.triggered.connect(lambda _checked=False: self.name_column())
+        menu.addAction(self.name_column_action)
         self.names_action = QAction("Names…", self)
         self.names_action.triggered.connect(lambda _checked=False: self.edit_names())
         menu.addAction(self.names_action)
@@ -618,17 +625,50 @@ class MainWindow(QMainWindow):
         dialog = NameCellDialog(self.model, row, col, self)
         return dialog.chosen_name() if dialog.exec() == QDialog.Accepted else None
 
+    def name_column(self, col: int | None = None) -> bool:
+        """Name a column (the current cell's, unless given), so formulas can
+        use name1, name2, ... for its cells. Its current name can be changed
+        or removed."""
+        self._commit_pending_edit()
+        if col is None:
+            col = self.view.currentIndex().column()
+        name = self._ask_column_name(col)
+        if name is None:
+            return False
+        problem = self.model.name_column(col, name)
+        if problem:  # (the dialog checks first; this is a safeguard)
+            self._show_error("Couldn't name the column.", problem)
+            return False
+        return True
+
+    def _ask_column_name(self, col: int) -> str | None:
+        """The name chosen in the Name Column dialog, or None if cancelled."""
+        dialog = NameColumnDialog(self.model, col, self)
+        return dialog.chosen_name() if dialog.exec() == QDialog.Accepted else None
+
+    def _show_header_menu(self, pos):
+        """A secondary click on a column header: select the column, offer to name it."""
+        col = self.view.horizontalHeader().logicalIndexAt(pos)
+        if col < 0:
+            return
+        self.view.select_range(0, col, self.model.rowCount() - 1, col)
+        menu = QMenu(self)
+        menu.addAction("Name Column…", lambda: self.name_column(col))
+        menu.popup(self.view.horizontalHeader().mapToGlobal(pos))
+        self.header_menu = menu  # kept alive while it's shown
+
     def edit_names(self) -> bool:
-        """Show every cell name, to rename, redefine, add, or delete."""
+        """Show every cell and column name, to rename, redefine, add, or delete."""
         self._commit_pending_edit()
         chosen = self._ask_names()
         if chosen is None:
             return False
-        self.model.replace_names(chosen, "Edit Names")
+        cells, columns = chosen
+        self.model.replace_names(cells, "Edit Names", columns)
         return True
 
-    def _ask_names(self) -> dict | None:
-        """The names as left in the Names dialog, or None if cancelled."""
+    def _ask_names(self) -> tuple | None:
+        """The cell and column names as left in the Names dialog, or None if cancelled."""
         dialog = NamesDialog(self.model, self)
         return dialog.chosen_names() if dialog.exec() == QDialog.Accepted else None
 
@@ -1177,7 +1217,7 @@ class MainWindow(QMainWindow):
             self.cell_label.setText("")
             self.edit_bar.setText("")
             return
-        name = self.model.name_of(index.row(), index.column())
+        name = self.model.alias_of(index.row(), index.column())
         reference = cell_name(index.row(), index.column())
         self.cell_label.setText(f"{reference} ({name})" if name else reference)
         self.edit_bar.setText(self.model.get_cell(index.row(), index.column()))

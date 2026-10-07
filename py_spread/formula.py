@@ -34,6 +34,7 @@ from .errors import (  # noqa: F401 -- re-exported for the rest of the app
     FormulaError,
 )
 from .functions import CONSTANTS, FUNCTIONS, power
+from .names import Names, as_names, cell_text
 from .numformat import format_number, parse_formatted  # noqa: F401 -- format_number re-exported
 from .references import column_index, column_name, parse_cell_name
 
@@ -91,10 +92,12 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     reference pushed off the top or left of the sheet becomes #REF!. Text that
     doesn't tokenize is returned unchanged.
 
-    A bare reference spelled like one of the cell `names` is that name, which
-    doesn't move; a shifted reference that would be spelled like a name gets
-    a $ so it still means the cell (see names.cell_text).
+    `names` (a names.Names, or cell names): a cell name doesn't move. A column
+    alias (t1) moves like $C1: its row number changes and its column doesn't.
+    A shifted reference that would be spelled like a name gets a $ so it
+    still means the cell (see names.cell_text).
     """
+    names = as_names(names)
     body = formula[1:]
     try:
         matches = _scan(body)
@@ -104,21 +107,26 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     pieces = []
     pos = 0
     for i, match in enumerate(matches):
-        if match.group("ref") is None or (i not in endpoints and _is_name(match, names)):
+        corner = i in endpoints
+        found = _token_cell(match, names, corner)
+        if found is None:
             continue
-        col = column_index(match.group("col"))
-        row = int(match.group("row")) - 1
-        if not match.group("col_anchor"):
-            col += d_col
-        if not match.group("row_anchor"):
-            row += d_row
+        (row, col), alias = found
+        if alias is not None:
+            row += d_row  # a column alias: the row is relative, the column fixed
+        else:
+            if not match.group("col_anchor"):
+                col += d_col
+            if not match.group("row_anchor"):
+                row += d_row
         if row < 0 or col < 0:
             shifted = REF_ERROR
         else:
-            shifted = _ref_text(match, (row, col), () if i in endpoints else names)
-        pieces.append(body[pos:match.start("ref")])
+            shifted = _cell_token_text(match, (row, col), alias, names, corner)
+        start, stop = _token_span(match)
+        pieces.append(body[pos:start])
         pieces.append(shifted)
-        pos = match.end("ref")
+        pos = stop
     pieces.append(body[pos:])
     return "=" + "".join(pieces)
 
@@ -131,8 +139,11 @@ def move_references(formula: str, move, move_range=None, names=()) -> str:
     new (start, end) or None; otherwise each corner is moved on its own.
     Unlike shift_references, $ anchors don't matter: a reference follows its
     cell. References to cells that didn't move keep their text exactly.
-    Cell `names` are handled as in shift_references: names don't move (their
-    definitions do), and a moved reference spelled like a name gets a $."""
+    `names` are handled as in shift_references: cell names don't move (their
+    definitions do), a column alias follows its cell (staying an alias while
+    the cell stays in the named column), and a moved reference spelled like a
+    name gets a $."""
+    names = as_names(names)
     body = formula[1:]
     try:
         matches = _scan(body)
@@ -142,65 +153,89 @@ def move_references(formula: str, move, move_range=None, names=()) -> str:
     pieces = []
     pos = 0
 
-    def replace(start: int, end: int, text: str) -> None:
+    def replace(start: int, stop: int, text: str) -> None:
         nonlocal pos
         pieces.append(body[pos:start])
         pieces.append(text)
-        pos = end
+        pos = stop
 
     i = 0
     while i < len(matches):
         match = matches[i]
-        if match.group("ref") is None:
+        found = _token_cell(match, names, i in endpoints)
+        if found is None or min(found[0]) < 0:
             i += 1
             continue
-        is_range = (i + 2 < len(matches) and matches[i + 1].group("op") == ":"
-                    and matches[i + 2].group("ref") is not None)
-        if is_range and move_range is not None:
+        last_found = None
+        if i + 2 < len(matches) and matches[i + 1].group("op") == ":":
+            last_found = _token_cell(matches[i + 2], names, True)
+        if last_found is not None and move_range is not None:
             last = matches[i + 2]
-            old = (_ref_cell(match), _ref_cell(last))
+            old = (found[0], last_found[0])
             new = move_range(*old)
             if new is None or min(new[0] + new[1]) < 0:
-                replace(match.start("ref"), last.end("ref"), REF_ERROR)
+                replace(_token_span(match)[0], _token_span(last)[1], REF_ERROR)
             elif new != old:
-                replace(match.start("ref"), last.end("ref"),
-                        f"{_ref_text(match, new[0])}:{_ref_text(last, new[1])}")
+                replace(_token_span(match)[0], _token_span(last)[1],
+                        f"{_cell_token_text(match, new[0], found[1], names, True)}:"
+                        f"{_cell_token_text(last, new[1], last_found[1], names, True)}")
             i += 3
             continue
-        if i not in endpoints and _is_name(match, names):
-            i += 1
-            continue
-        old = _ref_cell(match)
+        old, alias = found
         new = move(*old)
         if new is None or min(new) < 0:
-            replace(match.start("ref"), match.end("ref"), REF_ERROR)
+            replace(*_token_span(match), REF_ERROR)
         elif new != old:
-            replace(match.start("ref"), match.end("ref"),
-                    _ref_text(match, new, () if i in endpoints else names))
+            replace(*_token_span(match), _cell_token_text(match, new, alias, names, i in endpoints))
         i += 1
     pieces.append(body[pos:])
     return "=" + "".join(pieces)
+
+
+def _token_cell(match: re.Match, names, corner: bool):
+    """The cell a token refers to, as ((row, col), alias), where alias is the
+    column name if it's a column alias (t5). None if the token isn't a
+    reference here: not a reference at all, or a cell name."""
+    text = match.group("ref") or match.group("name")
+    if text and "$" not in text:
+        alias = names.alias(text)
+        if alias is not None:
+            return (alias[1], alias[2]), alias[0]
+    if match.group("ref") is None:
+        return None
+    if not corner and "$" not in text and text in names.cells:
+        return None  # a cell name spelled like a reference
+    return _ref_cell(match), None
+
+
+def _cell_token_text(match: re.Match, cell: tuple[int, int], alias, names, corner: bool) -> str:
+    """How to write a reference to `cell` in place of the token matched."""
+    if alias is not None:
+        if cell[1] == names.columns[alias]:
+            return f"{alias}{cell[0] + 1}"  # still in the named column
+        return f"${column_name(cell[1])}{cell[0] + 1}"  # moved out of it: like $C1
+    return _ref_text(match, cell, names, corner)
+
+
+def _token_span(match: re.Match) -> tuple[int, int]:
+    group = "ref" if match.group("ref") is not None else "name"
+    return match.start(group), match.end(group)
 
 
 def _ref_cell(match: re.Match) -> tuple[int, int]:
     return int(match.group("row")) - 1, column_index(match.group("col"))
 
 
-def _ref_text(match: re.Match, cell: tuple[int, int], names=()) -> str:
+def _ref_text(match: re.Match, cell: tuple[int, int], names=(), corner: bool = False) -> str:
     """A reference to `cell`, keeping the $ anchors of the reference matched.
-    A bare one spelled like one of the `names` gets a $ before its column."""
+    A bare one spelled like a name gets a $ before its column."""
     text = f"{match.group('col_anchor')}{column_name(cell[1])}{match.group('row_anchor')}{cell[0] + 1}"
-    return "$" + text if text in names else text
-
-
-def _is_name(match: re.Match, names) -> bool:
-    """Whether a reference token is really a cell name (bare, spelled like one)."""
-    return "$" not in match.group("ref") and match.group("ref") in names
+    return cell_text(text, names, corner) if "$" not in text else text
 
 
 def _range_endpoints(matches: list) -> set[int]:
-    """Indexes of the reference tokens that are a range's corners (A1 in
-    A1:B9). Those always mean cells, never names."""
+    """Indexes of the tokens that are a range's corners (A1 in A1:B9). Those
+    mean cells or column aliases, never cell names."""
     endpoints = set()
     for i, match in enumerate(matches):
         if match.group("op") == ":":
@@ -231,12 +266,12 @@ def parse(text: str, names: dict | None = None):
     ("err", code), ("neg", operand), ("bin", op, left, right),
     ("call", name, [args]).
 
-    `names` maps cell names (exactly as spelled) to the (row, col) they name,
-    or to None if that cell was deleted (#REF!). A name becomes a reference
-    to its cell. A bare reference spelled like a name (A1) is the name; with
-    a $ ($A1) it's the cell. Range corners are always cells.
+    `names` (a names.Names, or a dict of cell names to cells) says what names
+    mean; a name becomes a reference to its cell, or #REF! if that cell was
+    deleted. A bare reference spelled like a name (A1) is the name; with a $
+    ($A1) it's the cell. Range corners are cells or column aliases.
     """
-    return _Parser(tokenize(text), names or {}).parse()
+    return _Parser(tokenize(text), as_names(names or {})).parse()
 
 
 def references(node) -> tuple[set[tuple[int, int]], list[tuple[int, int, int, int]]]:
@@ -352,7 +387,7 @@ def _argument(node, sheet) -> list:
 
 
 class _Parser:
-    def __init__(self, tokens, names: dict):
+    def __init__(self, tokens, names: Names):
         self.tokens = tokens
         self.names = names
         self.pos = 0
@@ -406,8 +441,12 @@ class _Parser:
         if kind == "number":
             return ("num", float(text))
         if kind == "ref":
-            if "$" not in text and text in self.names:
-                return self._name_node(text)  # a name spelled like a cell; $A1 is the cell
+            if "$" not in text:
+                if text in self.names.cells:
+                    return self._name_node(text)  # a name spelled like a cell; $A1 is the cell
+                alias = self.names.alias(text)
+                if alias is not None:
+                    return self._alias_node(alias)
             return ("ref", *parse_cell_name(text))
         if kind == "error":
             return ("err", text)
@@ -426,8 +465,12 @@ class _Parser:
     def named(self, name: str):
         """A cell name (matched exactly), a constant, or a function call
         (matched in any case)."""
-        if name in self.names and self.peek() != "(":
-            return self._name_node(name)
+        if self.peek() != "(":
+            if name in self.names.cells:
+                return self._name_node(name)
+            alias = self.names.alias(name)
+            if alias is not None:
+                return self._alias_node(alias)
         name = name.upper()
         if name not in CONSTANTS:
             return self.call(name)
@@ -437,8 +480,25 @@ class _Parser:
         return ("num", CONSTANTS[name])
 
     def _name_node(self, name: str):
-        cell = self.names[name]
+        cell = self.names.cells[name]
         return ("err", REF_ERROR) if cell is None else ("ref", *cell)
+
+    def _alias_node(self, alias):
+        _, row, col = alias
+        return ("err", REF_ERROR) if row < 0 else ("ref", row, col)  # t0 names no cell
+
+    def _corner(self, token):
+        """A range corner: a cell, or a column alias. None for #REF!."""
+        kind, text = token
+        if kind == "error":
+            return None
+        if "$" not in text:
+            alias = self.names.alias(text)
+            if alias is not None:
+                return (alias[1], alias[2]) if alias[1] >= 0 else None
+        if kind != "ref":
+            raise FormulaError(PARSE_ERROR)
+        return parse_cell_name(text)
 
     def call(self, name: str):
         if name not in FUNCTIONS or self.peek() != "(":
@@ -455,15 +515,13 @@ class _Parser:
         return ("call", name, args)
 
     def argument(self):
-        is_endpoint = self.pos < len(self.tokens) and self.tokens[self.pos][0] in ("ref", "error")
+        is_endpoint = self.pos < len(self.tokens) and self.tokens[self.pos][0] in ("ref", "error", "name")
         if is_endpoint and self.pos + 1 < len(self.tokens) and self.tokens[self.pos + 1][1] == ":":
-            first = self.take()
+            first = self._corner(self.take())
             self.take()
-            second = self.take()
-            if second[0] not in ("ref", "error"):
-                raise FormulaError(PARSE_ERROR)
-            if "error" in (first[0], second[0]):
+            second = self._corner(self.take())
+            if first is None or second is None:
                 return ("err", REF_ERROR)  # a range end was pushed off the sheet
-            (r1, c1), (r2, c2) = parse_cell_name(first[1]), parse_cell_name(second[1])
+            (r1, c1), (r2, c2) = first, second
             return ("range", min(r1, r2), min(c1, c2), max(r1, r2), max(c1, c2))
         return self.expr()

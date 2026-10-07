@@ -1,4 +1,4 @@
-"""Dialogs for cell names: naming one cell, and the list of all names."""
+"""Dialogs for names: naming a cell or a column, and the list of all names."""
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt
 
 from . import names
 from .appearance import error_color
-from .references import cell_name, parse_cell_name
+from .references import cell_name, column_index, column_name, parse_cell_name
 
 DELETED = "#REF!"  # shown as the cell of a name whose cell was deleted
 
@@ -50,8 +50,10 @@ class NameCellDialog(_NoteDialog):
         self.setMinimumWidth(380)
         layout = QVBoxLayout(self)
         value = model.display_text(row, col)
-        layout.addWidget(QLabel(f"Name for {cell_name(row, col)}" + (f" (now {value})" if value else "")
-                                + ", for use in formulas, such as =PI*r^2:"))
+        intro = QLabel(f"Name for {cell_name(row, col)}" + (f" (now {value})" if value else "")
+                       + ", for use in formulas, such as =PI*r^2:")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
         self.name = QLineEdit(self.current or "")
         self.name.setPlaceholderText("A name such as r or tax_rate")
         self.name.textChanged.connect(self.update_state)
@@ -63,8 +65,8 @@ class NameCellDialog(_NoteDialog):
         text = self.name.text().strip()
         if not text:
             if self.current:
-                self.show_note(f"OK removes the name {self.current}; formulas using it will show #NAME?.",
-                               error=False)
+                self.show_note(f"OK removes the name {self.current}; formulas using it will then mean "
+                               f"{names.unnamed_meaning(self.current)}.", error=False)
             else:
                 self.show_note("Enter a name.", error=True)
             return
@@ -72,8 +74,8 @@ class NameCellDialog(_NoteDialog):
         if problem:
             self.show_note(problem, error=True)
         elif self.current and names.key(text) != names.key(self.current):
-            self.show_note(f"Renames {self.current}. Formulas using {self.current} will show #NAME? "
-                           f"until changed to {text}.", error=False)
+            self.show_note(f"Renames {self.current}. Formulas using {self.current} will then mean "
+                           f"{names.unnamed_meaning(self.current)} until changed to {text}.", error=False)
         else:
             self.show_note("", error=False)
 
@@ -81,28 +83,81 @@ class NameCellDialog(_NoteDialog):
         return self.name.text().strip()
 
 
+class NameColumnDialog(_NoteDialog):
+    """Name a column, so name1, name2, ... mean its cells. Starts with its
+    current name; clearing it removes the name."""
+
+    def __init__(self, model, col: int, parent=None):
+        super().__init__(parent)
+        self.model, self.col = model, col
+        self.current = model.column_name_of(col)
+        letters = column_name(col)
+        self.setWindowTitle(f"Name Column {letters}")
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+        intro = QLabel(f"Name for column {letters}. With the name t, formulas can use t1 for "
+                       f"${letters}1, t2 for ${letters}2, and so on; filling or copying a formula "
+                       "down moves to the next row's cell (t1 becomes t2).")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.name = QLineEdit(self.current or "")
+        self.name.setPlaceholderText("A name such as t or price (not ending in a digit)")
+        self.name.textChanged.connect(self.update_state)
+        layout.addWidget(self.name)
+        self._make_note_and_buttons(layout)
+        self.update_state()
+
+    def update_state(self, *_args) -> None:
+        text = self.name.text().strip()
+        if not text:
+            if self.current:
+                meaning = names.unnamed_meaning(f"{self.current}1")
+                then = (f"mean cells {self.current.upper()}1, {self.current.upper()}2, …"
+                        if meaning.startswith("cell") else f"show {meaning}")
+                self.show_note(f"OK removes the name {self.current}; formulas using "
+                               f"{self.current}1, {self.current}2, … will then {then}.", error=False)
+            else:
+                self.show_note("Enter a name.", error=True)
+            return
+        problem = self.model.column_name_problem(text, self.col)
+        if problem:
+            self.show_note(problem, error=True)
+        else:
+            letters = column_name(self.col)
+            self.show_note(f"{text}1 will mean ${letters}1, {text}2 ${letters}2, and so on.", error=False)
+
+    def chosen_name(self) -> str:
+        return self.name.text().strip()
+
+
 class NamesDialog(_NoteDialog):
-    """Every cell name, to rename, point at another cell, add, or delete.
-    Changes apply together when OK is clicked."""
+    """Every cell and column name, to rename, point at another cell or
+    column, add, or delete. Changes apply together when OK is clicked."""
 
     NAME, CELL, VALUE = range(3)
 
     def __init__(self, model, parent=None):
         super().__init__(parent)
         self.model = model
-        self.setWindowTitle("Cell Names")
-        self.resize(480, 380)
+        self.setWindowTitle("Names")
+        self.resize(520, 400)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Formulas can use these names in place of cell references. "
-                                "Edit a name or its cell to change it."))
+        intro = QLabel("Formulas can use these names in place of cell references. A name for a cell "
+                       "(such as B2) means that cell; a name for a column (such as C:C), say t, "
+                       "makes t1, t2, … mean its cells. Edit a name or what it refers to to change it.")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Name", "Cell", "Value"])
+        self.table.setHorizontalHeaderLabels(["Name", "Refers To", "Value"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         layout.addWidget(self.table)
         for name, cell in model.cell_names().items():
             self._add_row(name, cell_name(*cell) if cell else DELETED)
+        for name, col in model.column_names().items():
+            letters = column_name(col)
+            self._add_row(name, f"{letters}:{letters}")
         self.table.itemChanged.connect(self._on_edit)
 
         row_buttons = QHBoxLayout()
@@ -131,8 +186,13 @@ class NamesDialog(_NoteDialog):
         return row
 
     def _show_value(self, row: int) -> None:
-        cell = self._cell(self.table.item(row, self.CELL).text())
-        text = self.model.display_text(*cell) if isinstance(cell, tuple) else ""
+        target = self._target(self.table.item(row, self.CELL).text())
+        if isinstance(target, tuple):
+            text = self.model.display_text(*target)
+        elif isinstance(target, int) and not isinstance(target, bool):
+            text = f"Column {column_name(target)}"
+        else:
+            text = ""
         self.table.blockSignals(True)
         self.table.item(row, self.VALUE).setText(text)
         self.table.blockSignals(False)
@@ -153,50 +213,53 @@ class NamesDialog(_NoteDialog):
             self._show_value(item.row())
         self.update_state()
 
-    def _cell(self, text: str):
-        """The (row, col) a Cell entry names, None for a deleted cell, or
-        False if it isn't a cell name."""
-        text = text.strip()
+    def _target(self, text: str):
+        """What a Refers To entry names: a (row, col) cell, a column index
+        (written C:C, or just C), None for a deleted cell, or False if it's
+        neither."""
+        text = text.strip().replace("$", "")
         if text.upper() == DELETED:
             return None
+        first, colon, last = text.partition(":")
+        if (colon and first.upper() == last.upper() or not colon) and first.isalpha() and first.isascii():
+            return column_index(first)
         try:
-            row, col = parse_cell_name(text.replace("$", ""))
+            row, col = parse_cell_name(text)
         except ValueError:
             return False
         return (row, col) if row >= 0 else False
 
     def _read(self):
-        """{name: cell} from the table, or a message saying what's wrong."""
-        result, by_key, by_cell = {}, {}, {}
+        """({name: cell}, {name: column}) from the table, or a message saying
+        what's wrong."""
+        cells, columns = {}, {}
         for row in range(self.table.rowCount()):
             name = self.table.item(row, self.NAME).text().strip()
-            cell_text = self.table.item(row, self.CELL).text().strip()
+            target = self._target(self.table.item(row, self.CELL).text())
             problem = names.syntax_problem(name)
             if problem:
                 return f"Row {row + 1}: {problem}"
-            cell = self._cell(cell_text)
-            if cell is False:
-                return f"{name}: enter its cell, such as B2."
-            if names.key(name) in by_key:
-                return f"{name} is used twice. Each name can name only one cell."
-            if cell is not None and cell in by_cell:
-                return f"{cell_name(*cell)} has two names, {by_cell[cell]} and {name}. A cell can have only one."
-            by_key[names.key(name)] = name
-            if cell is not None:
-                by_cell[cell] = name
-            result[name] = cell
-        return result
+            if target is False:
+                return f"{name}: enter what it refers to, a cell such as B2 or a column such as C:C."
+            if name in cells or name in columns:
+                return f"{name} is used twice. Each name can name only one thing."
+            if isinstance(target, int) and not isinstance(target, bool):
+                columns[name] = target
+            else:
+                cells[name] = target
+        return names.conflict(cells, columns) or (cells, columns)
 
     def update_state(self, *_args) -> None:
         result = self._read()
         if isinstance(result, str):
             self.show_note(result, error=True)
-        elif any(cell is None for cell in result.values()):
+        elif any(cell is None for cell in result[0].values()):
             self.show_note(f"Names showing {DELETED} name cells that were deleted. "
                            "Give them a cell, or delete them.", error=False)
         else:
             self.show_note("", error=False)
 
-    def chosen_names(self) -> dict:
+    def chosen_names(self) -> tuple[dict, dict]:
+        """The cell names ({name: cell}) and column names ({name: column})."""
         result = self._read()
-        return result if isinstance(result, dict) else {}
+        return result if isinstance(result, tuple) else ({}, {})

@@ -55,7 +55,9 @@ for B2; a formula can use a name in place of that cell's reference (=PI*r^2), \
 and read_cells lists the sheet's names. Names are case-sensitive and can look \
 like cell references: if a cell is named A1, a bare A1 in a formula means \
 that name, and $A1, A$1, or $A$1 mean cell A1. Ranges (A1:B9) always mean \
-cells. There are no other functions: no \
+cells. A column can have a name too: with column C named t, t1 means $C1, t2 \
+means $C2, and so on, also as range corners (=SUM(t1:t9)); filling or \
+copying a formula down turns t1 into t2. There are no other functions: no \
 SQRT, LN, ABS, IF, or text functions (use x^0.5 for a square root). Text that \
 doesn't start with = is stored as typed; numbers may include a dollar sign and \
 thousands separators ($1,234.50), and keep that style."""
@@ -212,6 +214,10 @@ class SheetAccess:
         if cell_names:
             text += "\nNamed cells in the sheet: " + ", ".join(
                 f"{name} = {cell_name(*cell)}" for name, cell in cell_names.items())
+        if model.column_names():
+            text += "\nNamed columns in the sheet: " + ", ".join(
+                f"{name} = column {column_name(col)} ({name}1 is {column_name(col)}1)"
+                for name, col in model.column_names().items())
         return text
 
     def write(self, start: str, rows: list[list[str]]) -> str:

@@ -177,7 +177,7 @@ Sheets are saved as `.pysheet` files: JSON holding each cell's raw text
 ```json
 {
   "format": "py-spread",
-  "version": 5,
+  "version": 6,
   "rows": 1000,
   "columns": 52,
   "angles": "degrees",
@@ -346,6 +346,25 @@ is copied elsewhere. The cell bar shows a named cell as, for example, `B2 (r)`.
   shows `#REF!` until you give it a new cell.
 - Naming changes can be undone, and names are saved with the sheet. Claude
   knows about them too, so it can use them in formulas it writes.
+
+### Column names
+
+A whole column can have a name too. Choose Formulas > Name Column… (also on
+the secondary-click menu, and on a column header's), and name, say, column C
+`t`. Then `t1` means `$C1`, `t2` means `$C2`, and so on. The header shows
+`C (t)`, and the cell bar shows a cell's alias, such as `C5 (t5)`.
+
+- Like `$C1`, the row number moves when a formula is filled or copied down,
+  and the column doesn't: fill `=x*t1` down and you get `=x*t2`, `=x*t3`, ….
+- Aliases work as range corners too: `=SUM(t1:t10)`.
+- A column name can't end with a digit (`t2` followed by a row number would be
+  ambiguous), and every name, of a cell or a column, must be different. A cell
+  can't be named like an alias of a named column (no cell named `t5` while a
+  column is named `t`). A column has one name.
+- Formulas > Names… lists column names along with cell names; a column is
+  written `C:C` there.
+- Column names stay with their column when cells are inserted or deleted; cell
+  references in formulas still follow their cells.
 
 ## AutoSum (Σ)
 

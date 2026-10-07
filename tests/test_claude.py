@@ -558,3 +558,11 @@ def test_read_lists_cell_names(app):
     model.name_cell(1, 1, "r")
     assert SheetAccess(model).read("A1").endswith("Named cells in the sheet: r = B2")
     assert "=PI*r^2" in claude.SYSTEM_PROMPT
+
+
+
+def test_read_lists_column_names(app):
+    model = SheetModel(rows=10, cols=6)
+    model.name_column(2, "t")
+    assert SheetAccess(model).read("A1").endswith("Named columns in the sheet: t = column C (t1 is C1)")
+    assert "t1 means $C1" in claude.SYSTEM_PROMPT

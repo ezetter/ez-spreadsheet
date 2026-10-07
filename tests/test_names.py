@@ -198,7 +198,7 @@ def test_names_dialog_lists_and_edits(model):
     assert dialog.table.item(1, NamesDialog.VALUE).text() == ""
     dialog.table.selectRow(0)
     dialog.delete_selected()
-    assert dialog.chosen_names() == {"r": (0, 3)}
+    assert dialog.chosen_names() == ({"r": (0, 3)}, {})
 
 
 def test_names_dialog_add_and_duplicates(model):
@@ -211,7 +211,7 @@ def test_names_dialog_add_and_duplicates(model):
     dialog.table.item(row, NamesDialog.CELL).setText("E5")
     assert "used twice" in dialog.note.text()
     dialog.table.item(row, NamesDialog.NAME).setText("s")
-    assert dialog.chosen_names() == {"r": (1, 1), "s": (4, 4)}
+    assert dialog.chosen_names() == ({"r": (1, 1), "s": (4, 4)}, {})
 
 
 def test_names_dialog_shows_deleted(model):
@@ -220,7 +220,7 @@ def test_names_dialog_shows_deleted(model):
     dialog = NamesDialog(model)
     assert dialog.table.item(0, NamesDialog.CELL).text() == DELETED
     assert "deleted" in dialog.note.text()
-    assert dialog.chosen_names() == {"r": None}
+    assert dialog.chosen_names() == ({"r": None}, {})
 
 
 # --- In the window ---
@@ -261,7 +261,7 @@ def test_cancelled_dialogs_change_nothing(window, monkeypatch):
 
 def test_editing_names_from_the_window(window, monkeypatch):
     window.model.set_cells({(0, 0): "2", (5, 0): "=k*3"})
-    monkeypatch.setattr(window, "_ask_names", lambda: {"k": (0, 0)})
+    monkeypatch.setattr(window, "_ask_names", lambda: ({"k": (0, 0)}, {}))
     window.edit_names()
     assert window.model.display_text(5, 0) == "6"
     assert window.undo_action.text() == "Undo Edit Names"

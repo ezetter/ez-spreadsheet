@@ -5,16 +5,16 @@ included) keyed by its A1 name, and the unit SIN, COS, and TAN take angles in:
 
     {
       "format": "py-spread",
-      "version": 5,
+      "version": 6,
       "rows": 1000,
       "columns": 52,
       "angles": "degrees",
       "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"}
     }
 
-Number formats, text styles, and cell names, if any, follow under "formats",
-"styles", and "names" (name to cell, or null for a name whose cell was
-deleted).
+Number formats, text styles, cell names, and column names, if any, follow
+under "formats", "styles", "names" (name to cell, or null for a name whose
+cell was deleted), and "column_names" (name to column letters).
 """
 
 import json
@@ -27,10 +27,10 @@ from . import numformat, textstyle
 from .functions import ANGLE_UNITS, DEGREES
 from .numformat import NumberFormat
 from .textstyle import CellStyle
-from .references import cell_name, parse_cell_name
+from .references import cell_name, column_index, column_name, parse_cell_name
 
 FORMAT = "py-spread"
-VERSION = 5  # 2 added number formats; 3 bold and italic; 4 the angle unit; 5 cell names
+VERSION = 6  # 2 added number formats; 3 bold and italic; 4 the angle unit; 5 cell names; 6 column names
 EXTENSION = ".pysheet"
 
 
@@ -47,6 +47,7 @@ class SheetData:
     styles: dict[tuple[int, int], CellStyle] = field(default_factory=dict)
     angle_unit: str = DEGREES
     names: dict[str, tuple[int, int] | None] = field(default_factory=dict)  # name -> cell
+    column_names: dict[str, int] = field(default_factory=dict)  # name -> column index
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -71,6 +72,11 @@ def save_sheet(path: str, sheet: SheetData) -> None:
         document["names"] = {
             name: cell_name(*cell) if cell else None
             for name, cell in sorted(sheet.names.items(), key=lambda item: item[0].upper())
+        }
+    if sheet.column_names:
+        document["column_names"] = {
+            name: column_name(col)
+            for name, col in sorted(sheet.column_names.items(), key=lambda item: item[0].upper())
         }
     write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
 
@@ -126,8 +132,10 @@ def load_sheet(path: str) -> SheetData:
     styles = document.get("styles", {})  # absent before version 3
     angle_unit = document.get("angles", DEGREES)  # absent before version 4
     names = document.get("names", {})  # absent before version 5
+    column_names = document.get("column_names", {})  # absent before version 6
     if not (_positive_int(rows) and _positive_int(cols) and isinstance(cells, dict)
-            and isinstance(formats, dict) and isinstance(styles, dict) and isinstance(names, dict)):
+            and isinstance(formats, dict) and isinstance(styles, dict) and isinstance(names, dict)
+            and isinstance(column_names, dict)):
         raise SheetFileError(f"{path} is damaged: bad sheet size, or cell, format, style, or name table.")
     if angle_unit not in ANGLE_UNITS:
         raise SheetFileError(f"{path} is damaged: angles must be degrees or radians.")
@@ -155,19 +163,18 @@ def load_sheet(path: str) -> SheetData:
         if style != textstyle.PLAIN:
             sheet.styles[(row, col)] = style
             _grow_to_fit(sheet, row, col)
-    seen = {}
     for name, cell_text in names.items():
-        problem = cell_names.syntax_problem(name) if isinstance(name, str) else "not text"
-        if problem or cell_names.key(name) in seen:
-            raise SheetFileError(f"{path} is damaged: {name!r} isn't a usable cell name.")
-        cell = None
-        if cell_text is not None:
-            cell = _cell_key(path, cell_text)
-            if cell in seen.values():
-                raise SheetFileError(f"{path} is damaged: cell {cell_text} has two names.")
-            _grow_to_fit(sheet, *cell)
-        seen[cell_names.key(name)] = cell
-        sheet.names[name] = cell
+        sheet.names[name] = None if cell_text is None else _cell_key(path, cell_text)
+        if sheet.names[name]:
+            _grow_to_fit(sheet, *sheet.names[name])
+    for name, letters in column_names.items():
+        if not isinstance(letters, str) or not letters.isalpha() or not letters.isascii():
+            raise SheetFileError(f"{path} is damaged: bad column for the column name {name!r}.")
+        sheet.column_names[name] = column_index(letters)
+        sheet.cols = max(sheet.cols, sheet.column_names[name] + 1)
+    problem = cell_names.conflict(sheet.names, sheet.column_names)
+    if problem:
+        raise SheetFileError(f"{path} is damaged: its names don't work together. {problem}")
     return sheet
 
 

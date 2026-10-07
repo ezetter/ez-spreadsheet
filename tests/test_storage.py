@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QMessageBox
 
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from py_spread.storage import VERSION, SheetData, SheetFileError, load_sheet, save_sheet
 from py_spread.window import MainWindow
 
 
@@ -36,7 +36,7 @@ def test_file_is_readable_json(tmp_path):
     path = tmp_path / "s.pysheet"
     save_sheet(str(path), SheetData(10, 5, {(1, 0): "b", (0, 1): "a"}))
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert document == {"format": "py-spread", "version": 5, "rows": 10, "columns": 5,
+    assert document == {"format": "py-spread", "version": VERSION, "rows": 10, "columns": 5,
                         "angles": "degrees", "cells": {"B1": "a", "A2": "b"}}
     assert list(document["cells"]) == ["B1", "A2"]  # row by row
 
