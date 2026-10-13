@@ -1,7 +1,8 @@
 # EzSheet
 
 A desktop spreadsheet written in Python with PySide6 (Qt), using NumPy for
-calculations and Matplotlib for charts.
+calculations and Matplotlib for charts. Each sheet has a Jupyter-style
+notebook for working with its data in pandas.
 
 ## Setup
 
@@ -12,8 +13,9 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-`requirements.txt` lists what the app needs (PySide6, NumPy, Matplotlib, and
-the Anthropic SDK);
+`requirements.txt` lists what the app needs (PySide6, NumPy, Matplotlib,
+pandas, the Jupyter kernel packages ipykernel and jupyter_client, and the
+Anthropic SDK);
 `requirements-dev.txt` adds pytest for the tests.
 
 ## Run
@@ -42,9 +44,9 @@ creates the file.
 - Delete/Backspace clears the selected cells.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 - A secondary click (right-click, Control-click, or a two-finger click) on the
-  grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, and
-  Fill. Clicking inside the selection keeps it; clicking elsewhere selects
-  that cell first.
+  grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, Fill,
+  Name Cell…, Name Column…, DataFrame in Notebook, and Ask Claude…. Clicking
+  inside the selection keeps it; clicking elsewhere selects that cell first.
 
 ## Zoom
 
@@ -53,8 +55,8 @@ Actual Size (Cmd+0) scale the grid's text, row heights, column widths, and
 headers, along with the cell bar, the toolbar, and the status bar. Zoom goes
 from 50% to 300% in the usual steps, and the status bar shows the level.
 Columns or rows you've resized keep their size relative to the others. The
-Mac menu bar, chart windows, and Ask Claude windows aren't zoomed, and zoom
-isn't saved with the sheet.
+Mac menu bar, chart windows, the notebook, and Ask Claude windows aren't
+zoomed, and zoom isn't saved with the sheet.
 
 ## Dark mode
 
@@ -62,8 +64,8 @@ EzSheet follows the Mac's light or dark appearance. To override it, choose
 View > Appearance > Light or Dark (or Match System to follow the Mac again);
 the choice is remembered the next time you open EzSheet. Everything
 switches: the grid (with soft grid lines in either mode), toolbar, menus,
-dialogs, the Ask Claude window, and open charts, which redraw with a dark
-background and brighter line colors.
+dialogs, the notebook (code colors included), the Ask Claude window, and open
+charts, which redraw with a dark background and brighter line colors.
 
 ## Number formats
 
@@ -119,6 +121,79 @@ the chart window switches between line and scatter.
 - Charts redraw as you edit their cells. They aren't saved with the sheet, and
   they close when you open another sheet or start a new one.
 
+## Notebook
+
+Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by
+a real Jupyter (IPython) kernel, with pandas, NumPy, and Matplotlib at hand.
+
+### Sending cells as a DataFrame
+
+Select cells (a block, or several columns, including whole columns picked in
+the column headers), then click the Notebook button on the toolbar, choose
+Insert > DataFrame in Notebook, or choose it from the secondary-click menu.
+The notebook opens with a new cell that makes a pandas DataFrame of the data
+and shows it, and the cell runs:
+
+```python
+import pandas as pd
+
+# Cells A1:C4 of the sheet, with row 1 as the column names.
+df = pd.DataFrame({
+    'Month': ['Jan', 'Feb', 'Mar'],
+    'Sales': [1200, 1450.5, None],
+    'Note': ['say "hi"', None, 'x'],
+})
+df
+```
+
+- If the first selected row is text (and there's more than one row), it names
+  the columns. Otherwise a column's name (Formulas > Name Column…) or its
+  letter does. A name used twice gets the column letter added: `x (B)`.
+- Numbers are numbers (`$1,200` is 1200, and whole numbers are integers), text
+  is text, and empty cells and errors are missing values (NaN).
+- Selecting whole columns or rows takes just the part with data in it. If
+  nothing selected has data, no cell is made.
+- The data is a snapshot, written into the cell as Python, so it's readable,
+  editable, and still works after a restart. Editing the sheet afterwards
+  doesn't change the DataFrame; send the cells again for a fresh one. The next
+  is called `df2`, then `df3`, and so on, and each new cell goes at the end of
+  the notebook.
+
+### Working in the notebook
+
+View > Notebook opens the notebook at any time.
+
+- Shift+Return runs the current cell and moves to the next one (adding a cell
+  at the end); Cmd+Return runs it and stays. Return keeps the indentation, and
+  adds four spaces after a line ending in `:`; Tab inserts four spaces.
+- The toolbar has Run, Run All, + Cell (adds a cell below the current one),
+  Delete, ↑ and ↓ (move the current cell), Interrupt (Cmd+.), and Restart. Its
+  right end shows whether Python is idle or running.
+- Outputs appear under each cell as in Jupyter: printed text (errors printed
+  to stderr in red), results such as DataFrames shown as tables, Matplotlib
+  plots (try `df.plot()`), and errors with their tracebacks. `[3]:` beside a
+  cell is its run number; `[*]:` means it's waiting or running.
+- An error stops Run All at that cell, as in Jupyter. Interrupt stops the
+  running cell, like Ctrl-C, and drops the cells waiting to run. Restart starts
+  Python afresh, forgetting every variable.
+- Variables last from cell to cell while the sheet is open. Python starts the
+  first time a cell runs (in about a second) as a separate process, so code
+  that hangs or crashes can't take EzSheet down with it. It starts in the
+  sheet's folder (Documents for a new sheet), so code can read files next to
+  the sheet by name.
+
+### Saving the notebook
+
+The notebook is saved in the sheet's `.ezs` file, in Jupyter's own notebook
+format (nbformat 4) with its outputs, and editing or running it counts as an
+unsaved change to the sheet. Cmd+S in the notebook window saves the sheet.
+Closing the notebook window just hides it; opening another sheet, starting a
+new one, or closing the sheet stops its Python process.
+
+Opening a sheet shows its notebook's saved outputs but never runs its code.
+Notebook code runs as you, with access to your files, so only run notebooks
+you trust.
+
 ## Asking Claude
 
 Select some cells and choose Claude > Ask Claude… (Cmd+Shift+A, also on the
@@ -172,18 +247,29 @@ unsaved changes are discarded by New, Open, or closing the window.
 
 Sheets are saved as `.ezs` files: JSON holding each cell's raw text
 (formulas, not their results) under its cell name, the angle unit for `SIN`,
-`COS`, and `TAN`, and any number formats and bold/italic styles, e.g.
+`COS`, and `TAN`, and any number formats, bold/italic styles, cell and column
+names, and the notebook (as a Jupyter notebook document, under `"notebook"`),
+e.g.
 
 ```json
 {
   "format": "ezsheet",
-  "version": 6,
+  "version": 7,
   "rows": 1000,
   "columns": 52,
   "angles": "degrees",
   "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
   "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}},
-  "styles": {"A1": {"bold": true}, "B1": {"bold": true}}
+  "styles": {"A1": {"bold": true}, "B1": {"bold": true}},
+  "notebook": {
+    "cells": [{"cell_type": "code", "id": "3f2a9c1e", "metadata": {},
+               "source": "df.describe()", "outputs": [], "execution_count": null}],
+    "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3",
+                                "language": "python"},
+                 "language_info": {"name": "python"}},
+    "nbformat": 4,
+    "nbformat_minor": 5
+  }
 }
 ```
 

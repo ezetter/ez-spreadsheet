@@ -30,6 +30,9 @@ from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
+from .kernel import KernelRunner
+from .notebook import Notebook, data_block, dataframe_code, next_frame_name
+from .notebook_window import NotebookWindow, kernel_folder
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
@@ -264,6 +267,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.resize(1100, 700)
+        # The sheet's notebook, and the Python kernel its cells run in.
+        self.notebook = Notebook(self)
+        self.kernel = KernelRunner(self)
+        self.notebook_window = None  # made when first shown
+        self._notebook_dirty = False  # notebook changes since the last save
         self.file_path: str | None = None
         self._set_file_path(None)
 
@@ -317,6 +325,7 @@ class MainWindow(QMainWindow):
         self.model.dataChanged.connect(self._on_data_changed)
         self.model.names_changed.connect(self._show_current_name)
         self.model.contents_changed.connect(lambda: self.setWindowModified(True))
+        self.notebook.changed.connect(self._on_notebook_changed)
         # Undoing back to the saved state makes the sheet unmodified again.
         # (Bound methods, not lambdas: Qt disconnects them when the window is
         # destroyed, before the undo stack's last signals during teardown.)
@@ -404,6 +413,7 @@ class MainWindow(QMainWindow):
         menu.addAction(self.name_cell_action)
         menu.addAction(self.name_column_action)
         menu.addSeparator()
+        menu.addAction(self.notebook_action)
         menu.addAction(self.ask_claude_action)
         self.context_menu = menu
         # Qt selects a right-clicked cell outside the selection, and keeps the
@@ -456,6 +466,12 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, s=slot: s())
             menu.addAction(action)
             self.zoom_actions[name] = action
+
+        self.show_notebook_action = QAction("Notebook", self)
+        self.show_notebook_action.setToolTip("Open the sheet's notebook")
+        self.show_notebook_action.triggered.connect(lambda _checked=False: self.show_notebook())
+        menu.addSeparator()
+        menu.addAction(self.show_notebook_action)
 
         # Appearance: follow the Mac, or always light or dark (remembered).
         menu.addSeparator()
@@ -520,6 +536,12 @@ class MainWindow(QMainWindow):
             "Switch between line and scatter in the chart window.")
         self.chart_action.triggered.connect(lambda _checked=False: self.make_chart())
         menu.addAction(self.chart_action)
+        self.notebook_action = QAction("DataFrame in Notebook", self)
+        self.notebook_action.setIconText("Notebook")
+        self.notebook_action.setToolTip(
+            "Put the selected cells in a pandas DataFrame in the sheet's notebook, and run it")
+        self.notebook_action.triggered.connect(lambda _checked=False: self.send_to_notebook())
+        menu.addAction(self.notebook_action)
 
     def _build_chart_button(self, toolbar):
         self.chart_button = QToolButton()
@@ -771,6 +793,7 @@ class MainWindow(QMainWindow):
 
         self._build_fill_button(toolbar)
         self._build_chart_button(toolbar)
+        toolbar.addAction(self.notebook_action)
         self._add_currency_button(toolbar)
         self._add_angle_button(toolbar)
         self.statusBar()  # create it now so the window doesn't resize on the first message
@@ -894,7 +917,42 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
 
     def _on_clean_changed(self, clean: bool):
-        self.setWindowModified(not clean)
+        self.setWindowModified(not clean or self._notebook_dirty)
+
+    def _on_notebook_changed(self):
+        self._notebook_dirty = True
+        self.setWindowModified(True)
+
+    # --- Notebook ---
+
+    def show_notebook(self):
+        """Open the sheet's notebook window (making it the first time)."""
+        if self.notebook_window is None:
+            self.notebook_window = NotebookWindow(self.notebook, self.kernel, parent=self, save=self.save)
+            self.notebook_window.set_sheet_name(os.path.basename(self.file_path) if self.file_path
+                                                else "Untitled")
+        self.notebook_window.show()
+        self.notebook_window.raise_()
+        self.notebook_window.activateWindow()
+        return self.notebook_window
+
+    def send_to_notebook(self) -> str | None:
+        """Put the selected cells in a pandas DataFrame in a new notebook cell,
+        open the notebook, and run the cell. Returns the new cell's id, or None
+        if the selection is empty."""
+        self._commit_pending_edit()
+        cells = data_block(self.model, self._selected_cells())
+        if not cells:
+            self._show_status("The selection is empty. Select cells with data to make a DataFrame of them.")
+            return None
+        name = next_frame_name(self.notebook)
+        window = self.show_notebook()
+        if window.current_id is not None:
+            window.set_current(self.notebook.cells[-1].id)  # new data goes at the end
+        cell_id = window.add_cell_below(dataframe_code(self.model, cells, name))
+        window.run_cell(cell_id)
+        self._show_status(f"Sent the selection to the notebook as {name}.")
+        return cell_id
 
     def _on_undo_text(self, text: str):
         self.undo_action.setText(f"Undo {text}".strip())
@@ -1034,13 +1092,16 @@ class MainWindow(QMainWindow):
 
     def save_to(self, path: str) -> bool:
         self._commit_pending_edit()
+        sheet = self.model.sheet_data()
+        sheet.notebook = None if self.notebook.is_empty else self.notebook.to_json()
         try:
-            save_sheet(path, self.model.sheet_data())
+            save_sheet(path, sheet)
         except SheetFileError as e:
             self._show_error("Couldn't save the sheet.", str(e))
             return False
         self._set_file_path(path)
         self.model.undo_stack.setClean()
+        self._notebook_dirty = False
         self.setWindowModified(False)
         return True
 
@@ -1115,6 +1176,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self.maybe_save():
+            self.kernel.shutdown()  # no Python process outlives the sheet
+            if self.notebook_window is not None:
+                self.notebook_window.hide()  # it belongs to the sheet
             event.accept()
         else:
             event.ignore()
@@ -1123,6 +1187,9 @@ class MainWindow(QMainWindow):
         self.close_charts()  # they show the old sheet's cells
         self.clipboard.cancel()
         self.autosum.cancel()
+        self.kernel.shutdown()  # the old sheet's Python variables go with it
+        self.notebook.load(sheet.notebook)  # (its cells aren't run until asked)
+        self._notebook_dirty = False
         self.model.load_sheet_data(sheet)
         self.view.setCurrentIndex(self.model.index(0, 0))
         self._refresh_bar(self.view.currentIndex())
@@ -1143,6 +1210,9 @@ class MainWindow(QMainWindow):
         self.setWindowFilePath(path or "")
         name = os.path.basename(path) if path else "Untitled"
         self.setWindowTitle(f"{name}[*] — EzSheet")
+        self.kernel.working_dir = kernel_folder(path)  # notebook code's relative paths start here
+        if self.notebook_window is not None:
+            self.notebook_window.set_sheet_name(name)
 
     def _dialog_dir(self) -> str:
         if self.file_path:

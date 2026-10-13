@@ -2,3 +2,6 @@ PySide6>=6.8
 numpy>=2.1
 matplotlib>=3.9
 anthropic>=1.11
+pandas>=2.2
+ipykernel>=6.29
+jupyter_client>=8.6

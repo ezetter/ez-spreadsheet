@@ -151,7 +151,7 @@ def test_chart_button_and_menu(window):
     assert window.chart_button.text() == "Chart"
     assert window.chart_button.menu() is None  # no line/scatter choice on the toolbar
     insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
-    assert [a.text() for a in insert.actions()] == ["Chart"]
+    assert [a.text() for a in insert.actions()] == ["Chart", "DataFrame in Notebook"]
     window.view.select_range(0, 0, 3, 1)
     window.chart_button.click()
     insert.actions()[0].trigger()

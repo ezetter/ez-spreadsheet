@@ -14,7 +14,9 @@ included) keyed by its A1 name, and the unit SIN, COS, and TAN take angles in:
 
 Number formats, text styles, cell names, and column names, if any, follow
 under "formats", "styles", "names" (name to cell, or null for a name whose
-cell was deleted), and "column_names" (name to column letters).
+cell was deleted), and "column_names" (name to column letters). The sheet's
+notebook, if it has cells, is under "notebook", as a Jupyter notebook (.ipynb)
+document.
 """
 
 import json
@@ -25,12 +27,14 @@ from dataclasses import dataclass, field
 from . import names as cell_names
 from . import numformat, textstyle
 from .functions import ANGLE_UNITS, DEGREES
+from .notebook import NotebookFormatError, cells_from_json
 from .numformat import NumberFormat
 from .textstyle import CellStyle
 from .references import cell_name, column_index, column_name, parse_cell_name
 
 FORMAT = "ezsheet"
-VERSION = 6  # 2 added number formats; 3 bold and italic; 4 the angle unit; 5 cell names; 6 column names
+VERSION = 7  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
+# 6 column names; 7 the notebook
 EXTENSION = ".ezs"
 
 
@@ -48,6 +52,7 @@ class SheetData:
     angle_unit: str = DEGREES
     names: dict[str, tuple[int, int] | None] = field(default_factory=dict)  # name -> cell
     column_names: dict[str, int] = field(default_factory=dict)  # name -> column index
+    notebook: dict | None = None  # a Jupyter notebook (.ipynb) document, if there are notebook cells
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -78,6 +83,8 @@ def save_sheet(path: str, sheet: SheetData) -> None:
             name: column_name(col)
             for name, col in sorted(sheet.column_names.items(), key=lambda item: item[0].upper())
         }
+    if sheet.notebook:
+        document["notebook"] = sheet.notebook  # last, as it can be long
     write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
 
 
@@ -175,6 +182,12 @@ def load_sheet(path: str) -> SheetData:
     problem = cell_names.conflict(sheet.names, sheet.column_names)
     if problem:
         raise SheetFileError(f"{path} is damaged: its names don't work together. {problem}")
+    if "notebook" in document:  # absent before version 7, or with no notebook cells
+        try:
+            cells_from_json(document["notebook"])
+        except NotebookFormatError as e:
+            raise SheetFileError(f"{path} is damaged: {e}.") from None
+        sheet.notebook = document["notebook"]
     return sheet
 
 
