@@ -55,8 +55,12 @@ Actual Size (Cmd+0) scale the grid's text, row heights, column widths, and
 headers, along with the cell bar, the toolbar, and the status bar. Zoom goes
 from 50% to 300% in the usual steps, and the status bar shows the level.
 Columns or rows you've resized keep their size relative to the others. The
-Mac menu bar, chart windows, the notebook, and Ask Claude windows aren't
-zoomed, and zoom isn't saved with the sheet.
+Mac menu bar, chart windows, and Ask Claude windows aren't zoomed, and zoom
+isn't saved with the sheet.
+
+While the notebook window is in front, the same commands and shortcuts zoom
+the notebook instead (see [Notebook](#notebook)). The sheet and the notebook
+each keep their own zoom level.
 
 ## Dark mode
 
@@ -169,6 +173,10 @@ View > Notebook opens the notebook at any time.
 - The toolbar has Run, Run All, + Cell (adds a cell below the current one),
   Delete, ↑ and ↓ (move the current cell), Interrupt (Cmd+.), and Restart. Its
   right end shows whether Python is idle or running.
+- View > Zoom In (Cmd+Plus or Cmd+=), Zoom Out (Cmd+Minus), and Actual Size
+  (Cmd+0) zoom the notebook while it's in front: its toolbar, code, printed
+  text, tables, and plots, from 50% to 300%. Its zoom is separate from the
+  sheet's, and lasts while the sheet is open.
 - Outputs appear under each cell as in Jupyter: printed text (errors printed
   to stderr in red), results such as DataFrames shown as tables, Matplotlib
   plots (try `df.plot()`), and errors with their tracebacks. `[3]:` beside a

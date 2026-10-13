@@ -447,6 +447,90 @@ def test_kernel_starts_in_sheets_folder(app, tmp_path):
     window.setWindowModified(False)
 
 
+# --- Zoom ---
+
+def activate(widget):
+    """Bring a window to the front. (qWaitForWindowActive won't do: it counts
+    the notebook as active whenever the sheet, its parent, is.)"""
+    widget.activateWindow()
+    assert wait_for(lambda: QApplication.activeWindow() is widget, timeout=5)
+
+
+def test_zoom_applies_to_the_window_in_front(window):
+    nb = window.show_notebook()
+    cell = nb.add_cell_below("x = 1")
+    activate(nb)
+    code_size = nb.widgets[cell].editor.font().pointSizeF()
+    sheet_size = window.view.font().pointSizeF()
+    window.zoom_actions["Zoom In"].trigger()  # as Cmd+= does from the Mac's menu bar
+    window.zoom_actions["Zoom In"].trigger()
+    assert (nb.zoom, window.zoom) == (125, 100)
+    assert nb.widgets[cell].editor.font().pointSizeF() == pytest.approx(code_size * 1.25)
+    assert window.view.font().pointSizeF() == sheet_size
+    assert nb.status.text() == "Zoom 125%"
+    activate(window)
+    window.zoom_actions["Zoom Out"].trigger()
+    assert (nb.zoom, window.zoom) == (125, 90)
+    activate(nb)
+    window.zoom_actions["Actual Size"].trigger()
+    assert (nb.zoom, window.zoom) == (100, 90)
+    assert nb.widgets[cell].editor.font().pointSizeF() == pytest.approx(code_size)
+
+
+def test_zoom_limits_follow_the_window_in_front(window):
+    activate(window)
+    window.set_zoom(300)
+    assert not window.zoom_actions["Zoom In"].isEnabled()
+    nb = window.show_notebook()
+    activate(nb)
+    assert window.zoom_actions["Zoom In"].isEnabled()  # the notebook is at 100%
+    for _ in range(20):
+        window.zoom_actions["Zoom Out"].trigger()
+    assert (nb.zoom, window.zoom) == (50, 300)
+    assert not window.zoom_actions["Zoom Out"].isEnabled() and window.zoom_actions["Zoom In"].isEnabled()
+    activate(window)
+    assert window.zoom_actions["Zoom Out"].isEnabled() and not window.zoom_actions["Zoom In"].isEnabled()
+
+
+def test_notebook_zoom_scales_code_outputs_and_toolbar(window):
+    nb = window.show_notebook()
+    cell = nb.add_cell_below("1 + 1")
+    nb.run_cell(cell)
+    widget = nb.widgets[cell]
+    run_button = nb.toolbar.widgetForAction(nb.actions_by_name["Run"])
+    sizes = {w: w.font().pointSizeF() for w in (widget.editor, widget.prompt, widget.output_view, run_button,
+                                                nb.status)}
+    QApplication.processEvents()  # lays out the outputs
+    heights = widget.editor.height(), widget.output_view.height()
+    nb.set_zoom(200)
+    QApplication.processEvents()
+    for w, points in sizes.items():
+        assert w.font().pointSizeF() == pytest.approx(points * 2)
+    assert widget.editor.height() > heights[0] * 1.3 and widget.output_view.height() > heights[1] * 1.3
+    later = nb.add_cell_below("y")  # new cells come zoomed
+    assert nb.widgets[later].editor.font().pointSizeF() == pytest.approx(sizes[widget.editor] * 2)
+    assert window.zoom == 100
+
+
+def test_zoomed_plots_grow(app):
+    parent = QWidget()
+    view = OutputView(parent)
+    retina = {"output_type": "display_data", "data": {"image/png": png()},  # 40 by 20 pixels...
+              "metadata": {"image/png": {"width": 20, "height": 10}}}  # ...shown as 20 by 10 points
+    plain = {"output_type": "display_data", "data": {"image/png": png()}, "metadata": {}}
+    view.show_outputs([retina, plain])
+    assert 'width="20" height="10"' in view.toHtml() and 'width="40" height="20"' in view.toHtml()
+    view.set_zoom(200)
+    assert 'width="40" height="20"' in view.toHtml() and 'width="80" height="40"' in view.toHtml()
+
+
+def test_zoom_steps():
+    from py_spread.appearance import next_zoom
+    assert (next_zoom(100, 1), next_zoom(100, -1)) == (110, 90)
+    assert (next_zoom(300, 1), next_zoom(50, -1)) == (300, 50)
+    assert next_zoom(105, 1) == 110 and next_zoom(105, -1) == 100
+
+
 # --- With a real kernel ---
 
 def wait_for(predicate, timeout=60.0) -> bool:

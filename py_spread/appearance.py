@@ -3,11 +3,12 @@
 The app follows the Mac's appearance, or the user can pick light or dark in
 View > Appearance; the choice is remembered between launches. Qt switches
 the native widgets itself (Qt 6.8 and later); this module also supplies the
-colors Qt doesn't pick for us, such as the grid lines.
+colors Qt doesn't pick for us, such as the grid lines, and the zoom steps
+the sheet and its notebook share.
 """
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette
 from PySide6.QtWidgets import QProxyStyle, QStyle
 
 APPEARANCES = {  # key -> (menu label, Qt color scheme)
@@ -16,6 +17,7 @@ APPEARANCES = {  # key -> (menu label, Qt color scheme)
     "dark": ("Dark", Qt.ColorScheme.Dark),
 }
 SETTINGS_KEY = "appearance"
+ZOOM_LEVELS = (50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300)  # percent
 
 
 def settings() -> QSettings:
@@ -47,6 +49,23 @@ def blend(palette: QPalette, amount: float) -> QColor:
 def error_color(palette: QPalette) -> str:
     """A red that reads well on the current background."""
     return "#ff6b6b" if is_dark(palette) else "#c0392b"
+
+
+def next_zoom(percent: int, direction: int) -> int:
+    """The next zoom level in (direction 1) or out (-1), or `percent` itself
+    at the limit."""
+    levels = ZOOM_LEVELS if direction > 0 else tuple(reversed(ZOOM_LEVELS))
+    return next((level for level in levels if (level - percent) * direction > 0), percent)
+
+
+def scaled_font(font: QFont, percent: int) -> QFont:
+    """A copy of `font` at `percent` of its size."""
+    scaled = QFont(font)
+    if font.pointSizeF() > 0:
+        scaled.setPointSizeF(font.pointSizeF() * percent / 100)
+    else:
+        scaled.setPixelSize(max(1, round(font.pixelSize() * percent / 100)))
+    return scaled
 
 
 class GridStyle(QProxyStyle):

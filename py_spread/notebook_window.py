@@ -11,6 +11,7 @@ from PySide6.QtCore import QEvent, QRegularExpression, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QFont,
     QFontDatabase,
     QImage,
     QKeySequence,
@@ -29,11 +30,12 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTextBrowser,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from .appearance import error_color, is_dark
+from .appearance import error_color, is_dark, next_zoom, scaled_font
 from .notebook import joined_text as _text
 
 MAX_OUTPUT_HEIGHT = 600  # taller outputs scroll within the cell
@@ -50,15 +52,21 @@ def _table_css(line_color: str) -> str:
             f"thead th {{ border-bottom: 1px solid {line_color}; }}")
 
 
-def _image_size(output: dict) -> str:
-    """Width and height attributes for an image output that gives its size in
-    points (a Retina plot has twice as many pixels)."""
+def _image_size(output: dict, image: QImage, percent: int) -> str:
+    """Width and height attributes showing an image output at its size in
+    points, zoomed. (A Retina plot has twice as many pixels as points, and
+    gives its size in points in its metadata.)"""
     metadata = output.get("metadata")
     points = metadata.get("image/png") if isinstance(metadata, dict) else None
-    if not isinstance(points, dict):
-        return ""
-    return "".join(f' {side}="{int(points[side])}"' for side in ("width", "height")
-                   if isinstance(points.get(side), (int, float)) and not isinstance(points[side], bool))
+    points = points if isinstance(points, dict) else {}
+    scale = 1.0
+    for side, pixels in (("width", image.width()), ("height", image.height())):
+        size = points.get(side)
+        if isinstance(size, (int, float)) and not isinstance(size, bool) and size > 0 and pixels:
+            scale = size / pixels
+            break
+    scale *= percent / 100
+    return f' width="{round(image.width() * scale)}" height="{round(image.height() * scale)}"'
 
 
 class PythonHighlighter(QSyntaxHighlighter):
@@ -129,6 +137,11 @@ class CodeEditor(QPlainTextEdit):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._fit)  # the horizontal scroll bar may have come or gone
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.FontChange:  # zoomed
+            self._fit()
+
     def focusInEvent(self, event):
         super().focusInEvent(event)
         self.focused.emit()
@@ -168,6 +181,13 @@ class OutputView(QTextBrowser):
         self.viewport().setAutoFillBackground(False)  # on the cell's background, like Jupyter's outputs
         self.document().documentLayout().documentSizeChanged.connect(self._fit)
         self.outputs: list = []
+        self.zoom = 100  # percent
+        self._base_font = QFont(self.font())
+
+    def set_zoom(self, percent: int) -> None:
+        self.zoom = percent
+        self.setFont(scaled_font(self._base_font, percent))
+        self.show_outputs(self.outputs)  # images too
 
     def show_outputs(self, outputs: list) -> None:
         self.outputs = list(outputs)
@@ -197,7 +217,7 @@ class OutputView(QTextBrowser):
             if not image.isNull():
                 url = QUrl(f"output:image{number}")  # replaces the image shown here before
                 self.document().addResource(QTextDocument.ImageResource, url, image)
-                return f'<p><img src="{url.toString()}"{_image_size(output)}></p>'
+                return f'<p><img src="{url.toString()}"{_image_size(output, image, self.zoom)}></p>'
         if "text/html" in data:
             page = _DATAFRAME_GRID.sub('<table class="dataframe', _text(data["text/html"]))
             return f"<div>{page}</div>"
@@ -215,14 +235,12 @@ class OutputView(QTextBrowser):
 class CellWidget(QFrame):
     """One code cell: its prompt ([3]), editor, and outputs."""
 
-    def __init__(self, cell, parent=None):
+    def __init__(self, cell, zoom: int = 100, parent=None):
         super().__init__(parent)
         self.cell_id = cell.id
         self.setFrameShape(QFrame.StyledPanel)
         self.prompt = QLabel()
-        self.prompt.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         self.prompt.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        self.prompt.setFixedWidth(self.prompt.fontMetrics().horizontalAdvance("[000]:") + 6)
         self.editor = CodeEditor()
         self.editor.setPlainText(cell.source)
         self.output_view = OutputView()
@@ -234,8 +252,17 @@ class CellWidget(QFrame):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.prompt, 0, Qt.AlignTop)
         layout.addLayout(right, 1)
+        self.set_zoom(zoom)
         self.show_cell(cell)
         self.set_current(False)
+
+    def set_zoom(self, percent: int) -> None:
+        code_font = scaled_font(QFontDatabase.systemFont(QFontDatabase.FixedFont), percent)
+        self.prompt.setFont(code_font)
+        self.prompt.setFixedWidth(self.prompt.fontMetrics().horizontalAdvance("[000]:") + 6)
+        self.editor.setFont(code_font)
+        if percent != self.output_view.zoom:
+            self.output_view.set_zoom(percent)
 
     def show_cell(self, cell, running: bool = False) -> None:
         count = cell.execution_count
@@ -251,10 +278,14 @@ class NotebookWindow(QWidget):
     """The sheet's notebook. Closing it only hides it: its cells, and the
     kernel's variables, stay until the sheet is closed."""
 
+    zoom_changed = Signal(int)  # percent
+
     def __init__(self, notebook, kernel, parent=None, save=None):
         super().__init__(parent, Qt.Window)
         self.notebook = notebook
         self.kernel = kernel
+        self.zoom = 100  # percent, apart from the sheet's (View > Zoom zooms whichever is in front)
+        self._zoom_base_fonts = None  # the toolbar's and labels' fonts at 100%, saved on first zoom
         self.resize(820, 700)
         self.set_sheet_name("Untitled")
         self.widgets: dict[str, CellWidget] = {}
@@ -281,7 +312,10 @@ class NotebookWindow(QWidget):
             self.toolbar.addAction(action)
             self.addAction(action)
             self.actions_by_name[name] = action
-        self.status = QLabel(STATUS_TEXT["stopped"] if not kernel.has_kernel else STATUS_TEXT["idle"])
+        self._state_text = STATUS_TEXT["idle" if kernel.has_kernel else "stopped"]
+        self.status = QLabel(self._state_text)
+        self._zoom_message = QTimer(self, singleShot=True, interval=2000)  # "Zoom 125%", then the state again
+        self._zoom_message.timeout.connect(lambda: self.status.setText(self._state_text))
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
@@ -319,6 +353,33 @@ class NotebookWindow(QWidget):
     def set_sheet_name(self, name: str) -> None:
         self.setWindowTitle(f"Notebook — {name}")
 
+    # --- Zoom ---
+
+    def zoom_in(self) -> None:
+        self.set_zoom(next_zoom(self.zoom, 1))
+
+    def zoom_out(self) -> None:
+        self.set_zoom(next_zoom(self.zoom, -1))
+
+    def set_zoom(self, percent: int) -> None:
+        """Scale the toolbar, code, and outputs (text, tables, and plots) to
+        `percent` of their normal size."""
+        if self._zoom_base_fonts is None:
+            self._zoom_base_fonts = {widget: QFont(widget.font()) for widget in self._zoomable_widgets()}
+        self.zoom = percent
+        for widget, base in self._zoom_base_fonts.items():
+            widget.setFont(scaled_font(base, percent))
+        for widget in self.widgets.values():
+            widget.set_zoom(percent)
+        self.status.setText(f"Zoom {percent}%")
+        self._zoom_message.start()
+        self.zoom_changed.emit(percent)
+
+    def _zoomable_widgets(self) -> list:
+        buttons = [self.toolbar.widgetForAction(action) for action in self.toolbar.actions()
+                   if isinstance(self.toolbar.widgetForAction(action), QToolButton)]
+        return [*buttons, self.status, self.problem]
+
     # --- Cells ---
 
     def _rebuild(self) -> None:
@@ -333,7 +394,7 @@ class NotebookWindow(QWidget):
             self.set_current(self.notebook.cells[0].id)
 
     def _on_cell_added(self, cell_id: str, position: int) -> None:
-        widget = CellWidget(self.notebook.cell(cell_id))
+        widget = CellWidget(self.notebook.cell(cell_id), self.zoom)
         widget.editor.textChanged.connect(
             lambda w=widget: self.notebook.set_source(w.cell_id, w.editor.toPlainText()))
         widget.editor.focused.connect(lambda w=widget: self.set_current(w.cell_id))
@@ -434,7 +495,9 @@ class NotebookWindow(QWidget):
         self._on_cell_updated(cell_id)
 
     def _on_kernel_state(self, state: str) -> None:
-        self.status.setText(STATUS_TEXT.get(state, state))
+        self._state_text = STATUS_TEXT.get(state, state)
+        self._zoom_message.stop()
+        self.status.setText(self._state_text)
         if state in ("starting", "idle"):
             self.problem.setVisible(False)
 

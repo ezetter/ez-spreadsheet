@@ -4,7 +4,7 @@ import dataclasses
 import os
 
 from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QStandardPaths, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence, QPen
+from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication, QKeySequence, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -23,7 +23,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .appearance import APPEARANCES, GridStyle, apply_appearance, saved_appearance
+from .appearance import (
+    APPEARANCES,
+    ZOOM_LEVELS,
+    GridStyle,
+    apply_appearance,
+    next_zoom,
+    saved_appearance,
+    scaled_font,
+)
 from .autosum import AGGREGATES, Aggregate, AutoSumController
 from .clipboard import ClipboardController
 from .csvfile import read_csv, write_csv
@@ -44,7 +52,6 @@ from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_shee
 FILE_FILTER = f"EzSheet Sheets (*{EXTENSION})"
 COLUMN_WIDTH = 100  # default sizes at 100% zoom
 ROW_HEIGHT = 24
-ZOOM_LEVELS = (50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300)  # percent
 CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
 
 # A clicked cell reference can be inserted after any of these characters.
@@ -455,17 +462,21 @@ class MainWindow(QMainWindow):
         self.zoom = 100  # percent
         self._zoom_base_fonts = None  # each zoomable widget's font at 100%, saved on first zoom
         self.zoom_actions = {}
+        # These zoom the notebook instead when it's in front, as the Mac's
+        # menu bar, shortcuts included, stays this window's.
         for name, shortcuts, slot in (
             # ⌘= as well as ⌘+, so Shift isn't needed for the + key
-            ("Zoom In", [QKeySequence(QKeySequence.ZoomIn), QKeySequence("Ctrl+=")], self.zoom_in),
-            ("Zoom Out", [QKeySequence(QKeySequence.ZoomOut)], self.zoom_out),
-            ("Actual Size", [QKeySequence("Ctrl+0")], lambda: self.set_zoom(100)),
+            ("Zoom In", [QKeySequence(QKeySequence.ZoomIn), QKeySequence("Ctrl+=")],
+             lambda: self._zoom_target().zoom_in()),
+            ("Zoom Out", [QKeySequence(QKeySequence.ZoomOut)], lambda: self._zoom_target().zoom_out()),
+            ("Actual Size", [QKeySequence("Ctrl+0")], lambda: self._zoom_target().set_zoom(100)),
         ):
             action = QAction(name, self)
             action.setShortcuts(shortcuts)
             action.triggered.connect(lambda _checked=False, s=slot: s())
             menu.addAction(action)
             self.zoom_actions[name] = action
+        QGuiApplication.instance().focusWindowChanged.connect(self._update_zoom_actions)
 
         self.show_notebook_action = QAction("Notebook", self)
         self.show_notebook_action.setToolTip("Open the sheet's notebook")
@@ -493,10 +504,10 @@ class MainWindow(QMainWindow):
         self.appearance_actions[key].setChecked(True)
 
     def zoom_in(self):
-        self.set_zoom(next((z for z in ZOOM_LEVELS if z > self.zoom), self.zoom))
+        self.set_zoom(next_zoom(self.zoom, 1))
 
     def zoom_out(self):
-        self.set_zoom(next((z for z in reversed(ZOOM_LEVELS) if z < self.zoom), self.zoom))
+        self.set_zoom(next_zoom(self.zoom, -1))
 
     def set_zoom(self, percent: int) -> None:
         """Scale the grid (text, rows, columns, headers), the cell bar, the
@@ -505,18 +516,25 @@ class MainWindow(QMainWindow):
             self._zoom_base_fonts = {widget: QFont(widget.font()) for widget in self._zoomable_widgets()}
         old, self.zoom = self.zoom, percent
         for widget, base in self._zoom_base_fonts.items():
-            font = QFont(base)
-            if base.pointSizeF() > 0:
-                font.setPointSizeF(base.pointSizeF() * percent / 100)
-            else:
-                font.setPixelSize(max(1, round(base.pixelSize() * percent / 100)))
-            widget.setFont(font)
+            widget.setFont(scaled_font(base, percent))
         _rescale_header(self.view.horizontalHeader(), COLUMN_WIDTH, old, percent)
         _rescale_header(self.view.verticalHeader(), ROW_HEIGHT, old, percent)
-        for action, limit in ((self.zoom_actions["Zoom In"], ZOOM_LEVELS[-1]),
-                              (self.zoom_actions["Zoom Out"], ZOOM_LEVELS[0])):
-            action.setEnabled(percent != limit)
+        self._update_zoom_actions()
         self.statusBar().showMessage(f"Zoom {percent}%", 2000)
+
+    def _zoom_target(self):
+        """What View > Zoom applies to: the notebook when it's the active
+        window, otherwise the sheet."""
+        notebook_window = self.notebook_window
+        if notebook_window is not None and notebook_window.isActiveWindow():
+            return notebook_window
+        return self
+
+    def _update_zoom_actions(self, *_args) -> None:
+        """Zoom In and Zoom Out are unavailable at the limits of what they'd zoom."""
+        zoom = self._zoom_target().zoom
+        self.zoom_actions["Zoom In"].setEnabled(zoom != ZOOM_LEVELS[-1])
+        self.zoom_actions["Zoom Out"].setEnabled(zoom != ZOOM_LEVELS[0])
 
     def _zoomable_widgets(self) -> list:
         """Widgets whose font sets their size. (The menu bar is the Mac's own,
@@ -929,6 +947,7 @@ class MainWindow(QMainWindow):
         """Open the sheet's notebook window (making it the first time)."""
         if self.notebook_window is None:
             self.notebook_window = NotebookWindow(self.notebook, self.kernel, parent=self, save=self.save)
+            self.notebook_window.zoom_changed.connect(self._update_zoom_actions)
             self.notebook_window.set_sheet_name(os.path.basename(self.file_path) if self.file_path
                                                 else "Untitled")
         self.notebook_window.show()
