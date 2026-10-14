@@ -8,15 +8,17 @@ import pytest
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, Signal
 from PySide6.QtGui import QImage, QTextDocument, QTextTable
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QToolBar, QWidget
+from PySide6.QtWidgets import QApplication, QToolBar, QToolButton, QWidget
 
 from py_spread.model import SheetModel
 from py_spread.notebook import (
     Notebook,
     NotebookFormatError,
+    GraphError,
     cells_from_json,
     data_block,
     dataframe_code,
+    graph_code,
     next_frame_name,
 )
 from py_spread.notebook_window import NotebookWindow, OutputView
@@ -102,6 +104,102 @@ def test_data_block_trims_empty_edges(sheet):
     assert data_block(sheet, block(5, 0, 9, 3)) == set()
     scattered = block(0, 0, 29, 0) | block(0, 2, 29, 2)
     assert data_block(sheet, scattered) == block(0, 0, 3, 0) | block(0, 2, 3, 2)
+
+
+# --- The generated graph code ---
+
+@pytest.fixture
+def pyplot():
+    import matplotlib.pyplot as plt
+
+    backend = plt.get_backend()
+    plt.switch_backend("agg")
+    yield plt
+    plt.close("all")
+    plt.switch_backend(backend)
+
+
+def graph(model, cells, kind="line"):
+    """Run the DataFrame and graph cells for these cells; the graph (a Seaborn FacetGrid)."""
+    namespace = {}
+    exec(dataframe_code(model, cells), namespace)
+    code = graph_code(model, cells)
+    assert "kind='line'" in code
+    exec(code.replace("kind='line'", f"kind='{kind}'"), namespace)
+    return namespace["graph"]
+
+
+@pytest.fixture
+def sales(app):
+    model = SheetModel(rows=80, cols=8)
+    model.set_cells({(0, 0): "Month", (0, 1): "Sales", (0, 2): "Cost",
+                     (1, 0): "Mar", (1, 1): "1200", (1, 2): "800",
+                     (2, 0): "Jan", (2, 1): "1450.5", (2, 2): "n/a",
+                     (3, 0): "Feb", (3, 1): "1700", (3, 2): "950"})
+    return model
+
+
+def plotted(g) -> list:
+    """The graph's lines. (Seaborn also puts empty ones on the axes for its legend.)"""
+    return [line for line in g.ax.get_lines() if len(line.get_xdata())]
+
+
+def test_graph_of_several_series(sales, pyplot):
+    g = graph(sales, block(0, 0, 3, 2))
+    assert [t.get_text() for t in g.ax.get_xticklabels()] == ["Mar", "Jan", "Feb"]  # the sheet's order
+    assert [t.get_text() for t in g.legend.texts] == ["Sales", "Cost"]
+    sales_line, cost_line = plotted(g)
+    assert list(sales_line.get_ydata()) == [1200, 1450.5, 1700] and sales_line.get_marker() == "o"
+    assert list(cost_line.get_ydata()) == [800, 950]  # n/a isn't graphed
+    assert g.ax.get_xlabel() == "Month"
+
+
+def test_graph_of_one_series(sales, pyplot):
+    code = graph_code(sales, block(0, 0, 3, 1))
+    assert "melt" not in code and "pd." not in code  # nothing to reshape or fix
+    g = graph(sales, block(0, 0, 3, 1))
+    assert g.ax.get_ylabel() == "Sales" and g.legend is None  # named on the y axis, as in a chart
+
+
+def test_scatter_by_changing_kind(sales, pyplot):
+    g = graph(sales, block(0, 0, 3, 2), kind="scatter")
+    assert plotted(g) == [] and len(g.ax.collections[0].get_offsets()) == 5  # 3 sales, 2 costs
+
+
+def test_numeric_x_and_many_points(pyplot, app):
+    model = SheetModel(rows=80, cols=4)
+    model.set_cells({(row, 0): str(row) for row in range(60)} | {(row, 1): str(row * row) for row in range(60)})
+    model.set_cell(7, 0, "")  # a point without an x is left out
+    code = graph_code(model, block(0, 0, 59, 1))
+    assert "marker" not in code  # more than 50 points
+    [line] = plotted(graph(model, block(0, 0, 59, 1)))
+    assert len(line.get_xdata()) == 59 and line.get_xdata()[0] == 0
+
+
+def test_x_of_numbers_and_text(pyplot, app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "1", (1, 0): "two", (2, 0): "3", (0, 1): "5", (1, 1): "6", (2, 1): "7"})
+    assert "astype('string')" in graph_code(model, block(0, 0, 2, 1))
+    g = graph(model, block(0, 0, 2, 1))
+    assert [t.get_text() for t in g.ax.get_xticklabels()] == ["1", "two", "3"]
+
+
+def test_graph_names_dont_clash(pyplot, app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "t", (0, 1): "Value", (0, 2): "Series",
+                     (1, 0): "1", (1, 1): "2", (1, 2): "3", (2, 0): "2", (2, 1): "4", (2, 2): "5"})
+    code = graph_code(model, block(0, 0, 2, 2))
+    assert "var_name='Series 2', value_name='Value 2'" in code
+    assert [t.get_text() for t in graph(model, block(0, 0, 2, 2)).legend.texts] == ["Value", "Series"]
+
+
+@pytest.mark.parametrize("cells, problem", [
+    (block(0, 0, 3, 0), "at least two columns"),
+    (block(0, 0, 3, 0) | block(0, 3, 3, 3), "no numbers"),  # D is empty
+])
+def test_cells_that_cant_be_graphed(sales, cells, problem):
+    with pytest.raises(GraphError, match=problem):
+        graph_code(sales, cells)
 
 
 def test_frame_names(app):
@@ -330,12 +428,21 @@ def test_second_selection_appends_df2(window):
     assert "df2 = pd.DataFrame" in window.notebook.cell(second).source
 
 
-def test_tool_in_toolbar_menus_and_context_menu(window):
+def notebook_submenu(menu):
+    return next(action.menu() for action in menu.actions() if action.text() == "Notebook")
+
+
+def test_tool_in_toolbar_menus_and_context_menu(window, monkeypatch):
     toolbar = window.findChild(QToolBar)
-    assert window.notebook_action in toolbar.actions()
+    assert window.notebook_button in [toolbar.widgetForAction(action) for action in toolbar.actions()]
+    shown = []
+    monkeypatch.setattr(window.notebook_button, "showMenu", lambda: shown.append(1))  # (it would block)
+    window.notebook_button.click()
+    assert shown == [1]  # the button itself shows the menu, not just its arrow
     insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
-    assert window.notebook_action in insert.actions()
-    assert window.notebook_action in window.context_menu.actions()
+    for menu in (window.notebook_button.menu(), notebook_submenu(insert), notebook_submenu(window.context_menu)):
+        assert menu.actions() == [window.dataframe_action, window.graph_action]
+        assert [action.text() for action in menu.actions()] == ["DataFrame", "Graph"]
     view_menu = [m for m in window.menuBar().actions() if m.text() == "View"][0].menu()
     assert window.show_notebook_action in view_menu.actions()
 
@@ -445,6 +552,44 @@ def test_kernel_starts_in_sheets_folder(app, tmp_path):
     window.save_to(str(tmp_path / "s.ezs"))
     assert window.kernel.working_dir == str(tmp_path)
     window.setWindowModified(False)
+
+
+def test_graph_from_the_notebook_menu(window):
+    window.view.select_range(0, 0, window.model.rowCount() - 1, 1)  # columns A and B: Month, Sales
+    window.graph_action.trigger()
+    frame_cell, graph_cell = window.notebook.cells
+    assert [run[0] for run in window.kernel.runs] == [frame_cell.id, graph_cell.id]  # both run, in order
+    assert frame_cell.source == dataframe_code(window.model, block(0, 0, 3, 1))
+    assert "graph = sns.relplot(" in graph_cell.source and "x='Month', y='Sales'" in graph_cell.source
+    assert window.notebook_window.isVisible()
+    assert "as df, with a graph" in window.statusBar().currentMessage()
+    window.view.select_range(0, 0, 3, 1)
+    window.graph_action.trigger()
+    assert "df2 as a graph" in window.notebook.cells[-1].source
+
+
+@pytest.mark.parametrize("selection, problem", [
+    ((0, 0, 3, 0), "Select at least two columns"),
+    ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't graphed
+    ((10, 0, 12, 2), "The selection is empty"),
+])
+def test_graph_problems(window, selection, problem):
+    if problem is None:
+        window.view.select_range(*selection)
+        assert window.send_graph_to_notebook() is not None
+        return
+    window.model.set_cells({(0, 1): "Sales", (1, 1): "x", (2, 1): "y", (3, 1): "z"})  # no numbers
+    window.view.select_range(*selection)
+    assert window.send_graph_to_notebook() is None
+    assert problem in window.statusBar().currentMessage()
+    assert window.notebook.is_empty and window.notebook_window is None
+
+
+def test_graph_needs_numbers(window):
+    window.model.set_cells({(1, 1): "x", (2, 1): "y", (3, 1): ""})
+    window.view.select_range(0, 0, 3, 1)
+    assert window.send_graph_to_notebook() is None
+    assert "no numbers to graph" in window.statusBar().currentMessage()
 
 
 # --- Zoom ---
@@ -565,6 +710,24 @@ def test_real_kernel_runs_the_dataframe(app, sheet):
         window.setWindowModified(False)
         window.close()
     assert not window.kernel.has_kernel
+
+
+def test_real_kernel_draws_the_graph(app, sheet):
+    window = MainWindow()
+    window.model.set_cells({key: sheet.get_cell(*key) for key in block(0, 0, 3, 2)})
+    try:
+        window.view.select_range(0, 0, 3, 1)
+        graph_id = window.send_graph_to_notebook()
+        cell = window.notebook.cell(graph_id)
+        assert wait_for(lambda: cell.execution_count is not None)
+        kinds = [o["output_type"] for o in cell.outputs]
+        assert "error" not in kinds, cell.outputs
+        assert any("image/png" in o.get("data", {}) for o in cell.outputs)
+    finally:
+        if window.notebook_window is not None:
+            window.notebook_window.hide()
+        window.setWindowModified(False)
+        window.close()
 
 
 def test_real_kernel_errors_interrupt_and_restart(app):

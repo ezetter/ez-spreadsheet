@@ -185,16 +185,18 @@ def data_block(model, cells) -> set[tuple[int, int]]:
     return {(row, col) for row, col in cells if top <= row <= bottom and left <= col <= right}
 
 
-def dataframe_code(model, cells, name: str = "df") -> str:
-    """Python that makes a pandas DataFrame, called `name`, of the selected
-    (row, col) cells' values, and shows it.
+@dataclass
+class _Frame:
+    """The DataFrame that selected cells make: its column labels, and each
+    column's values (below the header row, if there is one)."""
 
-    The columns are the selected columns. If the first selected row is text
-    (and there's more than one row), it gives the column labels; otherwise a
-    column's name (Formulas > Name Column…) or its letter does. Numbers are
-    numbers ($1,200 is 1200); empty cells, error values, and cells inside the
-    block that weren't selected are missing values (NaN).
-    """
+    where: str  # the cells' block, such as A1:C4
+    header_row: int | None  # the sheet row giving the column labels
+    labels: list[str]
+    columns: list[list]
+
+
+def _frame(model, cells) -> _Frame:
     rows = sorted({row for row, _ in cells})
     cols = sorted({col for _, col in cells})
 
@@ -215,15 +217,96 @@ def dataframe_code(model, cells, name: str = "df") -> str:
             label = f"{label} ({column_name(col)})"  # keep labels unique
         labels.append(label)
     data_rows = rows[1:] if header else rows
+    return _Frame(where=f"{cell_name(rows[0], cols[0])}:{cell_name(rows[-1], cols[-1])}",
+                  header_row=rows[0] if header else None, labels=labels,
+                  columns=[[value(row, col) for row in data_rows] for col in cols])
 
-    where = f"{cell_name(rows[0], cols[0])}:{cell_name(rows[-1], cols[-1])}"
-    note = f", with row {rows[0] + 1} as the column names" if header else ""
-    lines = ["import pandas as pd", "", f"# Cells {where} of the sheet{note}.", f"{name} = pd.DataFrame({{"]
-    for label, col in zip(labels, cols):
-        values = ", ".join(_python_value(value(row, col)) for row in data_rows)
-        lines.append(f"    {label!r}: [{values}],")
+
+def dataframe_code(model, cells, name: str = "df") -> str:
+    """Python that makes a pandas DataFrame, called `name`, of the selected
+    (row, col) cells' values, and shows it.
+
+    The columns are the selected columns. If the first selected row is text
+    (and there's more than one row), it gives the column labels; otherwise a
+    column's name (Formulas > Name Column…) or its letter does. Numbers are
+    numbers ($1,200 is 1200); empty cells, error values, and cells inside the
+    block that weren't selected are missing values (NaN).
+    """
+    frame = _frame(model, cells)
+    note = f", with row {frame.header_row + 1} as the column names" if frame.header_row is not None else ""
+    lines = ["import pandas as pd", "", f"# Cells {frame.where} of the sheet{note}.", f"{name} = pd.DataFrame({{"]
+    for label, values in zip(frame.labels, frame.columns):
+        lines.append(f"    {label!r}: [{', '.join(_python_value(v) for v in values)}],")
     lines += ["})", name]
     return "\n".join(lines)
+
+
+# --- Graphing them with Seaborn ---
+
+MARKER_LIMIT = 50  # as with charts, line graphs with up to this many points mark each one
+
+
+class GraphError(ValueError):
+    """The selected cells can't be graphed; the message says why."""
+
+
+def graph_code(model, cells, frame_name: str = "df") -> str:
+    """Python that graphs the DataFrame `frame_name`, which dataframe_code
+    makes of the same cells, with Seaborn, the way a chart of them is drawn:
+    the first column across (text gives category labels, in the sheet's
+    order), and each other column a series up, named by its label. It's a
+    line graph, with a dot on each point when there are up to 50 of them, and
+    turns into a scatter graph by changing kind to 'scatter'. Text in the y
+    columns is left out. GraphError if the cells can't be graphed.
+    """
+    frame = _frame(model, cells)
+    if len(frame.labels) < 2:
+        raise GraphError("Select at least two columns: the first for x, the others for y.")
+    x_label, y_labels = frame.labels[0], frame.labels[1:]
+    x_values, y_columns = frame.columns[0], frame.columns[1:]
+    if not any(isinstance(v, float) for column in y_columns for v in column):
+        raise GraphError("There are no numbers to graph in the y columns.")
+
+    fixes = []  # changes Seaborn needs, made to a copy of the DataFrame
+    if any(isinstance(v, str) for v in x_values) and any(isinstance(v, float) for v in x_values):
+        fixes.append(f"data[{x_label!r}] = data[{x_label!r}].astype('string')  # numbers and text: all labels")
+    for label, column in zip(y_labels, y_columns):
+        if any(isinstance(v, str) for v in column):
+            fixes.append(f"data[{label!r}] = pd.to_numeric(data[{label!r}], errors='coerce')  # text isn't graphed")
+
+    lines = ["import pandas as pd"] if any("pd." in fix for fix in fixes) else []
+    up = "the second" if len(y_labels) == 1 else "the others"
+    lines += ["import seaborn as sns", "", f"# {frame_name} as a graph: its first column across, {up} up.",
+              "sns.set_theme(style='whitegrid')"]
+    data = frame_name
+    if fixes:
+        lines += [f"data = {frame_name}.copy()", *fixes]
+        data = "data"
+    if len(y_labels) == 1:
+        plotted = f"data={data}, x={x_label!r}, y={y_labels[0]!r}"
+    else:  # one column of values, with another naming each value's series
+        series, value = _unused("Series", frame.labels), _unused("Value", frame.labels)
+        lines.append(f"long = {data}.melt(id_vars=[{x_label!r}], value_vars={y_labels!r}, "
+                     f"var_name={series!r}, value_name={value!r})")
+        plotted = f"data=long, x={x_label!r}, y={value!r}, hue={series!r}"
+    marker = "marker='o', " if len(x_values) <= MARKER_LIMIT else ""
+    lines += [
+        "graph = sns.relplot(",
+        f"    {plotted},",
+        "    kind='line',  # or 'scatter' for the points alone",
+        f"    {marker}height=4, aspect=1.5,",
+        ")",
+    ]
+    return "\n".join(lines)
+
+
+def _unused(name: str, taken: list[str]) -> str:
+    """`name`, or `name 2`, `name 3`, ... if a column already has it."""
+    candidate, number = name, 1
+    while candidate in taken:
+        number += 1
+        candidate = f"{name} {number}"
+    return candidate
 
 
 def _python_value(value) -> str:

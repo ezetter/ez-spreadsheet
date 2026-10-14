@@ -5,3 +5,4 @@ anthropic>=1.11
 pandas>=2.2
 ipykernel>=6.29
 jupyter_client>=8.6
+seaborn>=0.13

@@ -2,7 +2,7 @@
 
 A desktop spreadsheet written in Python with PySide6 (Qt), using NumPy for
 calculations and Matplotlib for charts. Each sheet has a Jupyter-style
-notebook for working with its data in pandas.
+notebook for working with its data in pandas and graphing it with Seaborn.
 
 ## Setup
 
@@ -14,8 +14,8 @@ python3 -m venv .venv
 ```
 
 `requirements.txt` lists what the app needs (PySide6, NumPy, Matplotlib,
-pandas, the Jupyter kernel packages ipykernel and jupyter_client, and the
-Anthropic SDK);
+pandas, Seaborn, the Jupyter kernel packages ipykernel and jupyter_client, and
+the Anthropic SDK);
 `requirements-dev.txt` adds pytest for the tests.
 
 ## Run
@@ -45,7 +45,7 @@ creates the file.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 - A secondary click (right-click, Control-click, or a two-finger click) on the
   grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, Fill,
-  Name Cell…, Name Column…, DataFrame in Notebook, and Ask Claude…. Clicking
+  Name Cell…, Name Column…, Notebook (DataFrame or Graph), and Ask Claude…. Clicking
   inside the selection keeps it; clicking elsewhere selects that cell first.
 
 ## Zoom
@@ -128,15 +128,18 @@ the chart window switches between line and scatter.
 ## Notebook
 
 Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by
-a real Jupyter (IPython) kernel, with pandas, NumPy, and Matplotlib at hand.
+a real Jupyter (IPython) kernel, with pandas, NumPy, Matplotlib, and Seaborn at
+hand.
+
+Select cells (a block, or several columns, including whole columns picked in
+the column headers), then click the Notebook button on the toolbar, or choose
+Insert > Notebook or Notebook on the secondary-click menu. Its menu has
+**DataFrame** and **Graph**.
 
 ### Sending cells as a DataFrame
 
-Select cells (a block, or several columns, including whole columns picked in
-the column headers), then click the Notebook button on the toolbar, choose
-Insert > DataFrame in Notebook, or choose it from the secondary-click menu.
-The notebook opens with a new cell that makes a pandas DataFrame of the data
-and shows it, and the cell runs:
+DataFrame opens the notebook with a new cell that makes a pandas DataFrame of
+the data and shows it, and the cell runs:
 
 ```python
 import pandas as pd
@@ -162,6 +165,39 @@ df
   doesn't change the DataFrame; send the cells again for a fresh one. The next
   is called `df2`, then `df3`, and so on, and each new cell goes at the end of
   the notebook.
+
+### Graphing cells
+
+Graph does the same, and adds a second cell that graphs the DataFrame with
+Seaborn, the way a chart of the cells is drawn. Both cells run, so the table
+shows and then the graph:
+
+```python
+import seaborn as sns
+
+# df as a graph: its first column across, the others up.
+sns.set_theme(style='whitegrid')
+long = df.melt(id_vars=['Month'], value_vars=['Sales', 'Cost'], var_name='Series', value_name='Value')
+graph = sns.relplot(
+    data=long, x='Month', y='Value', hue='Series',
+    kind='line',  # or 'scatter' for the points alone
+    marker='o', height=4, aspect=1.5,
+)
+```
+
+- The first selected column is the x axis, and each other column is a series
+  of y values, named by its column label (in the legend, or on the y axis for
+  a single series). Text x values are categories, in the sheet's order.
+- It starts as a line graph, as charts do. For a scatter graph, change
+  `kind='line'` to `kind='scatter'` and run the cell again (Shift+Return).
+- With up to 50 points, each one gets a dot. Text in the y columns isn't
+  graphed, and rows without an x value are left out. Unlike a chart, a line
+  joins the points on either side of a missing value instead of leaving a gap.
+- It needs at least two columns, with some numbers in the y columns; if not,
+  the status bar says why and nothing is added.
+- The graph is a picture of the data when the cell ran, saved with the
+  notebook. `graph` is Seaborn's FacetGrid, so later cells can adjust it, for
+  example `graph.set(title='Sales')` followed by `graph.figure`.
 
 ### Working in the notebook
 

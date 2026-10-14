@@ -39,7 +39,7 @@ from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .kernel import KernelRunner
-from .notebook import Notebook, data_block, dataframe_code, next_frame_name
+from .notebook import GraphError, Notebook, data_block, dataframe_code, graph_code, next_frame_name
 from .notebook_window import NotebookWindow, kernel_folder
 from .recent import add_recent_file, clear_recent_files, menu_labels, recent_files, remove_recent_file
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
@@ -425,7 +425,7 @@ class MainWindow(QMainWindow):
         menu.addAction(self.name_cell_action)
         menu.addAction(self.name_column_action)
         menu.addSeparator()
-        menu.addAction(self.notebook_action)
+        self._add_notebook_menu(menu)
         menu.addAction(self.ask_claude_action)
         self.context_menu = menu
         # Qt selects a right-clicked cell outside the selection, and keeps the
@@ -559,12 +559,24 @@ class MainWindow(QMainWindow):
             "Switch between line and scatter in the chart window.")
         self.chart_action.triggered.connect(lambda _checked=False: self.make_chart())
         menu.addAction(self.chart_action)
-        self.notebook_action = QAction("DataFrame in Notebook", self)
-        self.notebook_action.setIconText("Notebook")
-        self.notebook_action.setToolTip(
+        # Notebook: the selected cells as a DataFrame, or a DataFrame and a graph.
+        self.dataframe_action = QAction("DataFrame", self)
+        self.dataframe_action.setToolTip(
             "Put the selected cells in a pandas DataFrame in the sheet's notebook, and run it")
-        self.notebook_action.triggered.connect(lambda _checked=False: self.send_to_notebook())
-        menu.addAction(self.notebook_action)
+        self.dataframe_action.triggered.connect(lambda _checked=False: self.send_to_notebook())
+        self.graph_action = QAction("Graph", self)
+        self.graph_action.setToolTip(
+            "Put the selected cells in a DataFrame in the sheet's notebook and graph it with Seaborn: "
+            "the first column is x, the others are y")
+        self.graph_action.triggered.connect(lambda _checked=False: self.send_graph_to_notebook())
+        self._add_notebook_menu(menu)
+
+    def _add_notebook_menu(self, menu=None) -> QMenu:
+        """A Notebook menu (DataFrame, Graph): a submenu of `menu`, or one of its own."""
+        submenu = menu.addMenu("Notebook") if menu is not None else QMenu("Notebook", self)
+        submenu.addAction(self.dataframe_action)
+        submenu.addAction(self.graph_action)
+        return submenu
 
     def _build_chart_button(self, toolbar):
         self.chart_button = QToolButton()
@@ -816,7 +828,15 @@ class MainWindow(QMainWindow):
 
         self._build_fill_button(toolbar)
         self._build_chart_button(toolbar)
-        toolbar.addAction(self.notebook_action)
+        self.notebook_button = QToolButton()
+        self.notebook_button.setText("Notebook")
+        self.notebook_button.setToolTip("Send the selected cells to the sheet's notebook, as a DataFrame "
+                                        "or as a DataFrame and a graph")
+        # An arrow beside the text, like Σ and Fill have, but the whole button shows the menu.
+        self.notebook_button.setPopupMode(QToolButton.MenuButtonPopup)
+        self.notebook_button.setMenu(self._add_notebook_menu())
+        self.notebook_button.clicked.connect(lambda _checked=False: self.notebook_button.showMenu())
+        toolbar.addWidget(self.notebook_button)
         self._add_currency_button(toolbar)
         self._add_angle_button(toolbar)
         self.statusBar()  # create it now so the window doesn't resize on the first message
@@ -970,13 +990,42 @@ class MainWindow(QMainWindow):
             self._show_status("The selection is empty. Select cells with data to make a DataFrame of them.")
             return None
         name = next_frame_name(self.notebook)
-        window = self.show_notebook()
-        if window.current_id is not None:
-            window.set_current(self.notebook.cells[-1].id)  # new data goes at the end
-        cell_id = window.add_cell_below(dataframe_code(self.model, cells, name))
-        window.run_cell(cell_id)
+        [cell_id] = self._run_in_notebook([dataframe_code(self.model, cells, name)])
         self._show_status(f"Sent the selection to the notebook as {name}.")
         return cell_id
+
+    def send_graph_to_notebook(self) -> str | None:
+        """Put the selected cells in a DataFrame in a new notebook cell, and a
+        Seaborn graph of it in the next (the first column across, the others
+        up, as in a chart); open the notebook and run them. Returns the graph
+        cell's id, or None if the cells can't be graphed (the status bar says
+        why)."""
+        self._commit_pending_edit()
+        cells = data_block(self.model, self._selected_cells())
+        if not cells:
+            self._show_status("The selection is empty. Select cells with data to graph them.")
+            return None
+        name = next_frame_name(self.notebook)
+        try:
+            graph = graph_code(self.model, cells, name)
+        except GraphError as e:
+            self._show_status(f"Can't make a graph: {e}")
+            return None
+        _frame_id, graph_id = self._run_in_notebook([dataframe_code(self.model, cells, name), graph])
+        self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
+        return graph_id
+
+    def _run_in_notebook(self, sources: list[str]) -> list[str]:
+        """Open the notebook, add cells with these sources at its end, and
+        run them in order. Returns their ids."""
+        window = self.show_notebook()
+        if window.current_id is not None:
+            window.set_current(self.notebook.cells[-1].id)  # new cells go at the end
+        ids = []
+        for source in sources:
+            ids.append(window.add_cell_below(source))
+            window.run_cell(ids[-1])
+        return ids
 
     def _on_undo_text(self, text: str):
         self.undo_action.setText(f"Undo {text}".strip())
