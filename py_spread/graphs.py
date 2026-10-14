@@ -1,6 +1,6 @@
-"""The notebook's graphs: finding cells that draw a Seaborn graph (one
-sns.relplot or sns.catplot call), reading what they draw, and changing it,
-for the Graph dialog.
+"""The notebook's charts (graphs, in the code's names): finding cells that
+draw a Seaborn chart (one sns.relplot or sns.catplot call), reading what
+they draw, and changing it, for the Chart dialog.
 
 Changing a graph's type or marker touches only kind=, marker=, and which of
 relplot and catplot draws it, so anything else changed by hand in its cell
@@ -16,7 +16,7 @@ from .notebook import CATEGORICAL, GRAPH_KINDS, FrameData, GraphColumns, GraphEr
 
 FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm")}  # the kinds each draws here
 DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip"}  # their kind when none is given
-_FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a graph\b", re.M)  # as graph_code writes it
+_FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a (?:chart|graph)\b", re.M)  # as graph_code writes it (or did)
 _OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm)\1[^\n]*")  # "# or 'scatter'"
 _OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
                 "swarm": "  # or 'strip'"}  # as graph_code writes them
@@ -40,7 +40,7 @@ class GraphCell:
     def title(self) -> str:
         """What it graphs: "Sales and Cost against Month"."""
         if not self.x_label or not self.y_labels:
-            return f"a graph of {self.frame}" if self.frame else "a graph"
+            return f"a chart of {self.frame}" if self.frame else "a chart"
         ys = self.y_labels
         if len(ys) == 1:
             series = ys[0]
@@ -72,7 +72,7 @@ def find_graphs(notebook) -> list[GraphCell]:
 
 def read_graph(source: str) -> GraphCell | None:
     """The graph a cell's code draws, or None if it doesn't draw exactly one
-    relplot or catplot graph of a kind the Graph dialog has, with a plain
+    relplot or catplot graph of a kind the Chart dialog has, with a plain
     marker."""
     found = _plot_call(source)
     if found is None:
@@ -105,7 +105,7 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
     if kind not in GRAPH_KINDS:  # (for a hue or new columns, the cell is written afresh)
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     if read_graph(source) is None:
-        raise ValueError("the code doesn't draw a graph that can be changed")
+        raise ValueError("the code doesn't draw a chart that can be changed")
     _tree, call = _plot_call(source)
     at = _Positions(source)
     keywords = {k.arg: k for k in call.keywords if k.arg}
@@ -158,7 +158,7 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
         source = source[:start] + text + source[end:]
     changed = read_graph(source)
     if changed is None or (changed.kind, changed.marker) != (kind, marker or None):
-        raise ValueError("the graph's code couldn't be changed")
+        raise ValueError("the chart's code couldn't be changed")
     return source
 
 

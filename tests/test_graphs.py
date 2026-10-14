@@ -109,8 +109,8 @@ def test_titles_and_labels():
               GraphCell("b", "line", None, "df", "Month", ["Sales"]),
               GraphCell("c", "line", None, None, None, []),
               GraphCell("d", "line", None, "df3", None, [])]
-    assert graph_labels(graphs) == ["df: Sales against Month (1)", "df: Sales against Month (2)", "A graph",
-                                    "df3: a graph of df3"]
+    assert graph_labels(graphs) == ["df: Sales against Month (1)", "df: Sales against Month (2)", "A chart",
+                                    "df3: a chart of df3"]
 
 
 # --- The Graph dialog, for changing a graph ---
@@ -150,7 +150,7 @@ def test_new_graphs_have_no_graph_list(app):
 
 def test_reads_categorical_scatters(sales):
     code = graph_code(sales, cells(3), "df", "strip", "D", x="Month", ys=["Sales"])
-    assert "graph = sns.catplot(" in code and "    kind='strip',  # or 'swarm'\n" in code
+    assert "chart = sns.catplot(" in code and "    kind='strip',  # or 'swarm'\n" in code
     graph = read_graph(code)
     assert (graph.kind, graph.marker, graph.x_label, graph.y_labels) == ("strip", "D", "Month", ["Sales"])
     assert read_graph("sns.catplot(data=d, x='a', y='b')").kind == "strip"  # catplot's default
@@ -221,8 +221,16 @@ def test_older_series_graph_in_the_changing_dialog(app):
 
 
 def test_reads_numbers_up_as_categories():
-    code = "graph = sns.catplot(data=df, x='Sales', y='Year', orient='h', kind='swarm')"
+    code = "chart = sns.catplot(data=df, x='Sales', y='Year', orient='h', kind='swarm')"
     graph = read_graph(code)
     assert graph.y_categories and graph.kind == "swarm"
     assert not read_graph(code.replace(", orient='h'", "")).y_categories
     assert change_graph(code, "strip", "o").count("orient='h'") == 1  # strip or swarm, still sideways
+
+
+def test_charts_made_before_they_were_called_charts(sales):
+    code = graph_code(sales, cells(3), "df2", "line", None)
+    assert "# df2 as a chart:" in code and "\nchart = sns.relplot(" in code
+    older = code.replace("as a chart", "as a graph").replace("chart = sns.", "graph = sns.")
+    assert read_graph(older).frame == "df2"
+    assert "graph = sns.relplot(" in change_graph(older, "scatter", "o")  # its own name stays

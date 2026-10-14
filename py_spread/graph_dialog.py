@@ -1,7 +1,7 @@
-"""The Graph dialog: the kind of graph, the columns across, up, and
+"""The Chart dialog: the kind of chart, the columns across, up, and
 coloring the points, and the marker drawn on each point, for a Seaborn
-graph of selected cells in the notebook, or for changing one of the
-notebook's graphs."""
+chart of selected cells in the notebook, or for changing one of the
+notebook's charts. (The code calls charts graphs.)"""
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
@@ -21,12 +21,12 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
 NO_HUE = "None"
-CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the graph sideways: "
+CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the chart sideways: "
                   "categories down the side, numbers across. A column of text always is.")
 
 
 def graph_labels(graphs) -> list[str]:
-    """How the Graph list names each of the notebook's graphs: "df2: Sales
+    """How the Chart list names each of the notebook's charts: "df2: Sales
     against Month", numbered if two would read the same."""
     labels = [f"{graph.frame}: {graph.title}" if graph.frame else graph.title.capitalize() for graph in graphs]
     return [f"{label} ({labels[:i].count(label) + 1})" if labels.count(label) > 1 else label
@@ -34,7 +34,7 @@ def graph_labels(graphs) -> list[str]:
 
 
 class GraphDialog(QDialog):
-    """The graph type (Line, Scatter, or Categorical scatter, which can be a
+    """The chart type (Line, Scatter, or Categorical scatter, which can be a
     swarm plot), the X axis column, the Y axis column, the Hue column whose
     values color the points (None by default), and a marker (None by
     default). Up takes a column with numbers, except that a categorical
@@ -48,20 +48,20 @@ class GraphDialog(QDialog):
     switches None to circles, and Line switches them back.
 
     Given the notebook's `graphs` (GraphCells), it's for changing one of
-    them instead: a Graph list chooses which, starting at graphs[current],
+    them instead: a Chart list chooses which, starting at graphs[current],
     and the controls show what it draws now. Its columns can be changed if
     its DataFrame's cell was found."""
 
     def __init__(self, parent=None, columns=None, kind: str = "line", marker: str | None = None,
                  graphs=None, current: int = 0):
         super().__init__(parent)
-        self.setWindowTitle("Graph")
+        self.setWindowTitle("Chart")
         self.setMinimumWidth(self.fontMetrics().averageCharWidth() * 48)
         self.graphs = list(graphs or [])
         self.columns = columns
         layout = QVBoxLayout(self)
         if self.graphs:
-            summary = QLabel("Change one of the notebook's graphs. It's redrawn when you click OK.")
+            summary = QLabel("Change one of the notebook's charts. It's redrawn when you click OK.")
             summary.setWordWrap(True)
             layout.addWidget(summary)
 
@@ -70,11 +70,11 @@ class GraphDialog(QDialog):
         if self.graphs:
             self.graph_box = QComboBox()
             self.graph_box.addItems(graph_labels(self.graphs))
-            form.addRow("Graph:", self.graph_box)
+            form.addRow("Chart:", self.graph_box)
         self.kind_box = QComboBox()
         for key, name in GRAPH_TYPES.items():
             self.kind_box.addItem(name, key)
-        form.addRow("Graph type:", self.kind_box)
+        form.addRow("Chart type:", self.kind_box)
         self.swarm_box = QCheckBox("Swarm plot")
         self.swarm_box.setToolTip("Spread each category's points out so none overlap, "
                                   "instead of scattering them a little at random")
@@ -170,7 +170,7 @@ class GraphDialog(QDialog):
         known = self.columns is not None
         for box in (self.x_box, self.y_box, self.hue_box, self.categories_box):
             box.setEnabled(known)
-            box.setToolTip("" if known else "The columns can't be changed: the cell making the graph's "
+            box.setToolTip("" if known else "The columns can't be changed: the cell making the chart's "
                                              "DataFrame wasn't found, or was changed by hand.")
         self._loading = False
         if known:
@@ -249,7 +249,7 @@ class GraphDialog(QDialog):
         needs_markers = kind in NEEDS_MARKERS
         none_item = self.marker_box.model().item(0)
         none_item.setEnabled(not needs_markers)
-        none_item.setToolTip("A scatter graph needs markers to show its points." if needs_markers else "")
+        none_item.setToolTip("A scatter chart needs markers to show its points." if needs_markers else "")
         if needs_markers and self.marker() is None:
             self.marker_box.setCurrentIndex(self.marker_box.findData(SCATTER_DEFAULT))
             self._none_replaced = True

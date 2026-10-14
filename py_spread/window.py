@@ -642,7 +642,7 @@ class MainWindow(QMainWindow):
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
         # Notebook: open it as it is, or add the selected cells as a DataFrame,
-        # or as a DataFrame and a graph.
+        # or as a DataFrame and a chart.
         self.open_notebook_action = QAction("Open", self)
         self.open_notebook_action.setToolTip("Open the sheet's notebook without adding anything to it")
         self.open_notebook_action.triggered.connect(lambda _checked=False: self.show_notebook())
@@ -650,12 +650,12 @@ class MainWindow(QMainWindow):
         self.dataframe_action.setToolTip(
             "Put the selected cells in a pandas DataFrame in the sheet's notebook, and run it")
         self.dataframe_action.triggered.connect(lambda _checked=False: self.send_to_notebook())
-        self.graph_action = QAction("Graph", self)
+        self.graph_action = QAction("Chart", self)
         self.graph_action.setToolTip(
-            "Put the selected cells in a DataFrame in the sheet's notebook and graph it with Seaborn, "
-            "choosing the kind of graph and its columns")
+            "Put the selected cells in a DataFrame in the sheet's notebook and chart it with Seaborn, "
+            "choosing the kind of chart and its columns")
         self.graph_action.triggered.connect(lambda _checked=False: self.send_graph_to_notebook())
-        self.graph_kind, self.graph_marker = "line", None  # the Graph dialog's last choices
+        self.graph_kind, self.graph_marker = "line", None  # the Chart dialog's last choices
         self.load_data_action = QAction("Load Data to Sheet…", self)
         self.load_data_action.setToolTip("Put one of the notebook's DataFrames in the sheet, at the current cell")
         self.load_data_action.triggered.connect(lambda _checked=False: self.load_data_to_sheet())
@@ -915,7 +915,7 @@ class MainWindow(QMainWindow):
         self.notebook_button = QToolButton()
         self.notebook_button.setText("Notebook")
         self.notebook_button.setToolTip("Send the selected cells to the sheet's notebook, as a DataFrame "
-                                        "or as a DataFrame and a graph")
+                                        "or as a DataFrame and a chart")
         # An arrow beside the text, like Σ and Fill have, but the whole button shows the menu.
         self.notebook_button.setPopupMode(QToolButton.MenuButtonPopup)
         self.notebook_button.setMenu(self._add_notebook_menu())
@@ -1084,7 +1084,7 @@ class MainWindow(QMainWindow):
         return cell_id
 
     def send_graph_to_notebook(self) -> str | None:
-        """Ask what kind of graph, of which columns (in the Graph dialog), then
+        """Ask what kind of graph, of which columns (in the Chart dialog), then
         put the selected cells in a DataFrame in a new notebook cell, and a
         Seaborn graph of it in the next; open the notebook and run them. With
         no data or just one column selected, which can't be graphed, change
@@ -1099,7 +1099,7 @@ class MainWindow(QMainWindow):
         try:
             columns = graph_columns(self.model, cells)
         except GraphError as e:
-            self._show_status(f"Can't make a graph: {e}")
+            self._show_status(f"Can't make a chart: {e}")
             return None
         choice = self._ask_graph_options(columns)
         if choice is None:
@@ -1112,12 +1112,12 @@ class MainWindow(QMainWindow):
                            choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
-        self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
+        self._show_status(f"Sent the selection to the notebook as {name}, with a chart of it.")
         return graph_id
 
     def change_notebook_graph(self) -> str | None:
-        """Graph with no data or one column selected: choose one of the
-        notebook's graphs in the Graph dialog, which starts with its type,
+        """Chart with no data or one column selected: choose one of the
+        notebook's graphs in the Chart dialog, which starts with its type,
         columns, and marker, and redraw it with the ones chosen. New columns
         (across, up, or for the hue) mean writing its cell afresh, from its
         DataFrame's cell; otherwise just its kind and marker change in the
@@ -1125,8 +1125,8 @@ class MainWindow(QMainWindow):
         None if there are no graphs or the dialog was cancelled."""
         graphs = find_graphs(self.notebook)
         if not graphs:
-            self._show_status("The notebook has no graphs to change. To make one, select two or more "
-                              "columns of data, then choose Graph.")
+            self._show_status("The notebook has no charts to change. To make one, select two or more "
+                              "columns of data, then choose Chart.")
             return None
         ids = [graph.cell_id for graph in graphs]
         current_id = self.notebook_window.current_id if self.notebook_window is not None else None
@@ -1150,25 +1150,25 @@ class MainWindow(QMainWindow):
             else:
                 source = change_graph(source, chosen.kind, chosen.marker)
         except (ValueError, GraphError) as e:
-            self._show_error("Couldn't change the graph.", str(e))
+            self._show_error("Couldn't change the chart.", str(e))
             return None
         window = self.show_notebook()
         window.replace_source(graph.cell_id, source)
         window.set_current(graph.cell_id, focus=True)
         # After a restart, or in a reopened sheet, the imports and the DataFrame have to run again first.
         window.run_needing(graph.cell_id, [pandas, seaborn, frame_cell(self.notebook, graph.cell_id, graph.frame)])
-        self._show_status(f"Redrawing the graph {graph_labels(graphs)[index]}.")
+        self._show_status(f"Redrawing the chart {graph_labels(graphs)[index]}.")
         return graph.cell_id
 
     def _ask_graph_change(self, graphs, current: int) -> tuple[int, GraphChoice] | None:
-        """The Graph dialog for changing a graph: (which, the choices), or None if cancelled."""
+        """The Chart dialog for changing a chart: (which, the choices), or None if cancelled."""
         dialog = GraphDialog(self, graphs=graphs, current=current)
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog.chosen_graph(), dialog.choice()
 
     def _ask_graph_options(self, columns) -> GraphChoice | None:
-        """The Graph dialog for a new graph of these GraphColumns: the choices, or None if cancelled."""
+        """The Chart dialog for a new chart of these GraphColumns: the choices, or None if cancelled."""
         dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker)
         return dialog.choice() if dialog.exec() == QDialog.Accepted else None
 

@@ -2,7 +2,7 @@
 
 A desktop spreadsheet written in Python with PySide6 (Qt), using NumPy for
 calculations. Each sheet has a Jupyter-style notebook for working with its
-data in pandas and graphing it with Seaborn (which draws with Matplotlib).
+data in pandas and charting it with Seaborn (which draws with Matplotlib).
 
 ## Setup
 
@@ -45,7 +45,7 @@ creates the file.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 - A secondary click (right-click, Control-click, or a two-finger click) on the
   grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, Fill,
-  Name Cell…, Name Column…, Notebook (Open, DataFrame, Graph, or Load Data to
+  Name Cell…, Name Column…, Notebook (Open, DataFrame, Chart, or Load Data to
   Sheet…), and Ask Claude…. Clicking
   inside the selection keeps it; clicking elsewhere selects that cell first.
 
@@ -119,7 +119,7 @@ import pandas as pd
 import seaborn as sns
 ```
 
-The cells EzSheet adds for DataFrames and graphs rely on it rather than
+The cells EzSheet adds for DataFrames and charts rely on it rather than
 repeating the imports, and whenever they run, the imports cell runs first if
 Python hasn't run it yet (after a restart, or in a sheet just opened). A
 notebook made before this, without an imports cell, keeps getting the imports
@@ -130,7 +130,7 @@ the column headers), then click the Notebook button on the toolbar, or choose
 Insert > Notebook or Notebook on the secondary-click menu. Its menu has
 **Open**, which just opens the notebook (as View > Notebook does), adding
 nothing but a new notebook's imports cell;
-**DataFrame** and **Graph**, which add the selected cells to it; and **Load
+**DataFrame** and **Chart**, which add the selected cells to it; and **Load
 Data to Sheet…**, which brings a DataFrame back into the sheet.
 
 ### Sending cells as a DataFrame
@@ -161,25 +161,25 @@ df
   is called `df2`, then `df3`, and so on, and each new cell goes at the end of
   the notebook.
 
-### Graphing cells
+### Charting cells
 
-Graph asks what kind of graph to make, of which columns, then does the same as
-DataFrame and adds a second cell that graphs the DataFrame with Seaborn. Both
-cells run, so the table shows and then the graph:
+Chart asks what kind of chart to make, of which columns, then does the same as
+DataFrame and adds a second cell that charts the DataFrame with Seaborn. Both
+cells run, so the table shows and then the chart:
 
 ```python
-# df as a graph: 'Sales' against 'Month', colored by 'Region'.
+# df as a chart: 'Sales' against 'Month', colored by 'Region'.
 sns.set_theme(style='whitegrid')
-graph = sns.relplot(
+chart = sns.relplot(
     data=df, x='Month', y='Sales', hue='Region',
     kind='line',  # or 'scatter'
     height=4, aspect=1.5,
 )
 ```
 
-The Graph dialog has these choices:
+The Chart dialog has these choices:
 
-- **Graph type:** Line, Scatter, or Categorical scatter. Line and Scatter are
+- **Chart type:** Line, Scatter, or Categorical scatter. Line and Scatter are
   drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
   a column of categories (text such as species or months) across and spreads
   each category's points out a little at random so they don't all sit on one
@@ -191,11 +191,11 @@ The Graph dialog has these choices:
   the sheet's order.
 - **Y axis:** one of the other columns with numbers. For a categorical
   scatter with numbers across, it can also be a column of categories (text),
-  which turns the graph sideways: the categories run down the side and the
+  which turns the chart sideways: the categories run down the side and the
   numbers across. While categories are up, the X axis offers only columns
   with numbers; and changing to Line or Scatter puts numbers back up.
 - **Y axis as categories**, shown only for a categorical scatter: for numbers
-  up that are really categories, such as years, check it to turn the graph
+  up that are really categories, such as years, check it to turn the chart
   sideways with each year as a category down the side (`orient='h'` in the
   code). Unchecked, numbers up are values, and the X axis column gives the
   categories. It's checked, and can't be changed, for a column of text up,
@@ -204,7 +204,7 @@ The Graph dialog has these choices:
   color the points, with a legend: categories (text) each get a color, and
   numbers get shades along a scale.
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
-  Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter graphs
+  Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
   choosing one switches None to Circle, and choosing Line again switches it
   back.
@@ -212,55 +212,58 @@ The Graph dialog has these choices:
 The axes start at sensible defaults: the first column
 across, and the next column with numbers up (a column of text alone can't go
 up). For a categorical scatter, the first column with text goes across
-instead. The defaults follow the graph type until you choose an X axis
+instead. The defaults follow the chart type until you choose an X axis
 yourself, and the Y axis follows the X axis until you choose it. Choosing a
 new X axis clears the Hue if it was that column.
 
 The type (including Swarm plot) and marker start from your last choices
 while EzSheet is open. Cancel
-adds nothing. If the cells can't be graphed (just one column, or no numbers),
+adds nothing. If the cells can't be charted (just one column, or no numbers),
 the status bar says why before the dialog appears.
 
 - The choices are in the cell's code too: change `kind='line'` to
   `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`), or add
   or change `marker='o'` (any Matplotlib marker), and run the cell again
   (Shift+Return).
-- Text in the y columns isn't graphed, and rows without an x value are left
+- Text in the y columns isn't charted, and rows without an x value are left
   out. A line joins the points on either side of a missing value.
-- The graph is a picture of the data when the cell ran, saved with the
-  notebook. `graph` is Seaborn's FacetGrid, so later cells can adjust it, for
-  example `graph.set(title='Sales')` followed by `graph.figure`.
+- The chart is a picture of the data when the cell ran, saved with the
+  notebook. `chart` is Seaborn's FacetGrid, so later cells can adjust it, for
+  example `chart.set(title='Sales')` followed by `chart.figure`.
 
-### Changing a graph
+### Changing a chart
 
-To change a graph that's already in the notebook, choose Graph with no data,
+To change a chart that's already in the notebook, choose Chart with no data,
 or just one column, selected (clicking any one cell does it). A single column
-can't be graphed, so the Graph dialog then has a **Graph** list of the
-notebook's graphs, named for their DataFrame and columns, such as "df2: Sales
-and Cost against Month". It starts at the graph in the current notebook cell,
-or else the newest one, and choosing a graph shows its type, axes, hue, and
+can't be charted, so the Chart dialog then has a **Chart** list of the
+notebook's charts, named for their DataFrame and columns, such as "df2: Sales
+and Cost against Month". It starts at the chart in the current notebook cell,
+or else the newest one, and choosing a chart shows its type, axes, hue, and
 marker. Change them and click OK:
 
 - Changing only the type or marker changes just `kind=`, `marker=`, and
   whether `relplot` or `catplot` draws it, so anything else you changed in the
   cell stays.
-- Changing the axes or the hue writes the graph's cell afresh, from the data in
-  its DataFrame's cell, so changes you made to the graph's cell by hand are
+- Changing the axes or the hue writes the chart's cell afresh, from the data in
+  its DataFrame's cell, so changes you made to the chart's cell by hand are
   replaced. The columns can be changed only if that cell is found, written as
   EzSheet writes it; otherwise they're shown but greyed out.
-- A graph made before the Y axis took one column may graph several, a series
+- A chart made before the Y axis took one column may chart several, a series
   each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
   each series has its own color; choosing one column instead redraws it with
   just that one.
 - Either way, it's an edit in the cell, so Cmd+Z there brings back the old
-  code. The cell runs again to redraw the graph. If Python has restarted since
+  code. The cell runs again to redraw the chart. If Python has restarted since
   its DataFrame was made (or the sheet was opened since), the imports cell and
   the DataFrame's cell run first.
-- Any cell drawing one `sns.relplot(...)` or `sns.catplot(...)` graph of a
+- Any cell drawing one `sns.relplot(...)` or `sns.catplot(...)` chart of a
   kind the dialog has counts, including ones you write, as long as its `kind=`
   and `marker=`, if it has them, are written out, such as `kind='line'` and
   `marker='o'`.
-- If the notebook has no graphs, the status bar says so, and how to make one.
+- If the notebook has no charts, the status bar says so, and how to make one.
+- Charts made when they were called graphs (in cells saying `# df as a graph`
+  and `graph = sns.relplot(...)`) count too, and keep the name `graph` when
+  only their type or marker changes.
 
 ### Loading data into the sheet
 

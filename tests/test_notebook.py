@@ -130,7 +130,7 @@ def graph(model, cells, kind="line", marker=None, **columns):
     namespace = {}
     exec(dataframe_code(model, cells), namespace)
     exec(graph_code(model, cells, "df", kind, marker, **columns), namespace)
-    return namespace["graph"]
+    return namespace["chart"]
 
 
 @pytest.fixture
@@ -241,7 +241,7 @@ def test_categorical_scatter(pyplot, app):
     assert columns.default_x("strip") == "Species" and columns.default_x("line") == "Width"
     code = graph_code(model, block(0, 0, 3, 2), "df", "strip", "D", x="Species")
     assert "sns.catplot(" in code and "x='Species', y='Length'," in code and "kind='strip',  # or 'swarm'" in code
-    assert "# df as a graph: 'Length' against 'Species'." in code  # the next column with numbers after x
+    assert "# df as a chart: 'Length' against 'Species'." in code  # the next column with numbers after x
     g = graph(model, block(0, 0, 3, 2), "strip", "D", x="Species")
     assert [t.get_text() for t in g.ax.get_xticklabels()] == ["b", "a"]  # categories in the sheet's order
     g = graph(model, block(0, 0, 3, 2), "swarm", None, x="Species", ys=["Length"], hue="Width")
@@ -301,7 +301,7 @@ def test_years_as_y_categories(pyplot, app):
 def test_hue(sales, pyplot):
     code = graph_code(sales, block(0, 0, 3, 2), "df", "scatter", "o", x="Sales", ys=["Cost"], hue="Month")
     assert "data=data, x='Sales', y='Cost', hue='Month'" in code
-    assert "# df as a graph: 'Cost' against 'Sales', colored by 'Month'." in code
+    assert "# df as a chart: 'Cost' against 'Sales', colored by 'Month'." in code
     g = graph(sales, block(0, 0, 3, 2), "scatter", "o", x="Sales", ys=["Cost"], hue="Month")
     assert [t.get_text() for t in g.legend.texts] == ["Mar", "Jan", "Feb"]
     for bad in ("Sales", "Nope"):  # x itself, or no such column
@@ -492,9 +492,9 @@ def test_code_without_its_imports(sheet, app):
     cells = block(0, 0, 3, 1)
     assert dataframe_code(sheet, cells, "df", import_pandas=False).startswith("# Cells A1:B4")
     graph = graph_code(sheet, cells, "df", import_pandas=False, import_seaborn=False)
-    assert graph.startswith("# df as a graph") and "pd.to_numeric" not in graph  # Sales is all numbers
+    assert graph.startswith("# df as a chart") and "pd.to_numeric" not in graph  # Sales is all numbers
     sheet.set_cell(2, 1, "n/a")
-    assert graph_code(sheet, cells, "df", import_pandas=False, import_seaborn=False).startswith("# df as a graph")
+    assert graph_code(sheet, cells, "df", import_pandas=False, import_seaborn=False).startswith("# df as a chart")
     assert graph_code(sheet, cells, "df", import_seaborn=False).startswith("import pandas as pd\n\n# df")
 
 
@@ -744,7 +744,7 @@ def test_tool_in_toolbar_menus_and_context_menu(window, monkeypatch):
         actions = menu.actions()
         assert [actions[0], actions[2], actions[3], actions[5]] == [
             window.open_notebook_action, window.dataframe_action, window.graph_action, window.load_data_action]
-        assert [action.text() for action in actions] == ["Open", "", "DataFrame", "Graph", "",
+        assert [action.text() for action in actions] == ["Open", "", "DataFrame", "Chart", "",
                                                          "Load Data to Sheet…"]
 
 
@@ -907,16 +907,16 @@ def test_graph_from_the_notebook_menu(window, dialogs):
     imports, frame_cell, graph_cell = window.notebook.cells
     assert [run[0] for run in window.kernel.runs] == [imports.id, frame_cell.id, graph_cell.id]  # in order
     assert frame_cell.source == dataframe_code(window.model, block(0, 0, 3, 1), "df", import_pandas=False)
-    assert "graph = sns.relplot(" in graph_cell.source and "x='Month', y='Sales'" in graph_cell.source
-    assert graph_cell.source.startswith("# df as a graph") and "import" not in graph_cell.source
+    assert "chart = sns.relplot(" in graph_cell.source and "x='Month', y='Sales'" in graph_cell.source
+    assert graph_cell.source.startswith("# df as a chart") and "import" not in graph_cell.source
     assert window.notebook_window.isVisible()
-    assert "as df, with a graph" in window.statusBar().currentMessage()
+    assert "as df, with a chart" in window.statusBar().currentMessage()
     assert "kind='line'" in graph_cell.source and "marker" not in graph_cell.source
     dialogs.graph_answer = ("scatter", "s")
     window.view.select_range(0, 0, 3, 1)
     window.graph_action.trigger()
     source = window.notebook.cells[-1].source
-    assert "df2 as a graph" in source and "kind='scatter'" in source and "marker='s'" in source
+    assert "df2 as a chart" in source and "kind='scatter'" in source and "marker='s'" in source
     window.graph_action.trigger()
     assert dialogs.graph_prompts[-1][1] == ("scatter", "s")  # the dialog starts from the last choices
 
@@ -932,8 +932,8 @@ def test_cancelling_the_graph_dialog(window, dialogs):
 @pytest.mark.parametrize("selection, problem", [
     ((0, 2, 3, 3), "Select at least two columns"),  # C and D, but D is empty
     ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't graphed
-    ((10, 0, 12, 2), "no graphs to change"),  # empty: for changing a graph, but there are none
-    ((0, 0, 3, 0), "no graphs to change"),  # one column: likewise
+    ((10, 0, 12, 2), "no charts to change"),  # empty: for changing a graph, but there are none
+    ((0, 0, 3, 0), "no charts to change"),  # one column: likewise
 ])
 def test_graph_problems(window, dialogs, selection, problem):
     if problem is None:
@@ -952,7 +952,7 @@ def test_graph_needs_numbers(window):
     window.model.set_cells({(1, 1): "x", (2, 1): "y", (3, 1): ""})
     window.view.select_range(0, 0, 3, 1)
     assert window.send_graph_to_notebook() is None
-    assert "no numbers to graph" in window.statusBar().currentMessage()
+    assert "no numbers to chart" in window.statusBar().currentMessage()
 
 
 # --- Changing a graph (Graph with no data selected) ---
@@ -966,7 +966,7 @@ def make_graph(window, columns=1) -> str:
 def test_no_graphs_to_change(window, dialogs):
     window.view.select_range(10, 0, 12, 2)  # empty
     assert window.send_graph_to_notebook() is None
-    assert "no graphs to change" in window.statusBar().currentMessage()
+    assert "no charts to change" in window.statusBar().currentMessage()
     assert dialogs.graph_change_prompts == [] and dialogs.graph_prompts == []
 
 
@@ -985,7 +985,7 @@ def test_change_a_graph(window, dialogs):
     assert nb.widgets[graph_id].editor.toPlainText() == source and nb.current_id == graph_id
     assert [run[0] for run in window.kernel.runs[runs:]] == [graph_id]  # its DataFrame is still there
     assert len(window.notebook.cells) == 3  # nothing added
-    assert "Redrawing the graph df: Sales against Month" in window.statusBar().currentMessage()
+    assert "Redrawing the chart df: Sales against Month" in window.statusBar().currentMessage()
     nb.widgets[graph_id].editor.undo()  # the change is an edit in the cell, so Undo there reverts it
     assert "kind='line'" in window.notebook.cell(graph_id).source
 

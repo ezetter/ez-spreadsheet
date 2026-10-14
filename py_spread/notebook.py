@@ -257,7 +257,7 @@ def dataframe_code(model, cells, name: str = "df", import_pandas: bool = True) -
 
 # --- Graphing them with Seaborn ---
 
-GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter"}  # the Graph dialog's
+GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter"}  # the Chart dialog's
 GRAPH_KINDS = ("line", "scatter", "strip", "swarm")  # Seaborn's kinds: swarm is a categorical scatter too
 CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories; the rest with relplot
 NEEDS_MARKERS = {"scatter", "strip", "swarm"}  # their points are nothing but markers
@@ -269,7 +269,7 @@ class GraphError(ValueError):
 
 @dataclass
 class GraphChoice:
-    """What the Graph dialog chose: the kind of graph, its marker, the x
+    """What the Chart dialog chose: the kind of chart, its marker, the x
     column, the y column (in a list; graphs made before the y was a single
     column could have several, a series each), the hue column, if any,
     coloring the points by its values, and whether a categorical scatter's
@@ -304,7 +304,7 @@ class GraphColumns:
         if len(columns.labels) < 2:
             raise GraphError("Select at least two columns: one for x, and another for y.")
         if not any(columns.numbers):
-            raise GraphError("There are no numbers to graph in the selected columns.")
+            raise GraphError("There are no numbers to chart in the selected columns.")
         return columns
 
     def category(self, label: str) -> bool:
@@ -398,9 +398,9 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     if (x not in columns.labels or not ys or any(y not in columns.y_options(x, kind) for y in ys)
             or len(ys) > 1 and any(columns.category(y) for y in ys)
             or sideways and x not in columns.x_options(ys[0], kind, y_categories)):
-        raise ValueError(f"can't graph {ys!r} against {x!r}")
+        raise ValueError(f"can't chart {ys!r} against {x!r}")
     if hue is not None and (hue not in columns.hue_options(x) or len(ys) > 1):
-        raise ValueError(f"can't color the graph by {hue!r}")
+        raise ValueError(f"can't color the chart by {hue!r}")
     values = dict(zip(frame.labels, frame.columns))
 
     labeled, measured = (ys[0], [x]) if sideways else (x, ys)  # the axis of labels; the columns of numbers
@@ -409,7 +409,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         fixes.append(f"data[{labeled!r}] = data[{labeled!r}].astype('string')  # numbers and text: all labels")
     for column in measured:
         if any(isinstance(v, str) for v in values[column]):
-            fixes.append(f"data[{column!r}] = pd.to_numeric(data[{column!r}], errors='coerce')  # text isn't graphed")
+            fixes.append(f"data[{column!r}] = pd.to_numeric(data[{column!r}], errors='coerce')  # text isn't charted")
 
     lines = ["import pandas as pd"] if import_pandas and any("pd." in fix for fix in fixes) else []
     lines += ["import seaborn as sns"] if import_seaborn else []
@@ -417,7 +417,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     named = [repr(y) for y in ys]  # repr: a label can't break out of the comment
     series = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
     colored = f", colored by {hue!r}" if hue is not None else ""
-    lines += [f"# {frame_name} as a graph: {series} against {x!r}{colored}.", "sns.set_theme(style='whitegrid')"]
+    lines += [f"# {frame_name} as a chart: {series} against {x!r}{colored}.", "sns.set_theme(style='whitegrid')"]
     data = frame_name
     if fixes:
         lines += [f"data = {frame_name}.copy()", *fixes]
@@ -435,7 +435,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
              "swarm": "  # or 'strip'"}[kind]
     marker = f"marker={marker!r}, " if marker else ""
     lines += [
-        f"graph = sns.{function}(",
+        f"chart = sns.{function}(",
         f"    {plotted},",
         f"    kind={kind!r},{other}",
         f"    {marker}height=4, aspect=1.5,",
