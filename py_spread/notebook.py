@@ -261,6 +261,7 @@ GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatt
 GRAPH_KINDS = ("line", "scatter", "strip", "swarm")  # Seaborn's kinds: swarm is a categorical scatter too
 CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories; the rest with relplot
 NEEDS_MARKERS = {"scatter", "strip", "swarm"}  # their points are nothing but markers
+ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
 
 
 class GraphError(ValueError):
@@ -344,15 +345,18 @@ class GraphColumns:
             usable = [label for label, text in zip(self.labels, self.text) if text and label in usable] or usable
         return usable[0]
 
-    def default_ys(self, x: str) -> list[str]:
-        """The first column with numbers after x, else before it."""
-        options = self.y_options(x)  # (numbers only: a graph is sideways only if asked for)
+    def default_ys(self, x: str, kind: str = "line") -> list[str]:
+        """For a line chart, all the columns with numbers but x, a line each;
+        otherwise the first column with numbers after x, else before it."""
+        options = self.y_options(x)  # (numbers only: a chart is sideways only if asked for)
+        if kind in ALL_SERIES:
+            return options
         after = [label for label in options if self.labels.index(label) > self.labels.index(x)]
         return [(after or options)[0]]
 
     def default_choice(self, kind: str, marker: str | None) -> GraphChoice:
         x = self.default_x(kind)
-        return GraphChoice(kind, marker, x, self.default_ys(x))
+        return GraphChoice(kind, marker, x, self.default_ys(x, kind))
 
 
 def graph_columns(model, cells) -> GraphColumns:
@@ -376,7 +380,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
                      y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True) -> str:
     """Python that graphs a DataFrame with Seaborn: column `x` across (text
     gives categories, in the sheet's order) and the `ys` column up (by
-    default, the first column across and the next with numbers up), with
+    default, the first column across and the next with numbers up, or for a
+    line chart all the others with numbers, a line each), with
     the points colored by the `hue` column's values, if given. `kind` is
     "line" or "scatter" (relplot), or a categorical scatter (catplot):
     "strip" jitters each category's points, "swarm" spreads them so none
@@ -384,8 +389,9 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     instead, with numbers across, turning it sideways: as a y column of text
     does, or one of numbers (such as years) with `y_categories`. `marker` is a Matplotlib marker such as "o" for each point
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
-    is left out. Several `ys` (as graphs made before the y was a single
-    column could have) make a series each, colored instead of by a hue.
+    is left out. Several `ys` (All, for a line chart, or as charts made
+    before the y was a single column could have) make a series each,
+    colored instead of by a hue.
     `import_pandas` and `import_seaborn` false leave out those imports (an
     earlier cell has them). GraphError if it can't be graphed.
     """
@@ -393,7 +399,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     columns = GraphColumns.of(frame)
     x = x if x is not None else columns.default_x(kind)
-    ys = list(ys) if ys is not None else columns.default_ys(x)
+    ys = list(ys) if ys is not None else columns.default_ys(x, kind)
     sideways = columns.sideways(ys, kind, y_categories)  # the categories go up, and the numbers across
     if (x not in columns.labels or not ys or any(y not in columns.y_options(x, kind) for y in ys)
             or len(ys) > 1 and any(columns.category(y) for y in ys)

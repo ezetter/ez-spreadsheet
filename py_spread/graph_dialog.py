@@ -6,7 +6,7 @@ notebook's charts. (The code calls charts graphs.)"""
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
 from .appearance import error_color
-from .notebook import CATEGORICAL, GRAPH_TYPES, NEEDS_MARKERS, GraphChoice
+from .notebook import ALL_SERIES, CATEGORICAL, GRAPH_TYPES, NEEDS_MARKERS, GraphChoice
 
 MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     None: "None",
@@ -23,6 +23,7 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
 NO_HUE = "None"
 NEW_CHART = "New chart"
+ALL_YS = "All"  # a line chart's y: every other column with numbers, a line each
 CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the chart sideways: "
                   "categories down the side, numbers across. A column of text always is.")
 
@@ -109,6 +110,7 @@ class GraphDialog(QDialog):
         self.ok_button = box.button(QDialogButtonBox.Ok)
 
         self._loading = False
+        self._older_ys = None  # the series of a chart being changed that has several (they stay)
         self._none_replaced = False  # a scatter graph swapped None for circles, to undo on Line
         self._x_chosen = bool(self.graphs)  # a graph's own columns stay; a new one's follow the type
         self._y_chosen = bool(self.graphs)  # likewise, the y follows the x until chosen
@@ -171,6 +173,7 @@ class GraphDialog(QDialog):
         columns, kind, marker = self._new
         self.columns = columns
         self._x_chosen = self._y_chosen = False
+        self._older_ys = None
         problem = self.new_problem
         if problem is not None:
             self._say(f"A new chart of {self.new_source} can't be made. {problem}", error=True)
@@ -182,6 +185,7 @@ class GraphDialog(QDialog):
     def _show_graph(self, index: int) -> None:
         graph = self.graphs[index]
         self._x_chosen = self._y_chosen = True  # a chart's own columns stay, whatever the type
+        self._older_ys = graph.y_labels if len(graph.y_labels) > 1 else None  # its series, kept as they are
         self._say("Change this chart. It's redrawn when you click OK.")
         self._allow(True)
         self.columns = graph.columns
@@ -224,8 +228,11 @@ class GraphDialog(QDialog):
         defaults). A categorical scatter can have categories up, with
         numbers across; otherwise up takes numbers."""
         kind = self.kind()
-        if ys is None or len(ys) == 1 and ys[0] not in self.columns.y_options(x, kind):
-            ys = self.columns.default_ys(x)
+        options = self.columns.y_options(x, kind)
+        every = self.columns.y_options(x) if kind in ALL_SERIES else []  # All, for a line chart
+        if (ys is None or any(y not in options for y in ys)
+                or len(ys) > 1 and ys != every and ys != self._older_ys):
+            ys = self.columns.default_ys(x, kind)
         self._loading = True
         self._show_categories(x, ys)
         self.x_box.clear()
@@ -233,10 +240,12 @@ class GraphDialog(QDialog):
             self.x_box.addItem(label, label)
         self.x_box.setCurrentIndex(max(0, self.x_box.findData(x)))
         self.y_box.clear()
-        for label in self.columns.y_options(x, kind):
+        if len(every) > 1:
+            self.y_box.addItem(ALL_YS, every)
+        for label in options:
             self.y_box.addItem(label, [label])
         index = next((i for i in range(self.y_box.count()) if self.y_box.itemData(i) == ys), -1)
-        if index < 0 and len(ys) > 1:  # a series each, from an older graph
+        if index < 0 and len(ys) > 1:  # a series each, from an older chart
             self.y_box.addItem(", ".join(ys), ys)
             index = self.y_box.count() - 1
         self.y_box.setCurrentIndex(max(0, index))
@@ -305,7 +314,8 @@ class GraphDialog(QDialog):
             if x != self.x():
                 self._set_axes(x, self.ys() if self._y_chosen else None)
                 self._fill_hues(self.hue_box.currentData() if self.hue_box.currentData() != x else None)
-        self._set_axes(self.x(), self.ys())  # what works across and up depends on the type
+        # What works across and up depends on the type; and a new chart's y follows it until chosen.
+        self._set_axes(self.x(), self.ys() if self._y_chosen else None)
 
     def _categories_toggled(self) -> None:
         if not self._loading and self.columns is not None:

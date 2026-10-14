@@ -148,12 +148,19 @@ def plotted(g) -> list:
     return [line for line in g.ax.get_lines() if len(line.get_xdata())]
 
 
-def test_graph_of_one_column_by_default(sales, pyplot):
+def test_line_chart_of_every_column_by_default(sales, pyplot):
     code = graph_code(sales, block(0, 0, 3, 2))
-    assert "x='Month', y='Sales'" in code and "melt" not in code and "hue" not in code
+    assert "value_vars=['Sales', 'Cost']" in code and "hue='Series'" in code  # All: a line each
     g = graph(sales, block(0, 0, 3, 2))
     assert [t.get_text() for t in g.ax.get_xticklabels()] == ["Mar", "Jan", "Feb"]  # the sheet's order
-    assert g.ax.get_ylabel() == "Sales" and g.legend is None
+    assert [t.get_text() for t in g.legend.texts] == ["Sales", "Cost"]
+
+
+def test_other_charts_of_one_column_by_default(sales, pyplot):
+    for kind in ("scatter", "strip", "swarm"):
+        code = graph_code(sales, block(0, 0, 3, 2), "df", kind, "o")
+        assert "x='Month', y='Sales'" in code and "melt" not in code
+    assert graph(sales, block(0, 0, 3, 2), "scatter", "o").ax.get_ylabel() == "Sales"
 
 
 def test_graph_of_several_series(sales, pyplot):
@@ -346,11 +353,12 @@ def dialog_state(dialog):
 
 def test_dialog_starts_with_defaults(app):
     dialog = GraphDialog(None, sales_columns())
-    assert dialog_state(dialog) == ("line", "Month", ["Sales"], None, None)
+    assert dialog_state(dialog) == ("line", "Month", ["Sales", "Cost"], None, None)  # All: a line each
     assert [dialog.kind_box.itemText(i) for i in range(3)] == ["Line", "Scatter", "Categorical scatter"]
     assert [dialog.marker_box.itemData(i) for i in range(dialog.marker_box.count())] == list(MARKERS)
     assert [dialog.x_box.itemText(i) for i in range(4)] == ["Month", "Sales", "Cost", "Note"]
-    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["Sales", "Cost"]  # one each
+    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["All", "Sales", "Cost"]
+    assert not dialog.hue_box.isEnabled()  # each line has its own color
     assert [dialog.hue_box.itemText(i) for i in range(dialog.hue_box.count())] == [
         "None", "Sales", "Cost", "Note"]  # any column but x
     assert not dialog.form.isRowVisible(dialog.swarm_box)  # just for categorical scatters
@@ -364,8 +372,8 @@ def test_dialog_starts_with_the_last_choices(app):
 
 def test_choosing_the_axes_and_hue(app):
     dialog = GraphDialog(None, sales_columns())
-    dialog.y_box.setCurrentIndex(1)
-    dialog.y_box.activated.emit(1)  # as the user's choice is
+    dialog.y_box.setCurrentIndex(2)
+    dialog.y_box.activated.emit(2)  # as the user's choice is
     dialog.hue_box.setCurrentIndex(dialog.hue_box.findData("Sales"))
     assert (dialog.ys(), dialog.hue()) == (["Cost"], "Sales")
     dialog.x_box.setCurrentIndex(1)  # Sales across: it can't color the points too
@@ -441,6 +449,29 @@ def test_y_axis_as_categories_checkbox(app):
     assert box.isChecked() and not box.isEnabled()  # text up is always categories
     dialog.kind_box.setCurrentIndex(1)
     assert not dialog.form.isRowVisible(box) and not dialog.choice().y_categories
+
+
+def test_all_is_for_line_charts(app):
+    dialog = GraphDialog(None, sales_columns())
+    dialog.kind_box.setCurrentIndex(1)  # Scatter: one column up
+    assert dialog.ys() == ["Sales"] and items(dialog.y_box) == ["Sales", "Cost"]
+    assert dialog.hue_box.isEnabled()
+    dialog.kind_box.setCurrentIndex(0)  # and Line again: All, as nothing else was chosen
+    assert dialog.ys() == ["Sales", "Cost"] and dialog.y_box.currentText() == "All"
+    dialog.y_box.setCurrentIndex(2)
+    dialog.y_box.activated.emit(2)
+    dialog.kind_box.setCurrentIndex(2)
+    dialog.kind_box.setCurrentIndex(0)
+    assert dialog.ys() == ["Cost"]  # chosen, so it stays
+    dialog.y_box.setCurrentIndex(0)
+    dialog.y_box.activated.emit(0)  # All, chosen
+    dialog.kind_box.setCurrentIndex(1)
+    assert dialog.ys() == ["Sales"]  # not for Scatter
+
+
+def test_no_all_with_one_column_of_numbers(app):
+    dialog = GraphDialog(None, GraphColumns(["Month", "Sales", "Note"], [False, True, False], [True, False, True]))
+    assert items(dialog.y_box) == ["Sales"] and dialog.ys() == ["Sales"]
 
 
 def test_swarm_plots(app):

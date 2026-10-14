@@ -77,7 +77,7 @@ def dialogs(monkeypatch):
             return None
         kind, marker, *axes = dialogs.graph_answer
         x = axes[0] if axes else columns.default_x(kind)
-        return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x),
+        return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
                            axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
@@ -92,7 +92,7 @@ def dialogs(monkeypatch):
             if problem is not None:
                 return None
             x = axes[0] if axes else columns.default_x(kind)
-            return None, GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x),
+            return None, GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
                                      axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False)
         graph = graphs[index]
         return index, GraphChoice(kind, marker, axes[0] if axes else graph.x_label,

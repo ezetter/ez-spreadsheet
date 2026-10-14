@@ -39,11 +39,11 @@ def test_reads_generated_graphs(sales):
 
 @pytest.mark.parametrize("before, after", list(itertools.permutations(SETTINGS, 2)))
 def test_changes_any_setting_to_any_other(sales, before, after):
-    original = graph_code(sales, cells(3), "df", *before)
+    original = graph_code(sales, cells(3), "df", *before, ys=["Sales"])
     changed = change_graph(original, *after)
     ast.parse(changed)
     assert (read_graph(changed).kind, read_graph(changed).marker) == after
-    assert changed == graph_code(sales, cells(3), "df", *after)  # just as if made that way
+    assert changed == graph_code(sales, cells(3), "df", *after, ys=["Sales"])  # just as if made that way
     assert change_graph(changed, *before) == original
 
 
@@ -159,12 +159,12 @@ def test_reads_categorical_scatters(sales):
 
 
 def test_switches_between_relplot_and_catplot(sales):
-    line = graph_code(sales, cells(3), "df", "line", None)
+    line = graph_code(sales, cells(3), "df", "line", None, ys=["Sales"])
     strip = change_graph(line, "strip", "o")
-    assert strip == graph_code(sales, cells(3), "df", "strip", "o")
+    assert strip == graph_code(sales, cells(3), "df", "strip", "o", ys=["Sales"])
     assert change_graph(strip, "line", None) == line
     older = strip.replace("  # or 'swarm'", "")  # a categorical scatter made before swarm plots
-    assert change_graph(older, "scatter", "o") == graph_code(sales, cells(3), "df", "scatter", "o")
+    assert change_graph(older, "scatter", "o") == graph_code(sales, cells(3), "df", "scatter", "o", ys=["Sales"])
 
 
 def test_frame_data_from_a_dataframe_cell(sales):
@@ -209,15 +209,24 @@ def test_hue_in_the_changing_dialog(app):
     assert GraphDialog(None, graphs=[graph], current=0).choice().hue == "Region"
 
 
-def test_older_series_graph_in_the_changing_dialog(app):
+def test_line_chart_of_every_column_in_the_changing_dialog(app):
     columns = GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False])
     graph = GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"], FrameData(["Month", "Sales", "Cost"], []),
                       columns)
     dialog = GraphDialog(None, graphs=[graph], current=0)
-    assert dialog.ys() == ["Sales", "Cost"] and dialog.y_box.currentText() == "Sales, Cost"
-    assert not dialog.hue_box.isEnabled() and dialog.hue() is None  # colored a series each
-    dialog.y_box.setCurrentIndex(0)
+    assert dialog.ys() == ["Sales", "Cost"] and dialog.y_box.currentText() == "All"
+    assert not dialog.hue_box.isEnabled() and dialog.hue() is None  # colored a line each
+    dialog.y_box.setCurrentIndex(1)
     assert dialog.ys() == ["Sales"] and dialog.hue_box.isEnabled()
+
+
+def test_older_scatter_of_several_series_in_the_changing_dialog(app):
+    columns = GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False])
+    graph = GraphCell("a", "scatter", "o", "df", "Month", ["Sales", "Cost"],
+                      FrameData(["Month", "Sales", "Cost"], []), columns)
+    dialog = GraphDialog(None, graphs=[graph], current=0)
+    assert dialog.y_box.currentText() == "Sales, Cost" and dialog.ys() == ["Sales", "Cost"]  # kept as it is
+    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["Sales", "Cost", "Sales, Cost"]
 
 
 def test_reads_numbers_up_as_categories():

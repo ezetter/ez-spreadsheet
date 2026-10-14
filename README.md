@@ -202,7 +202,9 @@ The Chart dialog has these choices:
   distributed (`kind='swarm'`). With many points, it gets wide.
 - **X axis:** any of the selected columns. Text in it gives categories, in
   the sheet's order.
-- **Y axis:** one of the other columns with numbers. For a categorical
+- **Y axis:** one of the other columns with numbers, or, for a line chart,
+  **All**: every other column with numbers, each its own line, named in the
+  legend (offered when there are two or more). For a categorical
   scatter with numbers across, it can also be a column of categories (text),
   which turns the chart sideways: the categories run down the side and the
   numbers across. While categories are up, the X axis offers only columns
@@ -215,17 +217,18 @@ The Chart dialog has these choices:
   and unavailable when the X axis column is text (that's the categories).
 - **Hue:** None (the default), or any column but the X axis's. Its values
   color the points, with a legend: categories (text) each get a color, and
-  numbers get shades along a scale.
+  numbers get shades along a scale. It's unavailable with All, as each line
+  already has its own color.
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
   choosing one switches None to Circle, and choosing Line again switches it
   back.
 
-The axes start at sensible defaults: the first column
-across, and the next column with numbers up (a column of text alone can't go
-up). For a categorical scatter, the first column with text goes across
-instead. The defaults follow the chart type until you choose an X axis
+The axes start at sensible defaults: the first column across, and up, for a
+line chart, All; for the other types, the next column with numbers (a column
+of text alone can't go up). For a categorical scatter, the first column with
+text goes across instead. The defaults follow the chart type until you choose an X axis
 yourself, and the Y axis follows the X axis until you choose it. Choosing a
 new X axis clears the Hue if it was that column.
 
