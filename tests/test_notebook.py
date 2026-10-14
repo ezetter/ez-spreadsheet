@@ -662,9 +662,10 @@ def test_cancelling_the_graph_dialog(window, dialogs):
 
 
 @pytest.mark.parametrize("selection, problem", [
-    ((0, 0, 3, 0), "Select at least two columns"),
+    ((0, 2, 3, 3), "Select at least two columns"),  # C and D, but D is empty
     ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't graphed
-    ((10, 0, 12, 2), "The selection is empty"),
+    ((10, 0, 12, 2), "no graphs to change"),  # empty: for changing a graph, but there are none
+    ((0, 0, 3, 0), "no graphs to change"),  # one column: likewise
 ])
 def test_graph_problems(window, dialogs, selection, problem):
     if problem is None:
@@ -759,6 +760,23 @@ def test_starts_with_the_current_graph(window, dialogs):
     window.notebook_window.set_current(window.notebook.cells[0].id)  # a DataFrame cell: the last graph
     window.send_graph_to_notebook()
     assert dialogs.graph_change_prompts[-1][1] == 1
+
+
+@pytest.mark.parametrize("selection", [
+    (0, 1, 3, 1),  # one column of data
+    (0, 1, 99, 1),  # a whole column, as clicking its header selects
+    (2, 2, 2, 2),  # one cell, with data
+    (20, 3, 22, 3),  # one empty column
+])
+def test_one_column_changes_a_graph(window, dialogs, selection):
+    graph_id = make_graph(window)
+    cells_before = len(window.notebook.cells)
+    window.view.select_range(*selection)
+    dialogs.graph_change_answer = (0, "scatter", "x")
+    assert window.send_graph_to_notebook() == graph_id
+    assert dialogs.graph_prompts == [("Month", ["Sales"], ("line", None))]  # only the first graph's
+    assert len(dialogs.graph_change_prompts) == 1 and len(window.notebook.cells) == cells_before
+    assert "marker='x'" in window.notebook.cell(graph_id).source
 
 
 def test_cancel_changes_nothing(window, dialogs):

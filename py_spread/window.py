@@ -1015,12 +1015,15 @@ class MainWindow(QMainWindow):
         """Ask for a line or scatter graph and its marker, then put the
         selected cells in a DataFrame in a new notebook cell, and a Seaborn
         graph of it in the next (the first column across, the others up, as in
-        a chart); open the notebook and run them. Returns the graph cell's id,
-        or None if the cells can't be graphed (the status bar says why) or the
-        dialog was cancelled."""
+        a chart); open the notebook and run them. With no data or just one
+        column selected, which can't be graphed, change one of the notebook's
+        graphs instead. Returns the graph cell's id, or None if the cells
+        can't be graphed (the status bar says why) or the dialog was
+        cancelled."""
         self._commit_pending_edit()
-        cells = data_block(self.model, self._selected_cells())
-        if not cells:
+        selected = self._selected_cells()
+        cells = data_block(self.model, selected)
+        if not cells or len({col for _, col in selected}) == 1:
             return self.change_notebook_graph()
         try:
             x_label, y_labels = graph_columns(self.model, cells)
@@ -1038,14 +1041,14 @@ class MainWindow(QMainWindow):
         return graph_id
 
     def change_notebook_graph(self) -> str | None:
-        """Graph with no data selected: choose one of the notebook's graphs in
-        the Graph dialog, which starts with its type and marker, and redraw it
-        with the ones chosen. Returns its cell id, or None if there are no
-        graphs or the dialog was cancelled."""
+        """Graph with no data or one column selected: choose one of the
+        notebook's graphs in the Graph dialog, which starts with its type and
+        marker, and redraw it with the ones chosen. Returns its cell id, or
+        None if there are no graphs or the dialog was cancelled."""
         graphs = find_graphs(self.notebook)
         if not graphs:
-            self._show_status("The selection is empty, and the notebook has no graphs to change. "
-                              "Select cells with data to graph them.")
+            self._show_status("The notebook has no graphs to change. To make one, select two or more "
+                              "columns of data: the first for x, the others for y.")
             return None
         ids = [graph.cell_id for graph in graphs]
         current_id = self.notebook_window.current_id if self.notebook_window is not None else None

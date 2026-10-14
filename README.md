@@ -216,8 +216,9 @@ dialog appears.
 
 ### Changing a graph
 
-To change a graph that's already in the notebook, choose Graph with no data
-selected (click an empty cell first). The Graph dialog then has a **Graph**
+To change a graph that's already in the notebook, choose Graph with no data,
+or just one column, selected (clicking any one cell does it). A single column
+can't be graphed, so the Graph dialog then has a **Graph**
 list of the notebook's graphs, named for their DataFrame and columns, such as
 "df2: Sales and Cost against Month". It starts at the graph in the current
 notebook cell, or else the newest one, and choosing a graph shows its type and
@@ -232,7 +233,7 @@ marker. Change them and click OK:
 - Any cell drawing one `sns.relplot(...)` graph counts, including ones you
   write, as long as its `kind=` and `marker=`, if it has them, are written out,
   such as `kind='line'` and `marker='o'`.
-- If the notebook has no graphs, the status bar says so.
+- If the notebook has no graphs, the status bar says so, and how to make one.
 
 ### Working in the notebook
 
