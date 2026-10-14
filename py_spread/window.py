@@ -1157,6 +1157,7 @@ class MainWindow(QMainWindow):
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas = importing_cell(self.notebook, "pandas")
         [cell_id] = self._run_in_notebook([dataframe_code(self.model, cells, name, pandas is None)], [pandas])
+        self.notebook_window.reveal(cell_id)  # so its table can be seen
         self._show_status(f"Sent the selection to the notebook as {name}.")
         return cell_id
 
@@ -1231,6 +1232,7 @@ class MainWindow(QMainWindow):
                            choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
+        self.notebook_window.reveal(graph_id)  # so the chart can be seen when it's drawn
         self._show_status(f"Sent {source} to the notebook as {name}, with a chart of it.")
         return graph_id
 
@@ -1262,6 +1264,7 @@ class MainWindow(QMainWindow):
         window.set_current(graph.cell_id, focus=True)
         # After a restart, or in a reopened sheet, the imports and the DataFrame have to run again first.
         window.run_needing(graph.cell_id, [pandas, seaborn, frame_cell(self.notebook, graph.cell_id, graph.frame)])
+        window.reveal(graph.cell_id)  # so the chart can be seen when it's redrawn
         self._show_status(f"Redrawing the chart {graph_labels(graphs)[index]}.")
         return graph.cell_id
 

@@ -5,7 +5,7 @@ import time
 
 import pandas as pd
 import pytest
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QImage, QTextDocument, QTextTable
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QToolBar, QToolButton, QWidget
@@ -1196,6 +1196,57 @@ def test_type_change_keeps_hand_edits(window, dialogs):
     assert "sns.catplot(" in source and "height=7" in source
 
 
+def in_view(nb, widget) -> bool:
+    """Whether a cell (or part of one) is wholly in the notebook's visible area."""
+    top = widget.mapTo(nb.cell_area, QPoint(0, 0)).y()
+    shown = nb.scroll.verticalScrollBar().value()
+    return shown <= top and top + widget.height() <= shown + nb.scroll.viewport().height()
+
+
+def tall_notebook(window):
+    nb = window.show_notebook()
+    nb.resize(820, 600)
+    for number in range(12):
+        nb.add_cell_below("\n".join(f"x{number} = {line}" for line in range(8)))
+    QApplication.processEvents()
+    return nb
+
+
+def test_new_chart_scrolled_into_view(window, dialogs):
+    nb = tall_notebook(window)
+    nb.scroll.verticalScrollBar().setValue(0)
+    graph_id = make_graph(window, dialogs)
+    widget = nb.widgets[graph_id]
+    assert wait_for(lambda: in_view(nb, widget), timeout=2)
+    assert not widget.output_view.isHidden() and in_view(nb, widget.output_view)
+
+
+def test_changed_chart_scrolled_into_view(window, dialogs):
+    graph_id = make_graph(window, dialogs)
+    nb = tall_notebook(window)  # more cells after the chart
+    bar = nb.scroll.verticalScrollBar()
+    assert wait_for(lambda: bar.maximum() > 0, timeout=2)
+    QTest.qWait(400)  # the chart's own reveal is over
+    bar.setValue(bar.maximum())
+    assert not in_view(nb, nb.widgets[graph_id])
+    window.view.select_range(10, 0, 10, 0)
+    dialogs.graph_change_answer = (0, "scatter", "o")
+    window.send_graph_to_notebook()
+    assert wait_for(lambda: in_view(nb, nb.widgets[graph_id].output_view), timeout=2)
+
+
+def test_scrolling_is_the_users_again_afterwards(window, dialogs):
+    nb = tall_notebook(window)
+    graph_id = make_graph(window, dialogs)
+    assert wait_for(lambda: in_view(nb, nb.widgets[graph_id]), timeout=2)
+    QTest.qWait(400)
+    bar = nb.scroll.verticalScrollBar()
+    bar.setValue(0)
+    nb.notebook.add_output(graph_id, {"output_type": "stream", "name": "stdout", "text": "more\n"})
+    QTest.qWait(200)
+    assert bar.value() == 0  # not pulled back to the chart
+
+
 def test_cancel_changes_nothing(window, dialogs):
     graph_id = make_graph(window, dialogs)
     source, runs = window.notebook.cell(graph_id).source, len(window.kernel.runs)
@@ -1395,6 +1446,23 @@ def test_real_kernel_draws_a_categorical_scatter(app, dialogs):
     finally:
         if window.notebook_window is not None:
             window.notebook_window.hide()
+        window.setWindowModified(False)
+        window.close()
+
+
+def test_real_kernel_chart_comes_into_view(app, sheet, dialogs):
+    window = MainWindow()
+    window.model.set_cells({key: sheet.get_cell(*key) for key in block(0, 0, 3, 2)})
+    try:
+        nb = tall_notebook(window)
+        nb.scroll.verticalScrollBar().setValue(0)
+        window.view.select_range(0, 0, 3, 1)
+        graph_id = window.send_graph_to_notebook()
+        assert wait_for(lambda: graph_id not in nb.running and window.notebook.cell(graph_id).outputs)
+        widget = nb.widgets[graph_id]
+        assert wait_for(lambda: in_view(nb, widget.output_view), timeout=5)  # the drawn chart
+    finally:
+        window.notebook_window.hide()
         window.setWindowModified(False)
         window.close()
 

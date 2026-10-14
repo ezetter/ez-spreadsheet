@@ -178,7 +178,9 @@ Chart makes a chart of the selected cells, or, if no more than one cell is
 selected, of the whole sheet (the block holding all its data). It asks what
 kind of chart to make, of which columns, then does the same as DataFrame and
 adds a second cell that charts the DataFrame with Seaborn. Both cells run, so
-the table shows and then the chart:
+the table shows and then the chart, and the notebook scrolls to keep the chart
+in view as it's drawn (as it does for a changed chart, and for DataFrame's
+table):
 
 ```python
 # df as a chart: 'Sales' against 'Month', colored by 'Region'.

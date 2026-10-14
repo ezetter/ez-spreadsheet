@@ -293,6 +293,7 @@ class NotebookWindow(QWidget):
         self.current_id: str | None = None
         self.running: set[str] = set()  # cells queued or running
         self.ran: set[str] = set()  # cells run without error by the current Python process
+        self._revealing: str | None = None  # a cell kept in view while its outputs come (see reveal)
 
         self.toolbar = QToolBar()
         self.actions_by_name = {}
@@ -424,6 +425,33 @@ class NotebookWindow(QWidget):
         widget = self.widgets.get(cell_id)
         if widget is not None:
             widget.show_cell(self.notebook.cell(cell_id), cell_id in self.running)
+            if cell_id == self._revealing:
+                self._reveal_soon()  # its outputs grew
+
+    def reveal(self, cell_id: str) -> None:
+        """Scroll so a cell and its outputs (a chart, say) can be seen, now,
+        as its outputs come while it runs, and once it's finished."""
+        self._revealing = cell_id
+        self._reveal_soon()
+        if cell_id not in self.running:  # it's run already: just this look
+            QTimer.singleShot(300, lambda: self._stop_revealing(cell_id))
+
+    def _reveal_soon(self) -> None:
+        # Outputs are laid out (and the cell grows) after they're shown, so look again a little later.
+        QTimer.singleShot(0, self._reveal_now)
+        QTimer.singleShot(150, self._reveal_now)
+
+    def _reveal_now(self) -> None:
+        widget = self.widgets.get(self._revealing)
+        if widget is None:
+            return
+        self.scroll.ensureWidgetVisible(widget, 0, 10)  # the whole cell, if it fits...
+        if not widget.output_view.isHidden():
+            self.scroll.ensureWidgetVisible(widget.output_view, 0, 10)  # ...else its outputs, at least
+
+    def _stop_revealing(self, cell_id: str) -> None:
+        if self._revealing == cell_id:
+            self._revealing = None
 
     def set_current(self, cell_id: str, focus: bool = False) -> None:
         if cell_id not in self.widgets:
@@ -514,6 +542,9 @@ class NotebookWindow(QWidget):
         self.running.discard(cell_id)
         if status == "ok":
             self.ran.add(cell_id)
+        if cell_id == self._revealing:  # one last look once it's laid out, then scrolling is the user's
+            self._reveal_soon()
+            QTimer.singleShot(300, lambda: self._stop_revealing(cell_id))
         if cell_id in self.widgets:
             self.notebook.set_execution_count(cell_id, count)
 
