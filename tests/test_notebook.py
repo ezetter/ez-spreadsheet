@@ -15,6 +15,7 @@ from py_spread.notebook import (
     Notebook,
     NotebookFormatError,
     IMPORTS_CELL,
+    GraphChoice,
     GraphColumns,
     GraphError,
     cells_from_json,
@@ -124,11 +125,11 @@ def pyplot():
     plt.switch_backend(backend)
 
 
-def graph(model, cells, kind="line", marker=None):
+def graph(model, cells, kind="line", marker=None, **columns):
     """Run the DataFrame and graph cells for these cells; the graph (a Seaborn FacetGrid)."""
     namespace = {}
     exec(dataframe_code(model, cells), namespace)
-    exec(graph_code(model, cells, "df", kind, marker), namespace)
+    exec(graph_code(model, cells, "df", kind, marker, **columns), namespace)
     return namespace["graph"]
 
 
@@ -147,9 +148,17 @@ def plotted(g) -> list:
     return [line for line in g.ax.get_lines() if len(line.get_xdata())]
 
 
-def test_graph_of_several_series(sales, pyplot):
+def test_graph_of_one_column_by_default(sales, pyplot):
+    code = graph_code(sales, block(0, 0, 3, 2))
+    assert "x='Month', y='Sales'" in code and "melt" not in code and "hue" not in code
     g = graph(sales, block(0, 0, 3, 2))
     assert [t.get_text() for t in g.ax.get_xticklabels()] == ["Mar", "Jan", "Feb"]  # the sheet's order
+    assert g.ax.get_ylabel() == "Sales" and g.legend is None
+
+
+def test_graph_of_several_series(sales, pyplot):
+    """As graphs made before the y was a single column could have."""
+    g = graph(sales, block(0, 0, 3, 2), ys=["Sales", "Cost"])
     assert [t.get_text() for t in g.legend.texts] == ["Sales", "Cost"]
     sales_line, cost_line = plotted(g)
     assert list(sales_line.get_ydata()) == [1200, 1450.5, 1700]
@@ -176,9 +185,9 @@ def test_scatter(sales, pyplot):
     code = graph_code(sales, block(0, 0, 3, 2), "df", "scatter")
     assert "kind='scatter',  # or 'line'" in code and "marker" not in code  # Seaborn's own circles
     g = graph(sales, block(0, 0, 3, 2), "scatter")
-    assert plotted(g) == [] and len(g.ax.collections[0].get_offsets()) == 5  # 3 sales, 2 costs
-    g = graph(sales, block(0, 0, 3, 2), "scatter", "*")
-    assert len(g.ax.collections[0].get_offsets()) == 5
+    assert plotted(g) == [] and len(g.ax.collections[0].get_offsets()) == 3
+    g = graph(sales, block(0, 0, 3, 2), "scatter", "*", ys=["Cost"])
+    assert len(g.ax.collections[0].get_offsets()) == 2  # n/a isn't graphed
 
 
 def test_line_or_scatter_only(sales):
@@ -206,9 +215,10 @@ def test_graph_names_dont_clash(pyplot, app):
     model = SheetModel(rows=10, cols=4)
     model.set_cells({(0, 0): "t", (0, 1): "Value", (0, 2): "Series",
                      (1, 0): "1", (1, 1): "2", (1, 2): "3", (2, 0): "2", (2, 1): "4", (2, 2): "5"})
-    code = graph_code(model, block(0, 0, 2, 2))
+    code = graph_code(model, block(0, 0, 2, 2), ys=["Value", "Series"])
     assert "var_name='Series 2', value_name='Value 2'" in code
-    assert [t.get_text() for t in graph(model, block(0, 0, 2, 2)).legend.texts] == ["Value", "Series"]
+    g = graph(model, block(0, 0, 2, 2), ys=["Value", "Series"])
+    assert [t.get_text() for t in g.legend.texts] == ["Value", "Series"]
 
 
 @pytest.mark.parametrize("cells, problem", [
@@ -230,14 +240,25 @@ def test_categorical_scatter(pyplot, app):
     columns = graph_columns(model, block(0, 0, 3, 2))
     assert columns.default_x("strip") == "Species" and columns.default_x("line") == "Width"
     code = graph_code(model, block(0, 0, 3, 2), "df", "strip", "D", x="Species")
-    assert "sns.catplot(" in code and "x='Species', y='Value', hue='Series'" in code
-    assert "# df as a graph: 'Width' and 'Length' against 'Species'." in code
-    namespace = {}
-    exec(dataframe_code(model, block(0, 0, 3, 2)), namespace)
-    exec(code, namespace)
-    g = namespace["graph"]
+    assert "sns.catplot(" in code and "x='Species', y='Length'," in code and "kind='strip',  # or 'swarm'" in code
+    assert "# df as a graph: 'Length' against 'Species'." in code  # the next column with numbers after x
+    g = graph(model, block(0, 0, 3, 2), "strip", "D", x="Species")
     assert [t.get_text() for t in g.ax.get_xticklabels()] == ["b", "a"]  # categories in the sheet's order
-    assert [t.get_text() for t in g.legend.texts] == ["Width", "Length"]
+    g = graph(model, block(0, 0, 3, 2), "swarm", None, x="Species", ys=["Length"], hue="Width")
+    assert g.ax.get_ylabel() == "Length" and g.legend is not None
+
+
+def test_hue(sales, pyplot):
+    code = graph_code(sales, block(0, 0, 3, 2), "df", "scatter", "o", x="Sales", ys=["Cost"], hue="Month")
+    assert "data=data, x='Sales', y='Cost', hue='Month'" in code
+    assert "# df as a graph: 'Cost' against 'Sales', colored by 'Month'." in code
+    g = graph(sales, block(0, 0, 3, 2), "scatter", "o", x="Sales", ys=["Cost"], hue="Month")
+    assert [t.get_text() for t in g.legend.texts] == ["Mar", "Jan", "Feb"]
+    for bad in ("Sales", "Nope"):  # x itself, or no such column
+        with pytest.raises(ValueError):
+            graph_code(sales, block(0, 0, 3, 2), "df", "line", None, x="Sales", ys=["Cost"], hue=bad)
+    with pytest.raises(ValueError):  # several series are colored by series already
+        graph_code(sales, block(0, 0, 3, 2), "df", "line", None, ys=["Sales", "Cost"], hue="Month")
 
 
 def test_chosen_axes(sales, pyplot):
@@ -270,49 +291,67 @@ def sales_columns():
 
 
 def dialog_state(dialog):
-    return dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()
+    return dialog.kind(), dialog.x(), dialog.ys(), dialog.hue(), dialog.marker()
 
 
 def test_dialog_starts_with_defaults(app):
     dialog = GraphDialog(None, sales_columns())
-    assert dialog_state(dialog) == ("line", "Month", ["Sales", "Cost"], None)
+    assert dialog_state(dialog) == ("line", "Month", ["Sales"], None, None)
     assert [dialog.kind_box.itemText(i) for i in range(3)] == ["Line", "Scatter", "Categorical scatter"]
     assert [dialog.marker_box.itemData(i) for i in range(dialog.marker_box.count())] == list(MARKERS)
     assert [dialog.x_box.itemText(i) for i in range(4)] == ["Month", "Sales", "Cost", "Note"]
-    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == [
-        "All other columns with numbers", "Sales", "Cost"]  # Note has no numbers
+    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["Sales", "Cost"]  # one each
+    assert [dialog.hue_box.itemText(i) for i in range(dialog.hue_box.count())] == [
+        "None", "Sales", "Cost", "Note"]  # any column but x
+    assert not dialog.form.isRowVisible(dialog.swarm_box)  # just for categorical scatters
 
 
 def test_dialog_starts_with_the_last_choices(app):
     dialog = GraphDialog(None, sales_columns(), "scatter", "D")
-    assert dialog_state(dialog) == ("scatter", "Month", ["Sales", "Cost"], "D")
+    assert dialog_state(dialog) == ("scatter", "Month", ["Sales"], None, "D")
+    assert dialog.choice() == GraphChoice("scatter", "D", "Month", ["Sales"], None)
 
 
-def test_choosing_the_axes(app):
+def test_choosing_the_axes_and_hue(app):
     dialog = GraphDialog(None, sales_columns())
-    dialog.y_box.setCurrentIndex(2)
-    dialog.y_box.activated.emit(2)  # as the user's choice is
-    assert dialog.ys() == ["Cost"]
-    dialog.x_box.setCurrentIndex(1)  # Sales across
+    dialog.y_box.setCurrentIndex(1)
+    dialog.y_box.activated.emit(1)  # as the user's choice is
+    dialog.hue_box.setCurrentIndex(dialog.hue_box.findData("Sales"))
+    assert (dialog.ys(), dialog.hue()) == (["Cost"], "Sales")
+    dialog.x_box.setCurrentIndex(1)  # Sales across: it can't color the points too
     assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["Cost"]
-    assert dialog.ys() == ["Cost"]
-    dialog.x_box.setCurrentIndex(2)  # Cost across: Cost can't go up too
-    assert dialog.ys() == ["Sales"] and dialog.choice().x == "Cost"
+    assert (dialog.ys(), dialog.hue()) == (["Cost"], None)
+    assert [dialog.hue_box.itemText(i) for i in range(dialog.hue_box.count())] == ["None", "Month", "Cost", "Note"]
+    dialog.hue_box.setCurrentIndex(dialog.hue_box.findData("Note"))
+    dialog.x_box.setCurrentIndex(2)  # Cost across: Cost can't go up too; Note's hue stays
+    assert (dialog.x(), dialog.ys(), dialog.hue()) == ("Cost", ["Sales"], "Note")
 
 
 def test_categorical_scatter_takes_a_text_column_across(app):
     columns = GraphColumns(["Width", "Species", "Length"], [True, False, True], [False, True, False])
     dialog = GraphDialog(None, columns)
-    assert dialog_state(dialog) == ("line", "Width", ["Length"], None)
+    assert dialog_state(dialog) == ("line", "Width", ["Length"], None, None)
     dialog.kind_box.setCurrentIndex(2)
-    assert dialog_state(dialog) == ("strip", "Species", ["Width", "Length"], "o")  # needs markers
+    assert dialog_state(dialog) == ("strip", "Species", ["Length"], None, "o")  # needs markers
     assert not dialog.marker_box.model().item(0).isEnabled()
     dialog.kind_box.setCurrentIndex(0)
-    assert dialog_state(dialog) == ("line", "Width", ["Length"], None)  # it follows the type...
+    assert dialog_state(dialog) == ("line", "Width", ["Length"], None, None)  # it follows the type...
     dialog.x_box.setCurrentIndex(2)
     dialog.x_box.activated.emit(2)  # ...until the user picks the x
     dialog.kind_box.setCurrentIndex(2)
     assert dialog.x() == "Length"
+
+
+def test_swarm_plots(app):
+    dialog = GraphDialog(None, sales_columns())
+    dialog.kind_box.setCurrentIndex(2)
+    assert dialog.form.isRowVisible(dialog.swarm_box) and dialog.kind() == "strip"
+    dialog.swarm_box.setChecked(True)
+    assert dialog.kind() == "swarm" and dialog.marker() == "o"
+    dialog.kind_box.setCurrentIndex(1)
+    assert not dialog.form.isRowVisible(dialog.swarm_box) and dialog.kind() == "scatter"
+    swarm = GraphDialog(None, sales_columns(), "swarm", "D")  # the last choice was a swarm plot
+    assert swarm.kind_box.currentText() == "Categorical scatter" and swarm.swarm_box.isChecked()
 
 
 def test_scatter_needs_a_marker(app):
@@ -919,6 +958,30 @@ def test_change_a_graphs_columns(window, dialogs):
     assert window.kernel.runs[-1][0] == graph_id
 
 
+def test_swarm_graph_with_hue(window, dialogs):
+    window.view.select_range(0, 0, 3, 2)  # Month, Sales, Note
+    dialogs.graph_answer = ("swarm", "D", "Month", ["Sales"], "Note")
+    graph_id = window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "sns.catplot(" in source and "x='Month', y='Sales', hue='Note'" in source and "kind='swarm'" in source
+    assert (window.graph_kind, window.graph_marker) == ("swarm", "D")  # remembered for next time
+
+
+def test_change_a_graphs_hue(window, dialogs):
+    graph_id = make_graph(window, columns=2)
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "line", None, "Month", ["Sales"], "Note")
+    window.send_graph_to_notebook()
+    assert "hue='Note'" in window.notebook.cell(graph_id).source
+    [(graphs, _)] = dialogs.graph_change_prompts
+    assert graphs[0].hue is None
+    dialogs.graph_change_answer = (0, "scatter", "o")  # keeps the hue, now read from the code
+    window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "hue='Note'" in source and "kind='scatter'" in source
+    assert dialogs.graph_change_prompts[1][0][0].hue == "Note"
+
+
 def test_type_change_keeps_hand_edits(window, dialogs):
     graph_id = make_graph(window)
     nb = window.notebook_window
@@ -1103,18 +1166,19 @@ def test_real_kernel_redraws_a_changed_graph(app, sheet, dialogs):
 
 def test_real_kernel_draws_a_categorical_scatter(app, dialogs):
     window = MainWindow()
-    window.model.set_cells({(0, 0): "Species", (0, 1): "Width", (1, 0): "a", (1, 1): "1.5",
-                            (2, 0): "b", (2, 1): "2", (3, 0): "a", (3, 1): "1.7"})
-    dialogs.graph_answer = ("strip", "D")
+    window.model.set_cells({(0, 0): "Species", (0, 1): "Width", (0, 2): "Site", (1, 0): "a", (1, 1): "1.5",
+                            (1, 2): "N", (2, 0): "b", (2, 1): "2", (2, 2): "S", (3, 0): "a", (3, 1): "1.7",
+                            (3, 2): "S"})
+    dialogs.graph_answer = ("swarm", "D", "Species", ["Width"], "Site")
     try:
-        window.view.select_range(0, 0, 3, 1)
+        window.view.select_range(0, 0, 3, 2)
         graph_id = window.send_graph_to_notebook()
         nb = window.notebook_window
         assert wait_for(lambda: not nb.running)
         outputs = window.notebook.cell(graph_id).outputs
         assert "error" not in [o["output_type"] for o in outputs], outputs
         assert any("image/png" in o.get("data", {}) for o in outputs)
-        assert "sns.catplot(" in window.notebook.cell(graph_id).source
+        assert "kind='swarm'" in window.notebook.cell(graph_id).source
     finally:
         if window.notebook_window is not None:
             window.notebook_window.hide()

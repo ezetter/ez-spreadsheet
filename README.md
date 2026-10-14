@@ -189,11 +189,10 @@ DataFrame and adds a second cell that graphs the DataFrame with Seaborn. Both
 cells run, so the table shows and then the graph:
 
 ```python
-# df as a graph: 'Sales' and 'Cost' against 'Month'.
+# df as a graph: 'Sales' against 'Month', colored by 'Region'.
 sns.set_theme(style='whitegrid')
-long = df.melt(id_vars=['Month'], value_vars=['Sales', 'Cost'], var_name='Series', value_name='Value')
 graph = sns.relplot(
-    data=long, x='Month', y='Value', hue='Series',
+    data=df, x='Month', y='Sales', hue='Region',
     kind='line',  # or 'scatter'
     height=4, aspect=1.5,
 )
@@ -203,13 +202,18 @@ The Graph dialog has these choices:
 
 - **Graph type:** Line, Scatter, or Categorical scatter. Line and Scatter are
   drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
-  a column of categories (text such as species or months) across and jitters
-  each category's points so they don't all sit on one line.
+  a column of categories (text such as species or months) across and spreads
+  each category's points out a little at random so they don't all sit on one
+  line (a strip plot).
+- **Swarm plot**, shown only for a categorical scatter: spreads each
+  category's points out so that none overlap, showing how they're
+  distributed (`kind='swarm'`). With many points, it gets wide.
 - **X axis:** any of the selected columns. Text in it gives categories, in
   the sheet's order.
-- **Y axis:** one of the other columns with numbers, or **All other columns
-  with numbers**, which graphs each as its own series, named in the legend
-  (a single series is named on the y axis).
+- **Y axis:** one of the other columns with numbers.
+- **Hue:** None (the default), or any column but the X axis's. Its values
+  color the points, with a legend: categories (text) each get a color, and
+  numbers get shades along a scale.
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter graphs
   need markers to show their points, so None isn't available for them:
@@ -217,18 +221,21 @@ The Graph dialog has these choices:
   back.
 
 The axes start at sensible defaults, as a chart's are: the first column
-across, and all the others with numbers up (a column of text alone can't go
+across, and the next column with numbers up (a column of text alone can't go
 up). For a categorical scatter, the first column with text goes across
 instead. The defaults follow the graph type until you choose an X axis
-yourself, and the Y axis follows the X axis until you choose it.
+yourself, and the Y axis follows the X axis until you choose it. Choosing a
+new X axis clears the Hue if it was that column.
 
-The type and marker start from your last choices while EzSheet is open. Cancel
+The type (including Swarm plot) and marker start from your last choices
+while EzSheet is open. Cancel
 adds nothing. If the cells can't be graphed (just one column, or no numbers),
 the status bar says why before the dialog appears.
 
 - The choices are in the cell's code too: change `kind='line'` to
-  `kind='scatter'`, or add or change `marker='o'` (any Matplotlib marker), and
-  run the cell again (Shift+Return).
+  `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`), or add
+  or change `marker='o'` (any Matplotlib marker), and run the cell again
+  (Shift+Return).
 - Text in the y columns isn't graphed, and rows without an x value are left
   out. Unlike a chart, a line joins the points on either side of a missing
   value instead of leaving a gap.
@@ -243,16 +250,20 @@ or just one column, selected (clicking any one cell does it). A single column
 can't be graphed, so the Graph dialog then has a **Graph** list of the
 notebook's graphs, named for their DataFrame and columns, such as "df2: Sales
 and Cost against Month". It starts at the graph in the current notebook cell,
-or else the newest one, and choosing a graph shows its type, axes, and marker.
-Change them and click OK:
+or else the newest one, and choosing a graph shows its type, axes, hue, and
+marker. Change them and click OK:
 
 - Changing only the type or marker changes just `kind=`, `marker=`, and
   whether `relplot` or `catplot` draws it, so anything else you changed in the
   cell stays.
-- Changing the axes writes the graph's cell afresh, from the data in its
-  DataFrame's cell, so changes you made to the graph's cell by hand are
-  replaced. The axes can be changed only if that cell is found, written as
+- Changing the axes or the hue writes the graph's cell afresh, from the data in
+  its DataFrame's cell, so changes you made to the graph's cell by hand are
+  replaced. The columns can be changed only if that cell is found, written as
   EzSheet writes it; otherwise they're shown but greyed out.
+- A graph made before the Y axis took one column may graph several, a series
+  each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
+  each series has its own color; choosing one column instead redraws it with
+  just that one.
 - Either way, it's an edit in the cell, so Cmd+Z there brings back the old
   code. The cell runs again to redraw the graph. If Python has restarted since
   its DataFrame was made (or the sheet was opened since), the imports cell and

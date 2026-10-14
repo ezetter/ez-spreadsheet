@@ -25,11 +25,11 @@ class Dialogs:
         self.insert_problems = None  # the choices it was told to disable
         self.delete_shift = "up"  # likewise for the Delete Cells dialog
         self.delete_problems = None
-        # The Graph dialog's (kind, marker), or (kind, marker, x, ys); None cancels. Axes left out
-        # are the defaults (for a new graph) or the graph's own (when changing one).
+        # The Graph dialog's (kind, marker), or (kind, marker, x, ys[, hue]); None cancels. Columns
+        # left out are the defaults (for a new graph) or the graph's own (when changing one).
         self.graph_answer = ("line", None)
         self.graph_prompts = []  # (the column labels, the choices it started with) each time it's shown
-        self.graph_change_answer = None  # changing a graph: (which, kind, marker[, x, ys]); None cancels
+        self.graph_change_answer = None  # changing a graph: (which, kind, marker[, x, ys[, hue]]); None cancels
         self.graph_change_prompts = []  # (the graphs offered, the one it started with)
         self.load_answer = None  # Load Data to Sheet: the DataFrame's name; None cancels
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
@@ -74,7 +74,8 @@ def dialogs(monkeypatch):
             return None
         kind, marker, *axes = dialogs.graph_answer
         x = axes[0] if axes else columns.default_x(kind)
-        return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x))
+        return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x),
+                           axes[2] if len(axes) > 2 else None)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
 
@@ -85,7 +86,8 @@ def dialogs(monkeypatch):
         index, kind, marker, *axes = dialogs.graph_change_answer
         graph = graphs[index]
         return index, GraphChoice(kind, marker, axes[0] if axes else graph.x_label,
-                                  axes[1] if len(axes) > 1 else graph.y_labels)
+                                  axes[1] if len(axes) > 1 else graph.y_labels,
+                                  axes[2] if len(axes) > 2 else graph.hue)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_change", ask_graph_change)
 

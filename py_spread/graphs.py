@@ -14,10 +14,12 @@ from dataclasses import dataclass, field
 
 from .notebook import CATEGORICAL, GRAPH_KINDS, FrameData, GraphColumns, GraphError
 
-FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip",)}  # the kinds each draws here
+FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm")}  # the kinds each draws here
 DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip"}  # their kind when none is given
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a graph\b", re.M)  # as graph_code writes it
-_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter)\1[^\n]*")  # graph_code's "# or 'scatter'"
+_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm)\1[^\n]*")  # "# or 'scatter'"
+_OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
+                "swarm": "  # or 'strip'"}  # as graph_code writes them
 _NOT_LITERAL = object()
 
 
@@ -31,6 +33,7 @@ class GraphCell:
     y_labels: list[str] = field(default_factory=list)
     data: FrameData | None = None  # the DataFrame's data, from its cell, if found
     columns: GraphColumns | None = None  # what can go across and up, given the data
+    hue: str | None = None  # the column coloring its points, if any
 
     @property
     def title(self) -> str:
@@ -83,10 +86,13 @@ def read_graph(source: str) -> GraphCell | None:
     graph = GraphCell("", kind, marker, frame=_frame_name(source, tree))
     x, y = _literal(keywords.get("x")), _literal(keywords.get("y"))
     graph.x_label = x if isinstance(x, str) else None
-    if "hue" in keywords:  # graph_code's long form: the y columns were melted into one
-        graph.y_labels = _melted_columns(tree)
-    elif isinstance(y, str):
-        graph.y_labels = [y]
+    melted = _melted_columns(tree)
+    if "hue" in keywords and melted:  # a series for each of several y columns, melted into one
+        graph.y_labels = melted
+    else:
+        graph.y_labels = [y] if isinstance(y, str) else []
+        hue = _literal(keywords.get("hue"))
+        graph.hue = hue if isinstance(hue, str) else None
     return graph
 
 
@@ -94,7 +100,7 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
     """The cell's code with its graph's kind and marker changed (no marker:
     marker= is taken out), switching between relplot and catplot as the kind
     needs."""
-    if kind not in GRAPH_KINDS:
+    if kind not in GRAPH_KINDS:  # (for a hue or new columns, the cell is written afresh)
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     if read_graph(source) is None:
         raise ValueError("the code doesn't draw a graph that can be changed")
@@ -108,17 +114,17 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
         end = at(call.func.end_lineno, call.func.end_col_offset)
         edits.append((end - len(call.func.attr), end, function))
 
-    other = {"line": "  # or 'scatter'", "scatter": "  # or 'line'"}.get(kind, "")
+    other = _OTHER_KINDS[kind]
     if "kind" in keywords:
         value = keywords["kind"].value
         start, end = at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset)
         edits.append((start, end, repr(kind)))
         line_end = _line_end(source, end)
         comment = _OTHER_KIND.search(source, end, line_end)
-        if comment:  # "# or 'scatter'" names the other kind, or goes for a categorical scatter
+        if comment:  # "# or 'scatter'" names the other kind
             edits.append((comment.start(), comment.end(), other))
-        elif other and call.func.attr != function and re.fullmatch(r",[ \t]*", source[end:line_end]):
-            edits.append((line_end, line_end, other))  # from a categorical scatter, in graph_code's layout
+        elif call.func.attr != function and re.fullmatch(r",[ \t]*", source[end:line_end]):
+            edits.append((line_end, line_end, other))  # graph_code's layout, from an older one without it
     else:
         paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
         edits.append((paren + 1, paren + 1, f"kind={kind!r}, "))

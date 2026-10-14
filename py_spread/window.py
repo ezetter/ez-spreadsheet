@@ -1152,7 +1152,7 @@ class MainWindow(QMainWindow):
         name = next_frame_name(self.notebook)
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
-        graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys,
+        graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys, choice.hue,
                            import_pandas=pandas is None, import_seaborn=seaborn is None)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
@@ -1163,8 +1163,9 @@ class MainWindow(QMainWindow):
         """Graph with no data or one column selected: choose one of the
         notebook's graphs in the Graph dialog, which starts with its type,
         columns, and marker, and redraw it with the ones chosen. New columns
-        mean writing its cell afresh, from its DataFrame's cell; otherwise
-        just its kind and marker change in the code. Returns its cell id, or
+        (across, up, or for the hue) mean writing its cell afresh, from its
+        DataFrame's cell; otherwise just its kind and marker change in the
+        code. Returns its cell id, or
         None if there are no graphs or the dialog was cancelled."""
         graphs = find_graphs(self.notebook)
         if not graphs:
@@ -1182,9 +1183,11 @@ class MainWindow(QMainWindow):
         seaborn = importing_cell(self.notebook, "seaborn", graph.cell_id)
         source = self.notebook.cell(graph.cell_id).source
         try:
-            if graph.data is not None and (chosen.x, chosen.ys) != (graph.x_label, graph.y_labels):
+            if graph.data is not None and (chosen.x, chosen.ys, chosen.hue) != (graph.x_label, graph.y_labels,
+                                                                                 graph.hue):
                 source = frame_graph_code(graph.data, graph.frame, chosen.kind, chosen.marker, chosen.x,
-                                          chosen.ys, import_pandas=pandas is None, import_seaborn=seaborn is None)
+                                          chosen.ys, chosen.hue, import_pandas=pandas is None,
+                                          import_seaborn=seaborn is None)
             else:
                 source = change_graph(source, chosen.kind, chosen.marker)
         except (ValueError, GraphError) as e:

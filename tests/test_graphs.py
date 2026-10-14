@@ -22,13 +22,17 @@ def cells(columns: int):
 
 
 SETTINGS = [("line", None), ("line", "o"), ("line", "*"), ("scatter", None), ("scatter", "D"),
-            ("strip", None), ("strip", "s")]
+            ("strip", None), ("strip", "s"), ("swarm", "D")]
 
 
 def test_reads_generated_graphs(sales):
     graph = read_graph(graph_code(sales, cells(3), "df2", "scatter", "D"))
     assert (graph.kind, graph.marker, graph.frame) == ("scatter", "D", "df2")
-    assert (graph.x_label, graph.y_labels, graph.title) == ("Month", ["Sales", "Cost"], "Sales and Cost against Month")
+    assert (graph.x_label, graph.y_labels, graph.hue, graph.title) == ("Month", ["Sales"], None, "Sales against Month")
+    graph = read_graph(graph_code(sales, cells(3), "df2", "line", None, x="Sales", ys=["Cost"], hue="Month"))
+    assert (graph.x_label, graph.y_labels, graph.hue) == ("Sales", ["Cost"], "Month")
+    graph = read_graph(graph_code(sales, cells(3), "df2", "line", None, ys=["Sales", "Cost"]))  # older: series
+    assert (graph.y_labels, graph.hue, graph.title) == (["Sales", "Cost"], None, "Sales and Cost against Month")
     graph = read_graph(graph_code(sales, cells(2)))
     assert (graph.kind, graph.marker, graph.frame, graph.y_labels) == ("line", None, "df", ["Sales"])
 
@@ -146,18 +150,21 @@ def test_new_graphs_have_no_graph_list(app):
 
 def test_reads_categorical_scatters(sales):
     code = graph_code(sales, cells(3), "df", "strip", "D", x="Month", ys=["Sales"])
-    assert "graph = sns.catplot(" in code and "    kind='strip',\n" in code
+    assert "graph = sns.catplot(" in code and "    kind='strip',  # or 'swarm'\n" in code
     graph = read_graph(code)
     assert (graph.kind, graph.marker, graph.x_label, graph.y_labels) == ("strip", "D", "Month", ["Sales"])
     assert read_graph("sns.catplot(data=d, x='a', y='b')").kind == "strip"  # catplot's default
+    assert read_graph(change_graph(code, "swarm", None)).kind == "swarm"
     assert read_graph("sns.catplot(data=d, x='a', y='b', kind='box')") is None  # not one the dialog has
 
 
 def test_switches_between_relplot_and_catplot(sales):
     line = graph_code(sales, cells(3), "df", "line", None)
     strip = change_graph(line, "strip", "o")
-    assert "sns.catplot(" in strip and "kind='strip',\n" in strip and "# or" not in strip
+    assert strip == graph_code(sales, cells(3), "df", "strip", "o")
     assert change_graph(strip, "line", None) == line
+    older = strip.replace("  # or 'swarm'", "")  # a categorical scatter made before swarm plots
+    assert change_graph(older, "scatter", "o") == graph_code(sales, cells(3), "df", "scatter", "o")
 
 
 def test_frame_data_from_a_dataframe_cell(sales):
@@ -184,7 +191,7 @@ def test_changing_dialog_shows_the_graphs_columns(app):
     graph = GraphCell("a", "strip", "D", "df", "Month", ["Cost"], FrameData(["Month", "Sales", "Cost"], []), columns)
     dialog = GraphDialog(None, graphs=[graph])
     assert (dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()) == ("strip", "Month", ["Cost"], "D")
-    assert dialog.x_box.isEnabled() and dialog.y_box.count() == 3
+    assert dialog.x_box.isEnabled() and dialog.y_box.count() == 2 and dialog.hue() is None
     dialog.kind_box.setCurrentIndex(0)
     assert dialog.x() == "Month" and dialog.ys() == ["Cost"]  # a graph's own columns stay put
 
@@ -193,3 +200,21 @@ def test_changing_dialog_without_the_data(app):
     dialog = GraphDialog(None, graphs=[GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"])])
     assert not dialog.x_box.isEnabled() and not dialog.y_box.isEnabled()
     assert dialog.choice().x == "Month" and dialog.ys() == ["Sales", "Cost"]
+
+
+def test_hue_in_the_changing_dialog(app):
+    columns = GraphColumns(["Month", "Sales", "Region"], [False, True, False], [True, False, True])
+    graph = GraphCell("a", "scatter", "o", "df", "Month", ["Sales"], FrameData(["Month", "Sales", "Region"], []),
+                      columns, hue="Region")
+    assert GraphDialog(None, graphs=[graph]).choice().hue == "Region"
+
+
+def test_older_series_graph_in_the_changing_dialog(app):
+    columns = GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False])
+    graph = GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"], FrameData(["Month", "Sales", "Cost"], []),
+                      columns)
+    dialog = GraphDialog(None, graphs=[graph])
+    assert dialog.ys() == ["Sales", "Cost"] and dialog.y_box.currentText() == "Sales, Cost"
+    assert not dialog.hue_box.isEnabled() and dialog.hue() is None  # colored a series each
+    dialog.y_box.setCurrentIndex(0)
+    assert dialog.ys() == ["Sales"] and dialog.hue_box.isEnabled()
