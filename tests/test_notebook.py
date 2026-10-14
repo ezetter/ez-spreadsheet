@@ -504,8 +504,24 @@ def test_tool_in_toolbar_menus_and_context_menu(window, monkeypatch):
     assert shown == [1]  # the button itself shows the menu, not just its arrow
     insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
     for menu in (window.notebook_button.menu(), notebook_submenu(insert), notebook_submenu(window.context_menu)):
-        assert menu.actions() == [window.dataframe_action, window.graph_action]
-        assert [action.text() for action in menu.actions()] == ["DataFrame", "Graph"]
+        actions = menu.actions()
+        assert [actions[0], *actions[2:]] == [window.open_notebook_action, window.dataframe_action,
+                                              window.graph_action]
+        assert [action.text() for action in actions] == ["Open", "", "DataFrame", "Graph"]
+
+
+def test_open_shows_the_notebook_as_it_is(window, tmp_path):
+    window.save_to(str(tmp_path / "s.ezs"))
+    window.view.select_range(0, 0, 3, 2)
+    window.open_notebook_action.trigger()
+    nb = window.notebook_window
+    assert nb.isVisible() and window.notebook.is_empty and window.kernel.runs == []
+    assert not window.isWindowModified()  # nothing was added
+    cell_id = window.send_to_notebook()
+    nb.hide()
+    window.open_notebook_action.trigger()
+    assert nb.isVisible() and [c.id for c in window.notebook.cells] == [cell_id]
+    assert len(window.kernel.runs) == 1  # opening ran nothing
     view_menu = [m for m in window.menuBar().actions() if m.text() == "View"][0].menu()
     assert window.show_notebook_action in view_menu.actions()
 

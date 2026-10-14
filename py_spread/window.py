@@ -568,7 +568,11 @@ class MainWindow(QMainWindow):
             "Switch between line and scatter in the chart window.")
         self.chart_action.triggered.connect(lambda _checked=False: self.make_chart())
         menu.addAction(self.chart_action)
-        # Notebook: the selected cells as a DataFrame, or a DataFrame and a graph.
+        # Notebook: open it as it is, or add the selected cells as a DataFrame,
+        # or as a DataFrame and a graph.
+        self.open_notebook_action = QAction("Open", self)
+        self.open_notebook_action.setToolTip("Open the sheet's notebook without adding anything to it")
+        self.open_notebook_action.triggered.connect(lambda _checked=False: self.show_notebook())
         self.dataframe_action = QAction("DataFrame", self)
         self.dataframe_action.setToolTip(
             "Put the selected cells in a pandas DataFrame in the sheet's notebook, and run it")
@@ -582,8 +586,10 @@ class MainWindow(QMainWindow):
         self._add_notebook_menu(menu)
 
     def _add_notebook_menu(self, menu=None) -> QMenu:
-        """A Notebook menu (DataFrame, Graph): a submenu of `menu`, or one of its own."""
+        """A Notebook menu (Open, DataFrame, Graph): a submenu of `menu`, or one of its own."""
         submenu = menu.addMenu("Notebook") if menu is not None else QMenu("Notebook", self)
+        submenu.addAction(self.open_notebook_action)
+        submenu.addSeparator()
         submenu.addAction(self.dataframe_action)
         submenu.addAction(self.graph_action)
         return submenu

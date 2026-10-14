@@ -45,7 +45,7 @@ creates the file.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 - A secondary click (right-click, Control-click, or a two-finger click) on the
   grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, Fill,
-  Name Cell…, Name Column…, Notebook (DataFrame or Graph), and Ask Claude…. Clicking
+  Name Cell…, Name Column…, Notebook (Open, DataFrame, or Graph), and Ask Claude…. Clicking
   inside the selection keeps it; clicking elsewhere selects that cell first.
 
 ## Zoom
@@ -134,7 +134,8 @@ hand.
 Select cells (a block, or several columns, including whole columns picked in
 the column headers), then click the Notebook button on the toolbar, or choose
 Insert > Notebook or Notebook on the secondary-click menu. Its menu has
-**DataFrame** and **Graph**.
+**Open**, which just opens the notebook as it is (as View > Notebook does),
+and **DataFrame** and **Graph**, which add the selected cells to it.
 
 ### Sending cells as a DataFrame
 
