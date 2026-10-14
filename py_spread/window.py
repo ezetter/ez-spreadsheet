@@ -39,7 +39,16 @@ from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .kernel import KernelRunner
-from .notebook import GraphError, Notebook, data_block, dataframe_code, graph_code, next_frame_name
+from .graph_dialog import GraphDialog
+from .notebook import (
+    GraphError,
+    Notebook,
+    data_block,
+    dataframe_code,
+    graph_code,
+    graph_columns,
+    next_frame_name,
+)
 from .notebook_window import NotebookWindow, kernel_folder
 from .recent import add_recent_file, clear_recent_files, menu_labels, recent_files, remove_recent_file
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
@@ -569,6 +578,7 @@ class MainWindow(QMainWindow):
             "Put the selected cells in a DataFrame in the sheet's notebook and graph it with Seaborn: "
             "the first column is x, the others are y")
         self.graph_action.triggered.connect(lambda _checked=False: self.send_graph_to_notebook())
+        self.graph_kind, self.graph_marker = "line", None  # the Graph dialog's last choices
         self._add_notebook_menu(menu)
 
     def _add_notebook_menu(self, menu=None) -> QMenu:
@@ -995,25 +1005,36 @@ class MainWindow(QMainWindow):
         return cell_id
 
     def send_graph_to_notebook(self) -> str | None:
-        """Put the selected cells in a DataFrame in a new notebook cell, and a
-        Seaborn graph of it in the next (the first column across, the others
-        up, as in a chart); open the notebook and run them. Returns the graph
-        cell's id, or None if the cells can't be graphed (the status bar says
-        why)."""
+        """Ask for a line or scatter graph and its marker, then put the
+        selected cells in a DataFrame in a new notebook cell, and a Seaborn
+        graph of it in the next (the first column across, the others up, as in
+        a chart); open the notebook and run them. Returns the graph cell's id,
+        or None if the cells can't be graphed (the status bar says why) or the
+        dialog was cancelled."""
         self._commit_pending_edit()
         cells = data_block(self.model, self._selected_cells())
         if not cells:
             self._show_status("The selection is empty. Select cells with data to graph them.")
             return None
-        name = next_frame_name(self.notebook)
         try:
-            graph = graph_code(self.model, cells, name)
+            x_label, y_labels = graph_columns(self.model, cells)
         except GraphError as e:
             self._show_status(f"Can't make a graph: {e}")
             return None
+        choice = self._ask_graph_options(x_label, y_labels)
+        if choice is None:
+            return None
+        self.graph_kind, self.graph_marker = choice
+        name = next_frame_name(self.notebook)
+        graph = graph_code(self.model, cells, name, *choice)
         _frame_id, graph_id = self._run_in_notebook([dataframe_code(self.model, cells, name), graph])
         self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
         return graph_id
+
+    def _ask_graph_options(self, x_label: str, y_labels: list[str]) -> tuple[str, str | None] | None:
+        """The Graph dialog: (kind, marker), or None if cancelled."""
+        dialog = GraphDialog(self, x_label, y_labels, self.graph_kind, self.graph_marker)
+        return (dialog.kind(), dialog.marker()) if dialog.exec() == QDialog.Accepted else None
 
     def _run_in_notebook(self, sources: list[str]) -> list[str]:
         """Open the notebook, add cells with these sources at its end, and

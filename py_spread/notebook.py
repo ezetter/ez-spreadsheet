@@ -243,29 +243,41 @@ def dataframe_code(model, cells, name: str = "df") -> str:
 
 # --- Graphing them with Seaborn ---
 
-MARKER_LIMIT = 50  # as with charts, line graphs with up to this many points mark each one
-
-
 class GraphError(ValueError):
     """The selected cells can't be graphed; the message says why."""
 
 
-def graph_code(model, cells, frame_name: str = "df") -> str:
-    """Python that graphs the DataFrame `frame_name`, which dataframe_code
-    makes of the same cells, with Seaborn, the way a chart of them is drawn:
-    the first column across (text gives category labels, in the sheet's
-    order), and each other column a series up, named by its label. It's a
-    line graph, with a dot on each point when there are up to 50 of them, and
-    turns into a scatter graph by changing kind to 'scatter'. Text in the y
-    columns is left out. GraphError if the cells can't be graphed.
-    """
+def _graph_frame(model, cells) -> _Frame:
     frame = _frame(model, cells)
     if len(frame.labels) < 2:
         raise GraphError("Select at least two columns: the first for x, the others for y.")
+    if not any(isinstance(v, float) for column in frame.columns[1:] for v in column):
+        raise GraphError("There are no numbers to graph in the y columns.")
+    return frame
+
+
+def graph_columns(model, cells) -> tuple[str, list[str]]:
+    """The labels of the x column and the y columns a graph of the cells
+    would have; GraphError if the cells can't be graphed."""
+    frame = _graph_frame(model, cells)
+    return frame.labels[0], frame.labels[1:]
+
+
+def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None) -> str:
+    """Python that graphs the DataFrame `frame_name`, which dataframe_code
+    makes of the same cells, with Seaborn, the way a chart of them is drawn:
+    the first column across (text gives category labels, in the sheet's
+    order), and each other column a series up, named by its label. `kind` is
+    "line" or "scatter", and `marker` a Matplotlib marker such as "o" for
+    each point (None: none on a line, Seaborn's circles on a scatter graph).
+    Text in the y columns is left out. GraphError if the cells can't be
+    graphed.
+    """
+    if kind not in ("line", "scatter"):
+        raise ValueError(f"kind must be 'line' or 'scatter', not {kind!r}")
+    frame = _graph_frame(model, cells)
     x_label, y_labels = frame.labels[0], frame.labels[1:]
     x_values, y_columns = frame.columns[0], frame.columns[1:]
-    if not any(isinstance(v, float) for column in y_columns for v in column):
-        raise GraphError("There are no numbers to graph in the y columns.")
 
     fixes = []  # changes Seaborn needs, made to a copy of the DataFrame
     if any(isinstance(v, str) for v in x_values) and any(isinstance(v, float) for v in x_values):
@@ -289,11 +301,12 @@ def graph_code(model, cells, frame_name: str = "df") -> str:
         lines.append(f"long = {data}.melt(id_vars=[{x_label!r}], value_vars={y_labels!r}, "
                      f"var_name={series!r}, value_name={value!r})")
         plotted = f"data=long, x={x_label!r}, y={value!r}, hue={series!r}"
-    marker = "marker='o', " if len(x_values) <= MARKER_LIMIT else ""
+    other = "scatter" if kind == "line" else "line"
+    marker = f"marker={marker!r}, " if marker else ""
     lines += [
         "graph = sns.relplot(",
         f"    {plotted},",
-        "    kind='line',  # or 'scatter' for the points alone",
+        f"    kind={kind!r},  # or {other!r}",
         f"    {marker}height=4, aspect=1.5,",
         ")",
     ]

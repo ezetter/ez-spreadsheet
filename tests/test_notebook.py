@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, Signal
 from PySide6.QtGui import QImage, QTextDocument, QTextTable
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QToolBar, QToolButton, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QToolBar, QToolButton, QWidget
 
 from py_spread.model import SheetModel
 from py_spread.notebook import (
@@ -19,8 +19,10 @@ from py_spread.notebook import (
     data_block,
     dataframe_code,
     graph_code,
+    graph_columns,
     next_frame_name,
 )
+from py_spread.graph_dialog import MARKERS, GraphDialog, describe
 from py_spread.notebook_window import NotebookWindow, OutputView
 from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
 from py_spread.window import MainWindow
@@ -119,13 +121,11 @@ def pyplot():
     plt.switch_backend(backend)
 
 
-def graph(model, cells, kind="line"):
+def graph(model, cells, kind="line", marker=None):
     """Run the DataFrame and graph cells for these cells; the graph (a Seaborn FacetGrid)."""
     namespace = {}
     exec(dataframe_code(model, cells), namespace)
-    code = graph_code(model, cells)
-    assert "kind='line'" in code
-    exec(code.replace("kind='line'", f"kind='{kind}'"), namespace)
+    exec(graph_code(model, cells, "df", kind, marker), namespace)
     return namespace["graph"]
 
 
@@ -149,9 +149,17 @@ def test_graph_of_several_series(sales, pyplot):
     assert [t.get_text() for t in g.ax.get_xticklabels()] == ["Mar", "Jan", "Feb"]  # the sheet's order
     assert [t.get_text() for t in g.legend.texts] == ["Sales", "Cost"]
     sales_line, cost_line = plotted(g)
-    assert list(sales_line.get_ydata()) == [1200, 1450.5, 1700] and sales_line.get_marker() == "o"
+    assert list(sales_line.get_ydata()) == [1200, 1450.5, 1700]
     assert list(cost_line.get_ydata()) == [800, 950]  # n/a isn't graphed
+    assert sales_line.get_marker() == "None"  # no markers unless asked for
     assert g.ax.get_xlabel() == "Month"
+
+
+@pytest.mark.parametrize("marker", [m for m in MARKERS if m])
+def test_line_markers(sales, pyplot, marker):
+    code = graph_code(sales, block(0, 0, 3, 2), "df", "line", marker)
+    assert f"marker={marker!r}, height=4" in code
+    assert {line.get_marker() for line in plotted(graph(sales, block(0, 0, 3, 2), "line", marker))} == {marker}
 
 
 def test_graph_of_one_series(sales, pyplot):
@@ -161,17 +169,24 @@ def test_graph_of_one_series(sales, pyplot):
     assert g.ax.get_ylabel() == "Sales" and g.legend is None  # named on the y axis, as in a chart
 
 
-def test_scatter_by_changing_kind(sales, pyplot):
-    g = graph(sales, block(0, 0, 3, 2), kind="scatter")
+def test_scatter(sales, pyplot):
+    code = graph_code(sales, block(0, 0, 3, 2), "df", "scatter")
+    assert "kind='scatter',  # or 'line'" in code and "marker" not in code  # Seaborn's own circles
+    g = graph(sales, block(0, 0, 3, 2), "scatter")
     assert plotted(g) == [] and len(g.ax.collections[0].get_offsets()) == 5  # 3 sales, 2 costs
+    g = graph(sales, block(0, 0, 3, 2), "scatter", "*")
+    assert len(g.ax.collections[0].get_offsets()) == 5
 
 
-def test_numeric_x_and_many_points(pyplot, app):
+def test_line_or_scatter_only(sales):
+    with pytest.raises(ValueError):
+        graph_code(sales, block(0, 0, 3, 2), "df", "bar")
+
+
+def test_numeric_x(pyplot, app):
     model = SheetModel(rows=80, cols=4)
     model.set_cells({(row, 0): str(row) for row in range(60)} | {(row, 1): str(row * row) for row in range(60)})
     model.set_cell(7, 0, "")  # a point without an x is left out
-    code = graph_code(model, block(0, 0, 59, 1))
-    assert "marker" not in code  # more than 50 points
     [line] = plotted(graph(model, block(0, 0, 59, 1)))
     assert len(line.get_xdata()) == 59 and line.get_xdata()[0] == 0
 
@@ -200,6 +215,54 @@ def test_graph_names_dont_clash(pyplot, app):
 def test_cells_that_cant_be_graphed(sales, cells, problem):
     with pytest.raises(GraphError, match=problem):
         graph_code(sales, cells)
+    with pytest.raises(GraphError, match=problem):
+        graph_columns(sales, cells)
+
+
+def test_graph_columns(sales):
+    assert graph_columns(sales, block(0, 0, 3, 2)) == ("Month", ["Sales", "Cost"])
+
+
+# --- The Graph dialog ---
+
+def test_dialog_starts_with_line_and_no_marker(app):
+    dialog = GraphDialog(None, "Month", ["Sales", "Cost"])
+    assert (dialog.kind(), dialog.marker()) == ("line", None)
+    assert [dialog.marker_box.itemData(i) for i in range(dialog.marker_box.count())] == list(MARKERS)
+    assert dialog.findChild(QLabel).text() == "Graph Sales and Cost against Month."
+
+
+def test_dialog_starts_with_the_last_choices(app):
+    dialog = GraphDialog(None, "x", ["y"], "scatter", "D")
+    assert (dialog.kind(), dialog.marker()) == ("scatter", "D")
+
+
+def test_scatter_needs_a_marker(app):
+    dialog = GraphDialog(None, "x", ["y"])
+    none = dialog.marker_box.model().item(0)
+    dialog.kind_buttons["scatter"].setChecked(True)
+    assert dialog.marker() == "o" and not none.isEnabled()  # circles in place of None
+    dialog.kind_buttons["line"].setChecked(True)
+    assert dialog.marker() is None and none.isEnabled()  # and back
+
+
+def test_chosen_marker_stays(app):
+    dialog = GraphDialog(None, "x", ["y"])
+    dialog.kind_buttons["scatter"].setChecked(True)
+    dialog.marker_box.setCurrentIndex(dialog.marker_box.findData("s"))
+    dialog.marker_box.activated.emit(dialog.marker_box.currentIndex())  # as a choice by the user does
+    dialog.kind_buttons["line"].setChecked(True)
+    assert (dialog.kind(), dialog.marker()) == ("line", "s")
+
+
+def test_scatter_from_the_start_gets_circles(app):
+    dialog = GraphDialog(None, "x", ["y"], "scatter", None)
+    assert dialog.marker() == "o"
+
+
+def test_descriptions():
+    assert describe("x", ["a"]) == "Graph a against x."
+    assert describe("x", ["a", "b", "c"]) == "Graph a, b, and c against x."
 
 
 def test_frame_names(app):
@@ -554,18 +617,32 @@ def test_kernel_starts_in_sheets_folder(app, tmp_path):
     window.setWindowModified(False)
 
 
-def test_graph_from_the_notebook_menu(window):
+def test_graph_from_the_notebook_menu(window, dialogs):
     window.view.select_range(0, 0, window.model.rowCount() - 1, 1)  # columns A and B: Month, Sales
     window.graph_action.trigger()
+    assert dialogs.graph_prompts == [("Month", ["Sales"], ("line", None))]
     frame_cell, graph_cell = window.notebook.cells
     assert [run[0] for run in window.kernel.runs] == [frame_cell.id, graph_cell.id]  # both run, in order
     assert frame_cell.source == dataframe_code(window.model, block(0, 0, 3, 1))
     assert "graph = sns.relplot(" in graph_cell.source and "x='Month', y='Sales'" in graph_cell.source
     assert window.notebook_window.isVisible()
     assert "as df, with a graph" in window.statusBar().currentMessage()
+    assert "kind='line'" in graph_cell.source and "marker" not in graph_cell.source
+    dialogs.graph_answer = ("scatter", "s")
     window.view.select_range(0, 0, 3, 1)
     window.graph_action.trigger()
-    assert "df2 as a graph" in window.notebook.cells[-1].source
+    source = window.notebook.cells[-1].source
+    assert "df2 as a graph" in source and "kind='scatter'" in source and "marker='s'" in source
+    window.graph_action.trigger()
+    assert dialogs.graph_prompts[-1][2] == ("scatter", "s")  # the dialog starts from the last choices
+
+
+def test_cancelling_the_graph_dialog(window, dialogs):
+    dialogs.graph_answer = None
+    window.view.select_range(0, 0, 3, 1)
+    assert window.send_graph_to_notebook() is None
+    assert window.notebook.is_empty and window.notebook_window is None
+    assert (window.graph_kind, window.graph_marker) == ("line", None)
 
 
 @pytest.mark.parametrize("selection, problem", [
@@ -573,7 +650,7 @@ def test_graph_from_the_notebook_menu(window):
     ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't graphed
     ((10, 0, 12, 2), "The selection is empty"),
 ])
-def test_graph_problems(window, selection, problem):
+def test_graph_problems(window, dialogs, selection, problem):
     if problem is None:
         window.view.select_range(*selection)
         assert window.send_graph_to_notebook() is not None
@@ -583,6 +660,7 @@ def test_graph_problems(window, selection, problem):
     assert window.send_graph_to_notebook() is None
     assert problem in window.statusBar().currentMessage()
     assert window.notebook.is_empty and window.notebook_window is None
+    assert dialogs.graph_prompts == []  # told before the dialog, not after
 
 
 def test_graph_needs_numbers(window):
@@ -712,7 +790,8 @@ def test_real_kernel_runs_the_dataframe(app, sheet):
     assert not window.kernel.has_kernel
 
 
-def test_real_kernel_draws_the_graph(app, sheet):
+def test_real_kernel_draws_the_graph(app, sheet, dialogs):
+    dialogs.graph_answer = ("scatter", "D")
     window = MainWindow()
     window.model.set_cells({key: sheet.get_cell(*key) for key in block(0, 0, 3, 2)})
     try:

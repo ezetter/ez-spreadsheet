@@ -24,6 +24,8 @@ class Dialogs:
         self.insert_problems = None  # the choices it was told to disable
         self.delete_shift = "up"  # likewise for the Delete Cells dialog
         self.delete_problems = None
+        self.graph_answer = ("line", None)  # the Graph dialog's (kind, marker); None cancels
+        self.graph_prompts = []  # (x label, y labels, the choices it started with) each time it's shown
 
 
 @pytest.fixture(autouse=True)
@@ -58,5 +60,11 @@ def dialogs(monkeypatch):
         return dialogs.delete_shift
 
     monkeypatch.setattr(MainWindow, "_ask_delete_shift", ask_delete_shift)
+
+    def ask_graph_options(window, x_label, y_labels):
+        dialogs.graph_prompts.append((x_label, list(y_labels), (window.graph_kind, window.graph_marker)))
+        return dialogs.graph_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
     monkeypatch.setattr(MainWindow, "_show_error", lambda window, text, detail: dialogs.errors.append(detail))
     return dialogs

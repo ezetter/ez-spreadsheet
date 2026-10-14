@@ -168,9 +168,10 @@ df
 
 ### Graphing cells
 
-Graph does the same, and adds a second cell that graphs the DataFrame with
-Seaborn, the way a chart of the cells is drawn. Both cells run, so the table
-shows and then the graph:
+Graph asks for the kind of graph and its markers, then does the same as
+DataFrame and adds a second cell that graphs the DataFrame with Seaborn, the
+way a chart of the cells is drawn. Both cells run, so the table shows and then
+the graph:
 
 ```python
 import seaborn as sns
@@ -180,21 +181,34 @@ sns.set_theme(style='whitegrid')
 long = df.melt(id_vars=['Month'], value_vars=['Sales', 'Cost'], var_name='Series', value_name='Value')
 graph = sns.relplot(
     data=long, x='Month', y='Value', hue='Series',
-    kind='line',  # or 'scatter' for the points alone
-    marker='o', height=4, aspect=1.5,
+    kind='line',  # or 'scatter'
+    height=4, aspect=1.5,
 )
 ```
+
+The Graph dialog says what it will graph ("Graph Sales and Cost against
+Month.") and has two choices:
+
+- **Graph type:** Line or Scatter.
+- **Marker**, drawn on each point: None (the default), Circle, Point, Square,
+  Diamond, Triangle up, Triangle down, Plus, Cross, or Star. A scatter graph
+  needs markers to show its points, so None isn't available for it: choosing
+  Scatter switches None to Circle, and choosing Line again switches it back.
+
+The dialog starts from your last choices while EzSheet is open. Cancel adds
+nothing. If the cells can't be graphed, the status bar says why before the
+dialog appears.
 
 - The first selected column is the x axis, and each other column is a series
   of y values, named by its column label (in the legend, or on the y axis for
   a single series). Text x values are categories, in the sheet's order.
-- It starts as a line graph, as charts do. For a scatter graph, change
-  `kind='line'` to `kind='scatter'` and run the cell again (Shift+Return).
-- With up to 50 points, each one gets a dot. Text in the y columns isn't
-  graphed, and rows without an x value are left out. Unlike a chart, a line
-  joins the points on either side of a missing value instead of leaving a gap.
-- It needs at least two columns, with some numbers in the y columns; if not,
-  the status bar says why and nothing is added.
+- The choices are in the cell's code too: change `kind='line'` to
+  `kind='scatter'`, or add or change `marker='o'` (any Matplotlib marker), and
+  run the cell again (Shift+Return).
+- Text in the y columns isn't graphed, and rows without an x value are left
+  out. Unlike a chart, a line joins the points on either side of a missing
+  value instead of leaving a gap.
+- It needs at least two columns, with some numbers in the y columns.
 - The graph is a picture of the data when the cell ran, saved with the
   notebook. `graph` is Seaborn's FacetGrid, so later cells can adjust it, for
   example `graph.set(title='Sales')` followed by `graph.figure`.
