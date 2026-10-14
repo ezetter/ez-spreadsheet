@@ -88,21 +88,6 @@ def test_sheet_uses_grid_style(window):
     assert isinstance(window.view.style(), GridStyle)
 
 
-def test_chart_follows_appearance(window):
-    from PySide6.QtWidgets import QApplication
-    from py_spread.chart import ChartWindow
-
-    window.model.set_cells({(0, 0): "1", (0, 1): "2", (1, 0): "2", (1, 1): "4"})
-    chart = ChartWindow(window.model, {(r, c) for r in range(2) for c in range(2)}, parent=window)
-    light_line = chart.axes.get_lines()[0].get_color()
-    chart.setPalette(palette(*DARK))
-    QApplication.processEvents()
-    assert chart.figure.get_facecolor()[:3] == pytest.approx(QColor(DARK[0]).getRgbF()[:3])
-    assert chart.axes.get_facecolor()[:3] == pytest.approx(QColor(DARK[1]).getRgbF()[:3])
-    assert chart.axes.get_lines()[0].get_color() != light_line  # the dark style's colors
-    chart.close()
-
-
 def test_fill_dialog_error_color(app):
     from py_spread.fill_dialogs import RandomDialog
     dialog = RandomDialog()

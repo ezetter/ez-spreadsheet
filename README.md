@@ -1,8 +1,8 @@
 # EzSheet
 
 A desktop spreadsheet written in Python with PySide6 (Qt), using NumPy for
-calculations and Matplotlib for charts. Each sheet has a Jupyter-style
-notebook for working with its data in pandas and graphing it with Seaborn.
+calculations. Each sheet has a Jupyter-style notebook for working with its
+data in pandas and graphing it with Seaborn (which draws with Matplotlib).
 
 ## Setup
 
@@ -56,8 +56,8 @@ Actual Size (Cmd+0) scale the grid's text, row heights, column widths, and
 headers, along with the cell bar, the toolbar, and the status bar. Zoom goes
 from 50% to 300% in the usual steps, and the status bar shows the level.
 Columns or rows you've resized keep their size relative to the others. The
-Mac menu bar, chart windows, and Ask Claude windows aren't zoomed, and zoom
-isn't saved with the sheet.
+Mac menu bar and Ask Claude windows aren't zoomed, and zoom isn't saved with
+the sheet.
 
 While the notebook window is in front, the same commands and shortcuts zoom
 the notebook instead (see [Notebook](#notebook)). The sheet and the notebook
@@ -69,8 +69,7 @@ EzSheet follows the Mac's light or dark appearance. To override it, choose
 View > Appearance > Light or Dark (or Match System to follow the Mac again);
 the choice is remembered the next time you open EzSheet. Everything
 switches: the grid (with soft grid lines in either mode), toolbar, menus,
-dialogs, the notebook (code colors included), the Ask Claude window, and open
-charts, which redraw with a dark background and brighter line colors.
+dialogs, the notebook (code colors included), and the Ask Claude window.
 
 ## Number formats
 
@@ -105,26 +104,6 @@ the style, it's removed from the selection; otherwise it's added. The buttons
 and menu items show whether the current cell is bold or italic. Styles are
 kept when you retype or clear a cell, are saved with the sheet, travel with
 copy and paste, can be undone, and are given by Fill to the cells it fills.
-
-## Charts
-
-Select some rows and columns, then use the Chart button on the toolbar or
-Insert > Chart. The first selected column is the x axis; each other column is
-a series of y values. Charts start as line charts; the Chart type control in
-the chart window switches between line and scatter.
-
-- If the first selected row has text in the y columns, it's a header: it
-  names the series (in the legend, or on the y axis for a single series) and
-  the x axis.
-- A text x column (months, say) gives category labels along the x axis.
-- Empty or non-numeric y cells leave gaps; rows without an x value are left
-  out of a numeric x axis. Line charts with up to 50 points mark each point.
-- Each chart opens in its own window, with the Line/Scatter switch and
-  Matplotlib's toolbar for zooming, panning, and saving the chart as an image.
-  (Its Configure Subplots button is left out: charts lay themselves out so
-  labels aren't cut off, which overrides that button's margin settings.)
-- Charts redraw as you edit their cells. They aren't saved with the sheet, and
-  they close when you open another sheet or start a new one.
 
 ## Notebook
 
@@ -230,7 +209,7 @@ The Graph dialog has these choices:
   choosing one switches None to Circle, and choosing Line again switches it
   back.
 
-The axes start at sensible defaults, as a chart's are: the first column
+The axes start at sensible defaults: the first column
 across, and the next column with numbers up (a column of text alone can't go
 up). For a categorical scatter, the first column with text goes across
 instead. The defaults follow the graph type until you choose an X axis
@@ -247,8 +226,7 @@ the status bar says why before the dialog appears.
   or change `marker='o'` (any Matplotlib marker), and run the cell again
   (Shift+Return).
 - Text in the y columns isn't graphed, and rows without an x value are left
-  out. Unlike a chart, a line joins the points on either side of a missing
-  value instead of leaving a gap.
+  out. A line joins the points on either side of a missing value.
 - The graph is a picture of the data when the cell ran, saved with the
   notebook. `graph` is Seaborn's FacetGrid, so later cells can adjust it, for
   example `graph.set(title='Sales')` followed by `graph.figure`.

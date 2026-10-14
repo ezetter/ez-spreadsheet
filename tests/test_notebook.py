@@ -178,7 +178,7 @@ def test_graph_of_one_series(sales, pyplot):
     code = graph_code(sales, block(0, 0, 3, 1))
     assert "melt" not in code and "pd." not in code  # nothing to reshape or fix
     g = graph(sales, block(0, 0, 3, 1))
-    assert g.ax.get_ylabel() == "Sales" and g.legend is None  # named on the y axis, as in a chart
+    assert g.ax.get_ylabel() == "Sales" and g.legend is None  # named on the y axis
 
 
 def test_scatter(sales, pyplot):
@@ -739,6 +739,7 @@ def test_tool_in_toolbar_menus_and_context_menu(window, monkeypatch):
     window.notebook_button.click()
     assert shown == [1]  # the button itself shows the menu, not just its arrow
     insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
+    assert [a.text() for a in insert.actions()] == ["Notebook"]  # charts are made in the notebook
     for menu in (window.notebook_button.menu(), notebook_submenu(insert), notebook_submenu(window.context_menu)):
         actions = menu.actions()
         assert [actions[0], actions[2], actions[3], actions[5]] == [

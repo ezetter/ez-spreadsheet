@@ -641,14 +641,6 @@ class MainWindow(QMainWindow):
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
-        self.charts = []  # open chart windows
-        # Charts start as line charts; the chart window switches the type.
-        self.chart_action = QAction("Chart", self)
-        self.chart_action.setToolTip(
-            "Chart the selected cells: the first column is x, the others are y. "
-            "Switch between line and scatter in the chart window.")
-        self.chart_action.triggered.connect(lambda _checked=False: self.make_chart())
-        menu.addAction(self.chart_action)
         # Notebook: open it as it is, or add the selected cells as a DataFrame,
         # or as a DataFrame and a graph.
         self.open_notebook_action = QAction("Open", self)
@@ -660,8 +652,8 @@ class MainWindow(QMainWindow):
         self.dataframe_action.triggered.connect(lambda _checked=False: self.send_to_notebook())
         self.graph_action = QAction("Graph", self)
         self.graph_action.setToolTip(
-            "Put the selected cells in a DataFrame in the sheet's notebook and graph it with Seaborn: "
-            "the first column is x, the others are y")
+            "Put the selected cells in a DataFrame in the sheet's notebook and graph it with Seaborn, "
+            "choosing the kind of graph and its columns")
         self.graph_action.triggered.connect(lambda _checked=False: self.send_graph_to_notebook())
         self.graph_kind, self.graph_marker = "line", None  # the Graph dialog's last choices
         self.load_data_action = QAction("Load Data to Sheet…", self)
@@ -682,40 +674,6 @@ class MainWindow(QMainWindow):
         submenu.addSeparator()
         submenu.addAction(self.load_data_action)
         return submenu
-
-    def _build_chart_button(self, toolbar):
-        self.chart_button = QToolButton()
-        self.chart_button.setDefaultAction(self.chart_action)
-        toolbar.addWidget(self.chart_button)
-
-    def make_chart(self):
-        """Open a line chart window for the selected cells; returns it, or None
-        if the cells can't be charted (the status bar says why)."""
-        # Imported here so Matplotlib loads only when a chart is first made.
-        from .chart import ChartError, ChartWindow, chart_data
-
-        self._commit_pending_edit()
-        cells = self._selected_cells()
-        try:
-            chart_data(self.model, cells)
-        except ChartError as e:
-            self._show_status(f"Can't make a chart: {e}")
-            return None
-        window = ChartWindow(self.model, cells, "line", parent=self)
-        window.destroyed.connect(lambda _obj=None, w=window: self._forget_chart(w))
-        self.charts.append(window)
-        window.show()
-        self._show_status("")
-        return window
-
-    def _forget_chart(self, window):
-        if window in self.charts:
-            self.charts.remove(window)
-
-    def close_charts(self):
-        for window in list(self.charts):
-            window.close()
-        self.charts.clear()
 
     def _build_format_menu(self):
         menu = self.menuBar().addMenu("Format")
@@ -954,7 +912,6 @@ class MainWindow(QMainWindow):
         self.autosum.message.connect(self._show_status)
 
         self._build_fill_button(toolbar)
-        self._build_chart_button(toolbar)
         self.notebook_button = QToolButton()
         self.notebook_button.setText("Notebook")
         self.notebook_button.setToolTip("Send the selected cells to the sheet's notebook, as a DataFrame "
@@ -1127,14 +1084,13 @@ class MainWindow(QMainWindow):
         return cell_id
 
     def send_graph_to_notebook(self) -> str | None:
-        """Ask for a line or scatter graph and its marker, then put the
-        selected cells in a DataFrame in a new notebook cell, and a Seaborn
-        graph of it in the next (the first column across, the others up, as in
-        a chart); open the notebook and run them. With no data or just one
-        column selected, which can't be graphed, change one of the notebook's
-        graphs instead. Returns the graph cell's id, or None if the cells
-        can't be graphed (the status bar says why) or the dialog was
-        cancelled."""
+        """Ask what kind of graph, of which columns (in the Graph dialog), then
+        put the selected cells in a DataFrame in a new notebook cell, and a
+        Seaborn graph of it in the next; open the notebook and run them. With
+        no data or just one column selected, which can't be graphed, change
+        one of the notebook's graphs instead. Returns the graph cell's id, or
+        None if the cells can't be graphed (the status bar says why) or the
+        dialog was cancelled."""
         self._commit_pending_edit()
         selected = self._selected_cells()
         cells = data_block(self.model, selected)
@@ -1646,7 +1602,6 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     def _load(self, sheet: SheetData, path: str | None) -> None:
-        self.close_charts()  # they show the old sheet's cells
         self.clipboard.cancel()
         self.autosum.cancel()
         self.kernel.shutdown()  # the old sheet's Python variables go with it
