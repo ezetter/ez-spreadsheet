@@ -304,9 +304,29 @@ class GraphColumns:
             raise GraphError("There are no numbers to graph in the selected columns.")
         return columns
 
-    def y_options(self, x: str) -> list[str]:
-        """The columns that can go up the y axis against x: those with numbers."""
-        return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != x]
+    def category(self, label: str) -> bool:
+        """Whether a column is just categories: text, without numbers."""
+        index = self.labels.index(label)
+        return self.text[index] and not self.numbers[index]
+
+    def y_options(self, x: str, kind: str = "line") -> list[str]:
+        """The columns that can go up the y axis against x: those with
+        numbers, and for a categorical scatter across a column of numbers,
+        columns of categories too (which turn the graph sideways)."""
+        sideways = kind in CATEGORICAL and self.numbers[self.labels.index(x)]
+        return [label for label, numbers in zip(self.labels, self.numbers)
+                if label != x and (numbers or sideways and self.category(label))]
+
+    def x_options(self, y: str | None, kind: str = "line") -> list[str]:
+        """The columns that can go across: any, except that with categories
+        up a categorical scatter (sideways), only those with numbers."""
+        if kind in CATEGORICAL and y in self.labels and self.category(y):
+            return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != y]
+        return list(self.labels)
+
+    def sideways(self, ys: list[str], kind: str) -> bool:
+        """Whether a categorical scatter has its categories up the y axis."""
+        return kind in CATEGORICAL and len(ys) == 1 and self.category(ys[0])
 
     def hue_options(self, x: str) -> list[str]:
         """The columns that can color the points: any but x."""
@@ -322,7 +342,7 @@ class GraphColumns:
 
     def default_ys(self, x: str) -> list[str]:
         """The first column with numbers after x, else before it."""
-        options = self.y_options(x)
+        options = self.y_options(x)  # (numbers only: a graph is sideways only if asked for)
         after = [label for label in options if self.labels.index(label) > self.labels.index(x)]
         return [(after or options)[0]]
 
@@ -356,7 +376,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     the points colored by the `hue` column's values, if given. `kind` is
     "line" or "scatter" (relplot), or a categorical scatter (catplot):
     "strip" jitters each category's points, "swarm" spreads them so none
-    overlap. `marker` is a Matplotlib marker such as "o" for each point
+    overlap. A categorical scatter can have its categories up the y axis
+    instead, with numbers across: Seaborn turns it sideways. `marker` is a Matplotlib marker such as "o" for each point
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
     is left out. Several `ys` (as graphs made before the y was a single
     column could have) make a series each, colored instead of by a hue.
@@ -368,18 +389,21 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     columns = GraphColumns.of(frame)
     x = x if x is not None else columns.default_x(kind)
     ys = list(ys) if ys is not None else columns.default_ys(x)
-    if x not in columns.labels or not ys or any(y not in columns.y_options(x) for y in ys):
+    if (x not in columns.labels or not ys or any(y not in columns.y_options(x, kind) for y in ys)
+            or len(ys) > 1 and any(columns.category(y) for y in ys)):
         raise ValueError(f"can't graph {ys!r} against {x!r}")
     if hue is not None and (hue not in columns.hue_options(x) or len(ys) > 1):
         raise ValueError(f"can't color the graph by {hue!r}")
     values = dict(zip(frame.labels, frame.columns))
 
+    sideways = columns.sideways(ys, kind)  # the categories go up, and the numbers across
+    labeled, measured = (ys[0], [x]) if sideways else (x, ys)  # the axis of labels; the columns of numbers
     fixes = []  # changes Seaborn needs, made to a copy of the DataFrame
-    if any(isinstance(v, str) for v in values[x]) and any(_is_number(v) for v in values[x]):
-        fixes.append(f"data[{x!r}] = data[{x!r}].astype('string')  # numbers and text: all labels")
-    for y in ys:
-        if any(isinstance(v, str) for v in values[y]):
-            fixes.append(f"data[{y!r}] = pd.to_numeric(data[{y!r}], errors='coerce')  # text isn't graphed")
+    if any(isinstance(v, str) for v in values[labeled]) and any(_is_number(v) for v in values[labeled]):
+        fixes.append(f"data[{labeled!r}] = data[{labeled!r}].astype('string')  # numbers and text: all labels")
+    for column in measured:
+        if any(isinstance(v, str) for v in values[column]):
+            fixes.append(f"data[{column!r}] = pd.to_numeric(data[{column!r}], errors='coerce')  # text isn't graphed")
 
     lines = ["import pandas as pd"] if import_pandas and any("pd." in fix for fix in fixes) else []
     lines += ["import seaborn as sns"] if import_seaborn else []

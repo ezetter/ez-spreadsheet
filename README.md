@@ -210,7 +210,11 @@ The Graph dialog has these choices:
   distributed (`kind='swarm'`). With many points, it gets wide.
 - **X axis:** any of the selected columns. Text in it gives categories, in
   the sheet's order.
-- **Y axis:** one of the other columns with numbers.
+- **Y axis:** one of the other columns with numbers. For a categorical
+  scatter with numbers across, it can also be a column of categories (text),
+  which turns the graph sideways: the categories run down the side and the
+  numbers across. While categories are up, the X axis offers only columns
+  with numbers; and changing to Line or Scatter puts numbers back up.
 - **Hue:** None (the default), or any column but the X axis's. Its values
   color the points, with a legend: categories (text) each get a color, and
   numbers get shades along a scale.

@@ -35,7 +35,9 @@ class GraphDialog(QDialog):
     """The graph type (Line, Scatter, or Categorical scatter, which can be a
     swarm plot), the X axis column, the Y axis column, the Hue column whose
     values color the points (None by default), and a marker (None by
-    default). For a new graph of `columns` (GraphColumns), the axes start at
+    default). Up takes a column with numbers, except that a categorical
+    scatter across a column of numbers can have its categories up, turning
+    it sideways; across then takes only columns with numbers. For a new graph of `columns` (GraphColumns), the axes start at
     the type's defaults, and follow the type until an X axis is chosen (and
     the Y axis follows the X until it's chosen). Scatter graphs need markers
     to show their points, so None is unavailable for them; choosing one
@@ -151,39 +153,48 @@ class GraphDialog(QDialog):
         self.marker_box.setCurrentIndex(max(0, self.marker_box.findData(marker)))
         self.kind_box.setCurrentIndex(max(0, self.kind_box.findData("strip" if kind in CATEGORICAL else kind)))
         self.swarm_box.setChecked(kind == "swarm")
-        self.x_box.clear()
         known = self.columns is not None
         for box in (self.x_box, self.y_box, self.hue_box):
             box.setEnabled(known)
             box.setToolTip("" if known else "The columns can't be changed: the cell making the graph's "
                                              "DataFrame wasn't found, or was changed by hand.")
-        if known:
-            for label in self.columns.labels:
-                self.x_box.addItem(label, label)
-            self.x_box.setCurrentIndex(self.x_box.findData(x if x is not None else self.columns.default_x(kind)))
-        else:
-            self.x_box.addItem(x or "?", x)
         self._loading = False
-        self._fill_ys(ys)
+        if known:
+            x = x if x is not None else self.columns.default_x(kind)
+            self._set_axes(x, list(ys) if ys is not None else self.columns.default_ys(x))
+        else:
+            self._loading = True
+            self.x_box.clear()
+            self.x_box.addItem(x or "?", x)
+            self.y_box.clear()
+            self.y_box.addItem(", ".join(ys or []) or "?", list(ys or []))
+            self._loading = False
         self._fill_hues(hue)
         self._kind_changed()
 
-    def _fill_ys(self, ys: list[str] | None) -> None:
-        """The Y axis choices for the X axis chosen, selecting `ys` (or the default)."""
+    def _set_axes(self, x: str, ys: list[str] | None) -> None:
+        """Fill the X and Y axis choices, which depend on the type and each
+        other, selecting `x` and `ys` where they still work (else the
+        defaults). A categorical scatter can have categories up, with
+        numbers across; otherwise up takes numbers."""
+        kind = self.kind()
+        if ys is None or len(ys) == 1 and ys[0] not in self.columns.y_options(x, kind):
+            ys = self.columns.default_ys(x)
         self._loading = True
+        self.x_box.clear()
+        for label in self.columns.x_options(ys[0] if len(ys) == 1 else None, kind):
+            self.x_box.addItem(label, label)
+        self.x_box.setCurrentIndex(max(0, self.x_box.findData(x)))
         self.y_box.clear()
-        if self.columns is None:
-            self.y_box.addItem(", ".join(ys or []) or "?", list(ys or []))
-        else:
-            for label in self.columns.y_options(self.x()):
-                self.y_box.addItem(label, [label])
-            wanted = list(ys) if ys is not None else self.columns.default_ys(self.x())
-            index = next((i for i in range(self.y_box.count()) if self.y_box.itemData(i) == wanted), -1)
-            if index < 0 and ys is not None and len(wanted) > 1:  # a series each, from an older graph
-                self.y_box.addItem(", ".join(wanted), wanted)
-                index = self.y_box.count() - 1
-            self.y_box.setCurrentIndex(max(0, index))
+        for label in self.columns.y_options(x, kind):
+            self.y_box.addItem(label, [label])
+        index = next((i for i in range(self.y_box.count()) if self.y_box.itemData(i) == ys), -1)
+        if index < 0 and len(ys) > 1:  # a series each, from an older graph
+            self.y_box.addItem(", ".join(ys), ys)
+            index = self.y_box.count() - 1
+        self.y_box.setCurrentIndex(max(0, index))
         self._loading = False
+        self._y_changed()
 
     def _fill_hues(self, hue: str | None) -> None:
         """None, and the columns that can color the points, selecting `hue`."""
@@ -214,10 +225,14 @@ class GraphDialog(QDialog):
         elif not needs_markers and self._none_replaced:
             self.marker_box.setCurrentIndex(0)
             self._none_replaced = False
-        if not self._x_chosen and self.columns is not None:  # a new graph's x follows the type
+        if self.columns is None:
+            return
+        if not self._x_chosen:  # a new graph's x follows the type
             x = self.columns.default_x(kind)
             if x != self.x():
-                self.x_box.setCurrentIndex(self.x_box.findData(x))
+                self._set_axes(x, self.ys() if self._y_chosen else None)
+                self._fill_hues(self.hue_box.currentData() if self.hue_box.currentData() != x else None)
+        self._set_axes(self.x(), self.ys())  # what works across and up depends on the type
 
     def _x_picked(self, _index: int) -> None:
         self._x_chosen = True  # the user's choice now, whatever the type
@@ -229,16 +244,20 @@ class GraphDialog(QDialog):
         if self._loading or self.columns is None:
             return
         ys, hue = self.ys(), self.hue_box.currentData()
-        if not self._y_chosen or len(ys) != 1 or ys[0] not in self.columns.y_options(self.x()):
-            ys = None  # the default, or what was chosen is now the x
-        self._fill_ys(ys)
+        self._set_axes(self.x(), ys if self._y_chosen else None)
         self._fill_hues(hue if hue != self.x() else None)
 
     def _y_changed(self) -> None:
-        """Several y columns (an older graph's) are colored a series each, so there's no hue."""
+        """Categories up limit what can go across; and several y columns (an
+        older graph's) are colored a series each, so there's no hue."""
         if self._loading or self.columns is None:
             return
-        several = len(self.ys()) > 1
+        ys = self.ys()
+        across = self.columns.x_options(ys[0] if len(ys) == 1 else None, self.kind())
+        if [self.x_box.itemData(i) for i in range(self.x_box.count())] != across:
+            self._set_axes(self.x(), ys)
+            return
+        several = len(ys) > 1
         self.hue_box.setEnabled(not several)
         self.hue_box.setToolTip("Each column is its own series, in its own color." if several
                                 else "A column whose values color the points, with a legend")

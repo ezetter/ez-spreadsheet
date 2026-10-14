@@ -248,6 +248,31 @@ def test_categorical_scatter(pyplot, app):
     assert g.ax.get_ylabel() == "Length" and g.legend is not None
 
 
+def test_column_rules():
+    columns = GraphColumns(["Species", "Width", "Length", "Site"], [False, True, True, False],
+                           [True, False, False, True])
+    assert columns.y_options("Width", "line") == ["Length"]
+    assert columns.y_options("Width", "swarm") == ["Species", "Length", "Site"]
+    assert columns.y_options("Species", "strip") == ["Width", "Length"]
+    assert columns.x_options("Species", "strip") == ["Width", "Length"]
+    assert columns.x_options("Species", "line") == columns.x_options("Width", "strip") == columns.labels
+    assert columns.sideways(["Species"], "strip") and not columns.sideways(["Width"], "strip")
+
+
+def test_sideways_categorical_scatter(pyplot, app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "Species", (0, 1): "Width", (1, 0): "b", (1, 1): "1", (2, 0): "a", (2, 1): "n/a",
+                     (3, 0): "b", (3, 1): "3"})
+    cells = block(0, 0, 3, 1)
+    code = graph_code(model, cells, "df", "swarm", "D", x="Width", ys=["Species"])
+    assert "x='Width', y='Species'" in code and "pd.to_numeric(data['Width']" in code  # n/a across
+    g = graph(model, cells, "swarm", "D", x="Width", ys=["Species"])
+    assert [t.get_text() for t in g.ax.get_yticklabels()] == ["b", "a"] and g.ax.get_xlabel() == "Width"
+    for kind, x in (("line", "Width"), ("strip", "Species")):  # line graphs, or categories both ways
+        with pytest.raises(ValueError):
+            graph_code(model, cells, "df", kind, None, x=x, ys=["Species"])
+
+
 def test_hue(sales, pyplot):
     code = graph_code(sales, block(0, 0, 3, 2), "df", "scatter", "o", x="Sales", ys=["Cost"], hue="Month")
     assert "data=data, x='Sales', y='Cost', hue='Month'" in code
@@ -340,6 +365,38 @@ def test_categorical_scatter_takes_a_text_column_across(app):
     dialog.x_box.activated.emit(2)  # ...until the user picks the x
     dialog.kind_box.setCurrentIndex(2)
     assert dialog.x() == "Length"
+
+
+def iris_columns():
+    return GraphColumns(["Species", "Width", "Length", "Site"], [False, True, True, False],
+                        [True, False, False, True])
+
+
+def items(box):
+    return [box.itemText(i) for i in range(box.count())]
+
+
+def test_categories_up_turn_a_categorical_scatter_sideways(app):
+    dialog = GraphDialog(None, iris_columns(), "strip", "o")
+    assert (dialog.x(), dialog.ys()) == ("Species", ["Width"])
+    assert items(dialog.y_box) == ["Width", "Length"]  # categories across: numbers up
+    dialog.x_box.setCurrentIndex(dialog.x_box.findData("Width"))
+    dialog.x_box.activated.emit(dialog.x_box.currentIndex())
+    assert items(dialog.y_box) == ["Species", "Length", "Site"]  # numbers across: categories can go up
+    dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Species"]))
+    dialog.y_box.activated.emit(dialog.y_box.currentIndex())
+    assert (dialog.x(), dialog.ys()) == ("Width", ["Species"])
+    assert items(dialog.x_box) == ["Width", "Length"]  # categories up: only numbers across
+    assert items(dialog.hue_box) == ["None", "Species", "Length", "Site"]
+    dialog.kind_box.setCurrentIndex(1)  # Scatter: up takes numbers
+    assert (dialog.x(), dialog.ys()) == ("Width", ["Length"])
+    assert items(dialog.x_box) == ["Species", "Width", "Length", "Site"]
+
+
+def test_line_graphs_take_numbers_up(app):
+    dialog = GraphDialog(None, iris_columns())
+    dialog.x_box.setCurrentIndex(dialog.x_box.findData("Width"))
+    assert items(dialog.y_box) == ["Length"]
 
 
 def test_swarm_plots(app):
@@ -982,6 +1039,15 @@ def test_change_a_graphs_hue(window, dialogs):
     assert dialogs.graph_change_prompts[1][0][0].hue == "Note"
 
 
+def test_change_a_graph_to_sideways(window, dialogs):
+    graph_id = make_graph(window, columns=2)  # Month, Sales, Note
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "strip", "o", "Sales", ["Note"])
+    window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "sns.catplot(" in source and "x='Sales', y='Note'" in source
+
+
 def test_type_change_keeps_hand_edits(window, dialogs):
     graph_id = make_graph(window)
     nb = window.notebook_window
@@ -1179,6 +1245,13 @@ def test_real_kernel_draws_a_categorical_scatter(app, dialogs):
         assert "error" not in [o["output_type"] for o in outputs], outputs
         assert any("image/png" in o.get("data", {}) for o in outputs)
         assert "kind='swarm'" in window.notebook.cell(graph_id).source
+        dialogs.graph_answer = ("strip", "o", "Width", ["Species"])  # sideways
+        window.view.select_range(0, 0, 3, 2)
+        sideways_id = window.send_graph_to_notebook()
+        assert wait_for(lambda: not nb.running)
+        outputs = window.notebook.cell(sideways_id).outputs
+        assert "error" not in [o["output_type"] for o in outputs], outputs
+        assert any("image/png" in o.get("data", {}) for o in outputs)
     finally:
         if window.notebook_window is not None:
             window.notebook_window.hide()
