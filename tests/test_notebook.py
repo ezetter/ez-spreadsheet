@@ -686,6 +686,89 @@ def test_graph_needs_numbers(window):
     assert "no numbers to graph" in window.statusBar().currentMessage()
 
 
+# --- Changing a graph (Graph with no data selected) ---
+
+def make_graph(window, columns=1) -> str:
+    """A graph of A1:B4 (or more columns): its cell's id. The notebook is shown."""
+    window.view.select_range(0, 0, 3, columns)
+    return window.send_graph_to_notebook()
+
+
+def test_no_graphs_to_change(window, dialogs):
+    window.view.select_range(10, 0, 12, 2)  # empty
+    assert window.send_graph_to_notebook() is None
+    assert "no graphs to change" in window.statusBar().currentMessage()
+    assert dialogs.graph_change_prompts == [] and dialogs.graph_prompts == []
+
+
+def test_change_a_graph(window, dialogs):
+    graph_id = make_graph(window)
+    runs = len(window.kernel.runs)
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "scatter", "s")
+    assert window.send_graph_to_notebook() == graph_id
+    [(graphs, current)] = dialogs.graph_change_prompts
+    assert [g.cell_id for g in graphs] == [graph_id] and current == 0
+    assert (graphs[0].kind, graphs[0].marker, graphs[0].title) == ("line", None, "Sales against Month")
+    source = window.notebook.cell(graph_id).source
+    assert "kind='scatter',  # or 'line'" in source and "marker='s', height=4" in source
+    nb = window.notebook_window
+    assert nb.widgets[graph_id].editor.toPlainText() == source and nb.current_id == graph_id
+    assert [run[0] for run in window.kernel.runs[runs:]] == [graph_id]  # its DataFrame is still there
+    assert len(window.notebook.cells) == 2  # nothing added
+    assert "Redrawing the graph df: Sales against Month" in window.statusBar().currentMessage()
+    nb.widgets[graph_id].editor.undo()  # the change is an edit in the cell, so Undo there reverts it
+    assert "kind='line'" in window.notebook.cell(graph_id).source
+
+
+@pytest.mark.parametrize("new_process", [
+    lambda window: window.notebook_window.restart(),  # asked for, so before the new process even starts
+    lambda window: window.kernel.state_changed.emit("starting"),  # as after Python crashed
+])
+def test_dataframe_made_again_after_a_restart(window, dialogs, new_process):
+    graph_id = make_graph(window)
+    frame_id = window.notebook.cells[0].id
+    new_process(window)  # df is gone
+    runs = len(window.kernel.runs)
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "line", "o")
+    window.send_graph_to_notebook()
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, graph_id]
+
+
+def test_dataframe_made_again_in_a_reopened_sheet(window, dialogs, tmp_path):
+    make_graph(window)
+    window.save_to(str(tmp_path / "s.ezs"))
+    window.open_path(str(tmp_path / "s.ezs"))
+    frame_id, graph_id = (cell.id for cell in window.notebook.cells)
+    runs = len(window.kernel.runs)
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "scatter", None)
+    window.send_graph_to_notebook()
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, graph_id]
+
+
+def test_starts_with_the_current_graph(window, dialogs):
+    first = make_graph(window)
+    make_graph(window, columns=2)
+    window.notebook_window.set_current(first)
+    window.view.select_range(10, 0, 12, 2)
+    window.send_graph_to_notebook()  # cancelled
+    graphs, current = dialogs.graph_change_prompts[-1]
+    assert len(graphs) == 2 and graphs[current].cell_id == first
+    window.notebook_window.set_current(window.notebook.cells[0].id)  # a DataFrame cell: the last graph
+    window.send_graph_to_notebook()
+    assert dialogs.graph_change_prompts[-1][1] == 1
+
+
+def test_cancel_changes_nothing(window, dialogs):
+    graph_id = make_graph(window)
+    source, runs = window.notebook.cell(graph_id).source, len(window.kernel.runs)
+    window.view.select_range(10, 0, 12, 2)
+    assert window.send_graph_to_notebook() is None
+    assert window.notebook.cell(graph_id).source == source and len(window.kernel.runs) == runs
+
+
 # --- Zoom ---
 
 def activate(widget):
@@ -818,6 +901,30 @@ def test_real_kernel_draws_the_graph(app, sheet, dialogs):
         kinds = [o["output_type"] for o in cell.outputs]
         assert "error" not in kinds, cell.outputs
         assert any("image/png" in o.get("data", {}) for o in cell.outputs)
+    finally:
+        if window.notebook_window is not None:
+            window.notebook_window.hide()
+        window.setWindowModified(False)
+        window.close()
+
+
+def test_real_kernel_redraws_a_changed_graph(app, sheet, dialogs):
+    window = MainWindow()
+    window.model.set_cells({key: sheet.get_cell(*key) for key in block(0, 0, 3, 2)})
+    try:
+        window.view.select_range(0, 0, 3, 1)
+        graph_id = window.send_graph_to_notebook()
+        nb = window.notebook_window
+        assert wait_for(lambda: not nb.running)
+        nb.restart()  # forgets df
+        assert wait_for(lambda: nb.status.text() == "Python: idle")
+        window.view.select_range(10, 0, 12, 2)
+        dialogs.graph_change_answer = (0, "scatter", "D")
+        window.send_graph_to_notebook()
+        assert wait_for(lambda: not nb.running)
+        outputs = window.notebook.cell(graph_id).outputs
+        assert "error" not in [o["output_type"] for o in outputs], outputs
+        assert any("image/png" in o.get("data", {}) for o in outputs)
     finally:
         if window.notebook_window is not None:
             window.notebook_window.hide()

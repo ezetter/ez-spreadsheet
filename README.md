@@ -214,6 +214,26 @@ dialog appears.
   notebook. `graph` is Seaborn's FacetGrid, so later cells can adjust it, for
   example `graph.set(title='Sales')` followed by `graph.figure`.
 
+### Changing a graph
+
+To change a graph that's already in the notebook, choose Graph with no data
+selected (click an empty cell first). The Graph dialog then has a **Graph**
+list of the notebook's graphs, named for their DataFrame and columns, such as
+"df2: Sales and Cost against Month". It starts at the graph in the current
+notebook cell, or else the newest one, and choosing a graph shows its type and
+marker. Change them and click OK:
+
+- Only `kind=` and `marker=` in the graph's code change, so anything else you
+  changed in the cell stays. It's an edit in the cell, so Cmd+Z there brings
+  back the old code.
+- The cell runs again to redraw the graph. If Python has restarted since its
+  DataFrame was made (or the sheet was opened since), the DataFrame's cell runs
+  first.
+- Any cell drawing one `sns.relplot(...)` graph counts, including ones you
+  write, as long as its `kind=` and `marker=`, if it has them, are written out,
+  such as `kind='line'` and `marker='o'`.
+- If the notebook has no graphs, the status bar says so.
+
 ### Working in the notebook
 
 View > Notebook opens the notebook at any time.

@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QShortcut,
     QSyntaxHighlighter,
     QTextCharFormat,
+    QTextCursor,
     QTextDocument,
 )
 from PySide6.QtWidgets import (
@@ -291,6 +292,7 @@ class NotebookWindow(QWidget):
         self.widgets: dict[str, CellWidget] = {}
         self.current_id: str | None = None
         self.running: set[str] = set()  # cells queued or running
+        self.ran: set[str] = set()  # cells run without error by the current Python process
 
         self.toolbar = QToolBar()
         self.actions_by_name = {}
@@ -387,6 +389,7 @@ class NotebookWindow(QWidget):
             widget.deleteLater()
         self.widgets.clear()
         self.running.clear()
+        self.ran.clear()
         self.current_id = None
         for position, cell in enumerate(self.notebook.cells):
             self._on_cell_added(cell.id, position)
@@ -407,6 +410,7 @@ class NotebookWindow(QWidget):
         if widget is not None:
             widget.deleteLater()
         self.running.discard(cell_id)
+        self.ran.discard(cell_id)
         if self.current_id == cell_id:
             self.current_id = None
 
@@ -447,6 +451,13 @@ class NotebookWindow(QWidget):
         if self.notebook.cells:
             self.set_current(self.notebook.cells[min(position, len(self.notebook.cells) - 1)].id, focus=True)
 
+    def replace_source(self, cell_id: str, source: str) -> None:
+        """Change a cell's code as an edit in its editor, so Undo there brings
+        the old code back."""
+        cursor = self.widgets[cell_id].editor.textCursor()
+        cursor.select(QTextCursor.Document)
+        cursor.insertText(source)
+
     def move_current(self, offset: int) -> None:
         if self.current_id is not None:
             self.notebook.move_cell(self.current_id, offset)
@@ -467,6 +478,13 @@ class NotebookWindow(QWidget):
                 self.set_current(cell_id)
                 self.add_cell_below()
 
+    def run_needing(self, cell_id: str, needed: str | None) -> None:
+        """Run a cell, first running the `needed` cell (such as the one making
+        a graph's DataFrame) if the current Python process hasn't run it."""
+        if needed is not None and needed not in self.ran and needed not in self.running:
+            self.run_cell(needed)
+        self.run_cell(cell_id)
+
     def run_current(self, advance: bool = False) -> None:
         if self.current_id is not None:
             self.run_cell(self.current_id, advance)
@@ -479,14 +497,17 @@ class NotebookWindow(QWidget):
         self.kernel.interrupt()
 
     def restart(self) -> None:
+        self.ran.clear()  # now, as cells asked for before the new process starts will run in it
         self.kernel.restart()
 
     def _on_output(self, cell_id: str, output: dict) -> None:
         if cell_id in self.widgets:
             self.notebook.add_output(cell_id, output)
 
-    def _on_finished(self, cell_id: str, count, _status: str) -> None:
+    def _on_finished(self, cell_id: str, count, status: str) -> None:
         self.running.discard(cell_id)
+        if status == "ok":
+            self.ran.add(cell_id)
         if cell_id in self.widgets:
             self.notebook.set_execution_count(cell_id, count)
 
@@ -495,6 +516,8 @@ class NotebookWindow(QWidget):
         self._on_cell_updated(cell_id)
 
     def _on_kernel_state(self, state: str) -> None:
+        if state == "starting":  # a new Python process, with none of the old one's variables
+            self.ran.clear()
         self._state_text = STATUS_TEXT.get(state, state)
         self._zoom_message.stop()
         self.status.setText(self._state_text)

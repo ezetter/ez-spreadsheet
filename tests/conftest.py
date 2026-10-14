@@ -26,6 +26,8 @@ class Dialogs:
         self.delete_problems = None
         self.graph_answer = ("line", None)  # the Graph dialog's (kind, marker); None cancels
         self.graph_prompts = []  # (x label, y labels, the choices it started with) each time it's shown
+        self.graph_change_answer = None  # changing a graph: (which, kind, marker); None cancels
+        self.graph_change_prompts = []  # (the graphs offered, the one it started with)
 
 
 @pytest.fixture(autouse=True)
@@ -66,5 +68,11 @@ def dialogs(monkeypatch):
         return dialogs.graph_answer
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
+
+    def ask_graph_change(window, graphs, current):
+        dialogs.graph_change_prompts.append((list(graphs), current))
+        return dialogs.graph_change_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_graph_change", ask_graph_change)
     monkeypatch.setattr(MainWindow, "_show_error", lambda window, text, detail: dialogs.errors.append(detail))
     return dialogs

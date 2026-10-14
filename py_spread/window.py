@@ -39,7 +39,8 @@ from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .kernel import KernelRunner
-from .graph_dialog import GraphDialog
+from .graph_dialog import GraphDialog, graph_labels
+from .graphs import change_graph, find_graphs, frame_cell
 from .notebook import (
     GraphError,
     Notebook,
@@ -1020,8 +1021,7 @@ class MainWindow(QMainWindow):
         self._commit_pending_edit()
         cells = data_block(self.model, self._selected_cells())
         if not cells:
-            self._show_status("The selection is empty. Select cells with data to graph them.")
-            return None
+            return self.change_notebook_graph()
         try:
             x_label, y_labels = graph_columns(self.model, cells)
         except GraphError as e:
@@ -1036,6 +1036,39 @@ class MainWindow(QMainWindow):
         _frame_id, graph_id = self._run_in_notebook([dataframe_code(self.model, cells, name), graph])
         self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
         return graph_id
+
+    def change_notebook_graph(self) -> str | None:
+        """Graph with no data selected: choose one of the notebook's graphs in
+        the Graph dialog, which starts with its type and marker, and redraw it
+        with the ones chosen. Returns its cell id, or None if there are no
+        graphs or the dialog was cancelled."""
+        graphs = find_graphs(self.notebook)
+        if not graphs:
+            self._show_status("The selection is empty, and the notebook has no graphs to change. "
+                              "Select cells with data to graph them.")
+            return None
+        ids = [graph.cell_id for graph in graphs]
+        current_id = self.notebook_window.current_id if self.notebook_window is not None else None
+        choice = self._ask_graph_change(graphs, ids.index(current_id) if current_id in ids else len(ids) - 1)
+        if choice is None:
+            return None
+        index, kind, marker = choice
+        graph = graphs[index]
+        source = change_graph(self.notebook.cell(graph.cell_id).source, kind, marker)
+        window = self.show_notebook()
+        window.replace_source(graph.cell_id, source)
+        window.set_current(graph.cell_id, focus=True)
+        # After a restart, or in a reopened sheet, the DataFrame has to be made again first.
+        window.run_needing(graph.cell_id, frame_cell(self.notebook, graph.cell_id, graph.frame))
+        self._show_status(f"Redrawing the graph {graph_labels(graphs)[index]}.")
+        return graph.cell_id
+
+    def _ask_graph_change(self, graphs, current: int) -> tuple[int, str, str | None] | None:
+        """The Graph dialog for changing a graph: (which, kind, marker), or None if cancelled."""
+        dialog = GraphDialog(self, graphs=graphs, current=current)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.chosen_graph(), dialog.kind(), dialog.marker()
 
     def _ask_graph_options(self, x_label: str, y_labels: list[str]) -> tuple[str, str | None] | None:
         """The Graph dialog: (kind, marker), or None if cancelled."""
