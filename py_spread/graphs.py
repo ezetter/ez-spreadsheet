@@ -1,30 +1,36 @@
 """The notebook's graphs: finding cells that draw a Seaborn graph (one
-sns.relplot call), reading their type and marker, and changing them in the
-code, for the Graph dialog.
+sns.relplot or sns.catplot call), reading what they draw, and changing it,
+for the Graph dialog.
 
-Only the kind= and marker= arguments are touched, so anything else changed
-by hand in a graph's cell stays as it is.
+Changing a graph's type or marker touches only kind=, marker=, and which of
+relplot and catplot draws it, so anything else changed by hand in its cell
+stays. Changing its columns writes the cell afresh, from the data in the
+DataFrame's own cell.
 """
 
 import ast
 import re
 from dataclasses import dataclass, field
 
-KINDS = ("line", "scatter")
-DEFAULT_KIND = "scatter"  # relplot's kind when none is given
+from .notebook import CATEGORICAL, GRAPH_KINDS, FrameData, GraphColumns, GraphError
+
+FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip",)}  # the kinds each draws here
+DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip"}  # their kind when none is given
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a graph\b", re.M)  # as graph_code writes it
-_OTHER_KIND = re.compile(r"#\s*or\s*(['\"])(line|scatter)\1")  # graph_code's "# or 'scatter'"
+_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter)\1[^\n]*")  # graph_code's "# or 'scatter'"
 _NOT_LITERAL = object()
 
 
 @dataclass
 class GraphCell:
     cell_id: str
-    kind: str  # "line" or "scatter"
+    kind: str  # one of GRAPH_KINDS
     marker: str | None
     frame: str | None = None  # the DataFrame it graphs, if known
     x_label: str | None = None
     y_labels: list[str] = field(default_factory=list)
+    data: FrameData | None = None  # the DataFrame's data, from its cell, if found
+    columns: GraphColumns | None = None  # what can go across and up, given the data
 
     @property
     def title(self) -> str:
@@ -43,27 +49,36 @@ class GraphCell:
 
 def find_graphs(notebook) -> list[GraphCell]:
     """The notebook's graph cells whose type and marker can be changed, top
-    to bottom."""
+    to bottom, each with its DataFrame's data if its cell is found."""
     graphs = []
     for cell in notebook.cells:
         graph = read_graph(cell.source)
         if graph is not None:
             graph.cell_id = cell.id
+            made = frame_cell(notebook, cell.id, graph.frame)
+            graph.data = frame_data(notebook.cell(made).source, graph.frame) if made else None
+            if graph.data is not None:
+                try:
+                    graph.columns = GraphColumns.of(graph.data)
+                except GraphError:
+                    graph.data = None
             graphs.append(graph)
     return graphs
 
 
 def read_graph(source: str) -> GraphCell | None:
     """The graph a cell's code draws, or None if it doesn't draw exactly one
-    relplot graph with a line or scatter kind and a plain marker."""
-    found = _relplot(source)
+    relplot or catplot graph of a kind the Graph dialog has, with a plain
+    marker."""
+    found = _plot_call(source)
     if found is None:
         return None
     tree, call = found
+    function = call.func.attr
     keywords = {k.arg: k.value for k in call.keywords if k.arg}
-    kind = _literal(keywords["kind"]) if "kind" in keywords else DEFAULT_KIND
+    kind = _literal(keywords["kind"]) if "kind" in keywords else DEFAULT_KINDS[function]
     marker = _literal(keywords["marker"]) if "marker" in keywords else None
-    if kind not in KINDS or not (marker is None or isinstance(marker, str) and marker):
+    if kind not in FUNCTION_KINDS[function] or not (marker is None or isinstance(marker, str) and marker):
         return None
     graph = GraphCell("", kind, marker, frame=_frame_name(source, tree))
     x, y = _literal(keywords.get("x")), _literal(keywords.get("y"))
@@ -77,25 +92,33 @@ def read_graph(source: str) -> GraphCell | None:
 
 def change_graph(source: str, kind: str, marker: str | None) -> str:
     """The cell's code with its graph's kind and marker changed (no marker:
-    marker= is taken out)."""
-    if kind not in KINDS:
-        raise ValueError(f"kind must be 'line' or 'scatter', not {kind!r}")
+    marker= is taken out), switching between relplot and catplot as the kind
+    needs."""
+    if kind not in GRAPH_KINDS:
+        raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     if read_graph(source) is None:
         raise ValueError("the code doesn't draw a graph that can be changed")
-    _tree, call = _relplot(source)
+    _tree, call = _plot_call(source)
     at = _Positions(source)
     keywords = {k.arg: k for k in call.keywords if k.arg}
     edits = []  # (start, end, new text), applied from the end backward
 
+    function = "catplot" if kind in CATEGORICAL else "relplot"
+    if call.func.attr != function:
+        end = at(call.func.end_lineno, call.func.end_col_offset)
+        edits.append((end - len(call.func.attr), end, function))
+
+    other = {"line": "  # or 'scatter'", "scatter": "  # or 'line'"}.get(kind, "")
     if "kind" in keywords:
         value = keywords["kind"].value
         start, end = at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset)
         edits.append((start, end, repr(kind)))
         line_end = _line_end(source, end)
         comment = _OTHER_KIND.search(source, end, line_end)
-        if comment:  # "# or 'scatter'" now names the other kind
-            other = KINDS[1 - KINDS.index(kind)]
-            edits.append((comment.start(), comment.end(), f"# or {other!r}"))
+        if comment:  # "# or 'scatter'" names the other kind, or goes for a categorical scatter
+            edits.append((comment.start(), comment.end(), other))
+        elif other and call.func.attr != function and re.fullmatch(r",[ \t]*", source[end:line_end]):
+            edits.append((line_end, line_end, other))  # from a categorical scatter, in graph_code's layout
     else:
         paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
         edits.append((paren + 1, paren + 1, f"kind={kind!r}, "))
@@ -119,8 +142,9 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
             spot = comma.end() if comma else kind_end
             edits.append((spot, spot, f" marker={marker!r}," if comma else f", marker={marker!r}"))
         else:  # kind was just added after the parenthesis; the marker goes with it
-            start, end, text = edits[0]
-            edits[0] = (start, end, f"{text}marker={marker!r}, ")
+            index = next(i for i, edit in enumerate(edits) if edit[2].startswith("kind="))
+            start, end, text = edits[index]
+            edits[index] = (start, end, f"{text}marker={marker!r}, ")
 
     for start, end, text in sorted(edits, key=lambda edit: edit[0], reverse=True):
         source = source[:start] + text + source[end:]
@@ -140,16 +164,41 @@ def frame_cell(notebook, graph_cell_id: str, frame: str | None) -> str | None:
     return next((cell.id for cell in reversed(above) if assigns.search(cell.source)), None)
 
 
+def frame_data(source: str, frame: str) -> FrameData | None:
+    """The data a DataFrame cell writes out, as dataframe_code does it
+    (`df = pd.DataFrame({'Month': [...], ...})`), if it's written plainly."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    made = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == frame and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "DataFrame"
+                and len(node.value.args) == 1):
+            made = node  # the last one counts
+    if made is None:
+        return None
+    table = _literal(made.value.args[0])
+    if (not isinstance(table, dict) or not table or not all(isinstance(k, str) for k in table)
+            or not all(isinstance(v, list) for v in table.values())
+            or len({len(v) for v in table.values()}) != 1):
+        return None
+    return FrameData(list(table), [list(column) for column in table.values()])
+
+
 # --- Reading the code ---
 
-def _relplot(source: str):
-    """(tree, the call) for the code's one relplot(...) call, or None."""
+def _plot_call(source: str):
+    """(tree, the call) for the code's one relplot(...) or catplot(...) call, or None."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
     calls = [node for node in ast.walk(tree)
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "relplot"]
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr in FUNCTION_KINDS]
     return (tree, calls[0]) if len(calls) == 1 else None
 
 
@@ -158,7 +207,7 @@ def _literal(node):
         return None
     try:
         return ast.literal_eval(node)
-    except (ValueError, TypeError, SyntaxError):
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return _NOT_LITERAL
 
 

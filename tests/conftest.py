@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from py_spread.notebook import GraphChoice
 from py_spread.window import MainWindow
 
 
@@ -24,9 +25,11 @@ class Dialogs:
         self.insert_problems = None  # the choices it was told to disable
         self.delete_shift = "up"  # likewise for the Delete Cells dialog
         self.delete_problems = None
-        self.graph_answer = ("line", None)  # the Graph dialog's (kind, marker); None cancels
-        self.graph_prompts = []  # (x label, y labels, the choices it started with) each time it's shown
-        self.graph_change_answer = None  # changing a graph: (which, kind, marker); None cancels
+        # The Graph dialog's (kind, marker), or (kind, marker, x, ys); None cancels. Axes left out
+        # are the defaults (for a new graph) or the graph's own (when changing one).
+        self.graph_answer = ("line", None)
+        self.graph_prompts = []  # (the column labels, the choices it started with) each time it's shown
+        self.graph_change_answer = None  # changing a graph: (which, kind, marker[, x, ys]); None cancels
         self.graph_change_prompts = []  # (the graphs offered, the one it started with)
         self.load_answer = None  # Load Data to Sheet: the DataFrame's name; None cancels
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
@@ -65,15 +68,24 @@ def dialogs(monkeypatch):
 
     monkeypatch.setattr(MainWindow, "_ask_delete_shift", ask_delete_shift)
 
-    def ask_graph_options(window, x_label, y_labels):
-        dialogs.graph_prompts.append((x_label, list(y_labels), (window.graph_kind, window.graph_marker)))
-        return dialogs.graph_answer
+    def ask_graph_options(window, columns):
+        dialogs.graph_prompts.append((list(columns.labels), (window.graph_kind, window.graph_marker)))
+        if dialogs.graph_answer is None:
+            return None
+        kind, marker, *axes = dialogs.graph_answer
+        x = axes[0] if axes else columns.default_x(kind)
+        return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x))
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
 
     def ask_graph_change(window, graphs, current):
         dialogs.graph_change_prompts.append((list(graphs), current))
-        return dialogs.graph_change_answer
+        if dialogs.graph_change_answer is None:
+            return None
+        index, kind, marker, *axes = dialogs.graph_change_answer
+        graph = graphs[index]
+        return index, GraphChoice(kind, marker, axes[0] if axes else graph.x_label,
+                                  axes[1] if len(axes) > 1 else graph.y_labels)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_change", ask_graph_change)
 

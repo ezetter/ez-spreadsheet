@@ -4,9 +4,9 @@ import itertools
 import pytest
 
 from py_spread.graph_dialog import GraphDialog, graph_labels
-from py_spread.graphs import GraphCell, change_graph, find_graphs, frame_cell, read_graph
+from py_spread.graphs import GraphCell, change_graph, find_graphs, frame_cell, frame_data, read_graph
 from py_spread.model import SheetModel
-from py_spread.notebook import Notebook, graph_code
+from py_spread.notebook import FrameData, GraphColumns, Notebook, dataframe_code, graph_code
 
 
 @pytest.fixture
@@ -21,7 +21,8 @@ def cells(columns: int):
     return {(row, col) for row in range(3) for col in range(columns)}
 
 
-SETTINGS = [("line", None), ("line", "o"), ("line", "*"), ("scatter", None), ("scatter", "D")]
+SETTINGS = [("line", None), ("line", "o"), ("line", "*"), ("scatter", None), ("scatter", "D"),
+            ("strip", None), ("strip", "s")]
 
 
 def test_reads_generated_graphs(sales):
@@ -137,4 +138,58 @@ def test_marker_the_list_lacks(app):
 
 
 def test_new_graphs_have_no_graph_list(app):
-    assert GraphDialog(None, "x", ["y"]).chosen_graph() is None
+    columns = GraphColumns(["x", "y"], [True, True], [False, False])
+    assert GraphDialog(None, columns).chosen_graph() is None
+
+
+# --- Categorical scatter, and the data behind a graph ---
+
+def test_reads_categorical_scatters(sales):
+    code = graph_code(sales, cells(3), "df", "strip", "D", x="Month", ys=["Sales"])
+    assert "graph = sns.catplot(" in code and "    kind='strip',\n" in code
+    graph = read_graph(code)
+    assert (graph.kind, graph.marker, graph.x_label, graph.y_labels) == ("strip", "D", "Month", ["Sales"])
+    assert read_graph("sns.catplot(data=d, x='a', y='b')").kind == "strip"  # catplot's default
+    assert read_graph("sns.catplot(data=d, x='a', y='b', kind='box')") is None  # not one the dialog has
+
+
+def test_switches_between_relplot_and_catplot(sales):
+    line = graph_code(sales, cells(3), "df", "line", None)
+    strip = change_graph(line, "strip", "o")
+    assert "sns.catplot(" in strip and "kind='strip',\n" in strip and "# or" not in strip
+    assert change_graph(strip, "line", None) == line
+
+
+def test_frame_data_from_a_dataframe_cell(sales):
+    code = dataframe_code(sales, cells(3), "df2")
+    data = frame_data(code, "df2")
+    assert data.labels == ["Month", "Sales", "Cost"] and data.columns[2] == [2, "x"]
+    assert frame_data(code, "df") is None
+    assert frame_data("df = pd.DataFrame(rows)", "df") is None  # not written out
+    assert frame_data("df = pd.DataFrame({'a': [1], 'b': [1, 2]})", "df") is None  # uneven
+
+
+def test_found_graphs_know_their_data(sales, app):
+    notebook = Notebook()
+    notebook.add_cell(dataframe_code(sales, cells(3)))
+    notebook.add_cell(graph_code(sales, cells(3)))
+    notebook.add_cell("sns.relplot(data=other, x='a', y='b', kind='line')")  # its DataFrame's not here
+    made, lost = find_graphs(notebook)
+    assert made.data.labels == ["Month", "Sales", "Cost"] and made.columns.numbers == [False, True, True]
+    assert lost.data is None and lost.columns is None
+
+
+def test_changing_dialog_shows_the_graphs_columns(app):
+    columns = GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False])
+    graph = GraphCell("a", "strip", "D", "df", "Month", ["Cost"], FrameData(["Month", "Sales", "Cost"], []), columns)
+    dialog = GraphDialog(None, graphs=[graph])
+    assert (dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()) == ("strip", "Month", ["Cost"], "D")
+    assert dialog.x_box.isEnabled() and dialog.y_box.count() == 3
+    dialog.kind_box.setCurrentIndex(0)
+    assert dialog.x() == "Month" and dialog.ys() == ["Cost"]  # a graph's own columns stay put
+
+
+def test_changing_dialog_without_the_data(app):
+    dialog = GraphDialog(None, graphs=[GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"])])
+    assert not dialog.x_box.isEnabled() and not dialog.y_box.isEnabled()
+    assert dialog.choice().x == "Month" and dialog.ys() == ["Sales", "Cost"]

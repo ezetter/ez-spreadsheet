@@ -15,6 +15,7 @@ from py_spread.notebook import (
     Notebook,
     NotebookFormatError,
     IMPORTS_CELL,
+    GraphColumns,
     GraphError,
     cells_from_json,
     data_block,
@@ -24,7 +25,7 @@ from py_spread.notebook import (
     importing_cell,
     next_frame_name,
 )
-from py_spread.graph_dialog import MARKERS, GraphDialog, describe
+from py_spread.graph_dialog import MARKERS, GraphDialog
 from py_spread.notebook_window import NotebookWindow, OutputView
 from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
 from py_spread.window import MainWindow
@@ -221,50 +222,119 @@ def test_cells_that_cant_be_graphed(sales, cells, problem):
         graph_columns(sales, cells)
 
 
+def test_categorical_scatter(pyplot, app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "Width", (0, 1): "Species", (0, 2): "Length",
+                     (1, 0): "1", (1, 1): "b", (1, 2): "4", (2, 0): "2", (2, 1): "a", (2, 2): "5",
+                     (3, 0): "3", (3, 1): "b", (3, 2): "6"})
+    columns = graph_columns(model, block(0, 0, 3, 2))
+    assert columns.default_x("strip") == "Species" and columns.default_x("line") == "Width"
+    code = graph_code(model, block(0, 0, 3, 2), "df", "strip", "D", x="Species")
+    assert "sns.catplot(" in code and "x='Species', y='Value', hue='Series'" in code
+    assert "# df as a graph: 'Width' and 'Length' against 'Species'." in code
+    namespace = {}
+    exec(dataframe_code(model, block(0, 0, 3, 2)), namespace)
+    exec(code, namespace)
+    g = namespace["graph"]
+    assert [t.get_text() for t in g.ax.get_xticklabels()] == ["b", "a"]  # categories in the sheet's order
+    assert [t.get_text() for t in g.legend.texts] == ["Width", "Length"]
+
+
+def test_chosen_axes(sales, pyplot):
+    code = graph_code(sales, block(0, 0, 3, 2), "df", "line", None, x="Sales", ys=["Cost"])
+    assert "x='Sales', y='Cost'" in code and "pd.to_numeric(data['Cost']" in code  # Cost has n/a
+    g = graph(sales, block(0, 0, 3, 2), "scatter", None)
+    assert g.ax.get_xlabel() == "Month"
+    with pytest.raises(ValueError):
+        graph_code(sales, block(0, 0, 3, 2), "df", "line", None, x="Sales", ys=["Sales"])  # x up too
+    with pytest.raises(ValueError):
+        graph_code(sales, block(0, 0, 3, 2), "df", "line", None, x="Month", ys=["Nope"])
+
+
+def test_x_with_the_only_numbers_goes_up_instead(app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "n", (0, 1): "t", (1, 0): "1", (1, 1): "a", (2, 0): "2", (2, 1): "b"})
+    columns = graph_columns(model, block(0, 0, 2, 1))
+    assert columns.default_x("line") == "t" and columns.default_ys("t") == ["n"]
+
+
 def test_graph_columns(sales):
-    assert graph_columns(sales, block(0, 0, 3, 2)) == ("Month", ["Sales", "Cost"])
+    assert graph_columns(sales, block(0, 0, 3, 2)) == GraphColumns(
+        ["Month", "Sales", "Cost"], [False, True, True], [True, False, True])  # Cost has n/a
 
 
 # --- The Graph dialog ---
 
-def test_dialog_starts_with_line_and_no_marker(app):
-    dialog = GraphDialog(None, "Month", ["Sales", "Cost"])
-    assert (dialog.kind(), dialog.marker()) == ("line", None)
+def sales_columns():
+    return GraphColumns(["Month", "Sales", "Cost", "Note"], [False, True, True, False], [True, False, False, True])
+
+
+def dialog_state(dialog):
+    return dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()
+
+
+def test_dialog_starts_with_defaults(app):
+    dialog = GraphDialog(None, sales_columns())
+    assert dialog_state(dialog) == ("line", "Month", ["Sales", "Cost"], None)
+    assert [dialog.kind_box.itemText(i) for i in range(3)] == ["Line", "Scatter", "Categorical scatter"]
     assert [dialog.marker_box.itemData(i) for i in range(dialog.marker_box.count())] == list(MARKERS)
-    assert dialog.findChild(QLabel).text() == "Graph Sales and Cost against Month."
+    assert [dialog.x_box.itemText(i) for i in range(4)] == ["Month", "Sales", "Cost", "Note"]
+    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == [
+        "All other columns with numbers", "Sales", "Cost"]  # Note has no numbers
 
 
 def test_dialog_starts_with_the_last_choices(app):
-    dialog = GraphDialog(None, "x", ["y"], "scatter", "D")
-    assert (dialog.kind(), dialog.marker()) == ("scatter", "D")
+    dialog = GraphDialog(None, sales_columns(), "scatter", "D")
+    assert dialog_state(dialog) == ("scatter", "Month", ["Sales", "Cost"], "D")
+
+
+def test_choosing_the_axes(app):
+    dialog = GraphDialog(None, sales_columns())
+    dialog.y_box.setCurrentIndex(2)
+    dialog.y_box.activated.emit(2)  # as the user's choice is
+    assert dialog.ys() == ["Cost"]
+    dialog.x_box.setCurrentIndex(1)  # Sales across
+    assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["Cost"]
+    assert dialog.ys() == ["Cost"]
+    dialog.x_box.setCurrentIndex(2)  # Cost across: Cost can't go up too
+    assert dialog.ys() == ["Sales"] and dialog.choice().x == "Cost"
+
+
+def test_categorical_scatter_takes_a_text_column_across(app):
+    columns = GraphColumns(["Width", "Species", "Length"], [True, False, True], [False, True, False])
+    dialog = GraphDialog(None, columns)
+    assert dialog_state(dialog) == ("line", "Width", ["Length"], None)
+    dialog.kind_box.setCurrentIndex(2)
+    assert dialog_state(dialog) == ("strip", "Species", ["Width", "Length"], "o")  # needs markers
+    assert not dialog.marker_box.model().item(0).isEnabled()
+    dialog.kind_box.setCurrentIndex(0)
+    assert dialog_state(dialog) == ("line", "Width", ["Length"], None)  # it follows the type...
+    dialog.x_box.setCurrentIndex(2)
+    dialog.x_box.activated.emit(2)  # ...until the user picks the x
+    dialog.kind_box.setCurrentIndex(2)
+    assert dialog.x() == "Length"
 
 
 def test_scatter_needs_a_marker(app):
-    dialog = GraphDialog(None, "x", ["y"])
+    dialog = GraphDialog(None, sales_columns())
     none = dialog.marker_box.model().item(0)
-    dialog.kind_buttons["scatter"].setChecked(True)
+    dialog.kind_box.setCurrentIndex(1)
     assert dialog.marker() == "o" and not none.isEnabled()  # circles in place of None
-    dialog.kind_buttons["line"].setChecked(True)
+    dialog.kind_box.setCurrentIndex(0)
     assert dialog.marker() is None and none.isEnabled()  # and back
 
 
 def test_chosen_marker_stays(app):
-    dialog = GraphDialog(None, "x", ["y"])
-    dialog.kind_buttons["scatter"].setChecked(True)
+    dialog = GraphDialog(None, sales_columns())
+    dialog.kind_box.setCurrentIndex(1)
     dialog.marker_box.setCurrentIndex(dialog.marker_box.findData("s"))
     dialog.marker_box.activated.emit(dialog.marker_box.currentIndex())  # as a choice by the user does
-    dialog.kind_buttons["line"].setChecked(True)
+    dialog.kind_box.setCurrentIndex(0)
     assert (dialog.kind(), dialog.marker()) == ("line", "s")
 
 
 def test_scatter_from_the_start_gets_circles(app):
-    dialog = GraphDialog(None, "x", ["y"], "scatter", None)
-    assert dialog.marker() == "o"
-
-
-def test_descriptions():
-    assert describe("x", ["a"]) == "Graph a against x."
-    assert describe("x", ["a", "b", "c"]) == "Graph a, b, and c against x."
+    assert GraphDialog(None, sales_columns(), "scatter", None).marker() == "o"
 
 
 def test_importing_cells(app):
@@ -692,7 +762,7 @@ def test_kernel_starts_in_sheets_folder(app, tmp_path):
 def test_graph_from_the_notebook_menu(window, dialogs):
     window.view.select_range(0, 0, window.model.rowCount() - 1, 1)  # columns A and B: Month, Sales
     window.graph_action.trigger()
-    assert dialogs.graph_prompts == [("Month", ["Sales"], ("line", None))]
+    assert dialogs.graph_prompts == [(["Month", "Sales"], ("line", None))]
     imports, frame_cell, graph_cell = window.notebook.cells
     assert [run[0] for run in window.kernel.runs] == [imports.id, frame_cell.id, graph_cell.id]  # in order
     assert frame_cell.source == dataframe_code(window.model, block(0, 0, 3, 1), "df", import_pandas=False)
@@ -707,7 +777,7 @@ def test_graph_from_the_notebook_menu(window, dialogs):
     source = window.notebook.cells[-1].source
     assert "df2 as a graph" in source and "kind='scatter'" in source and "marker='s'" in source
     window.graph_action.trigger()
-    assert dialogs.graph_prompts[-1][2] == ("scatter", "s")  # the dialog starts from the last choices
+    assert dialogs.graph_prompts[-1][1] == ("scatter", "s")  # the dialog starts from the last choices
 
 
 def test_cancelling_the_graph_dialog(window, dialogs):
@@ -831,9 +901,33 @@ def test_one_column_changes_a_graph(window, dialogs, selection):
     window.view.select_range(*selection)
     dialogs.graph_change_answer = (0, "scatter", "x")
     assert window.send_graph_to_notebook() == graph_id
-    assert dialogs.graph_prompts == [("Month", ["Sales"], ("line", None))]  # only the first graph's
+    assert dialogs.graph_prompts == [(["Month", "Sales"], ("line", None))]  # only the first graph's
     assert len(dialogs.graph_change_prompts) == 1 and len(window.notebook.cells) == cells_before
     assert "marker='x'" in window.notebook.cell(graph_id).source
+
+
+def test_change_a_graphs_columns(window, dialogs):
+    graph_id = make_graph(window, columns=2)  # Month, Sales, Note
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "strip", "D", "Month", ["Sales"])
+    window.send_graph_to_notebook()
+    [(graphs, _)] = dialogs.graph_change_prompts
+    assert graphs[0].columns.labels == ["Month", "Sales", "Note"]  # from the DataFrame's cell
+    source = window.notebook.cell(graph_id).source
+    assert source == graph_code(window.model, block(0, 0, 3, 2), "df", "strip", "D", x="Month", ys=["Sales"],
+                                import_pandas=False, import_seaborn=False)
+    assert window.kernel.runs[-1][0] == graph_id
+
+
+def test_type_change_keeps_hand_edits(window, dialogs):
+    graph_id = make_graph(window)
+    nb = window.notebook_window
+    nb.replace_source(graph_id, window.notebook.cell(graph_id).source.replace("height=4", "height=7"))
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "strip", "o")  # same columns
+    window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "sns.catplot(" in source and "height=7" in source
 
 
 def test_cancel_changes_nothing(window, dialogs):
@@ -1000,6 +1094,27 @@ def test_real_kernel_redraws_a_changed_graph(app, sheet, dialogs):
         outputs = window.notebook.cell(graph_id).outputs
         assert "error" not in [o["output_type"] for o in outputs], outputs
         assert any("image/png" in o.get("data", {}) for o in outputs)
+    finally:
+        if window.notebook_window is not None:
+            window.notebook_window.hide()
+        window.setWindowModified(False)
+        window.close()
+
+
+def test_real_kernel_draws_a_categorical_scatter(app, dialogs):
+    window = MainWindow()
+    window.model.set_cells({(0, 0): "Species", (0, 1): "Width", (1, 0): "a", (1, 1): "1.5",
+                            (2, 0): "b", (2, 1): "2", (3, 0): "a", (3, 1): "1.7"})
+    dialogs.graph_answer = ("strip", "D")
+    try:
+        window.view.select_range(0, 0, 3, 1)
+        graph_id = window.send_graph_to_notebook()
+        nb = window.notebook_window
+        assert wait_for(lambda: not nb.running)
+        outputs = window.notebook.cell(graph_id).outputs
+        assert "error" not in [o["output_type"] for o in outputs], outputs
+        assert any("image/png" in o.get("data", {}) for o in outputs)
+        assert "sns.catplot(" in window.notebook.cell(graph_id).source
     finally:
         if window.notebook_window is not None:
             window.notebook_window.hide()

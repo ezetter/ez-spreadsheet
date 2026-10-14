@@ -184,13 +184,12 @@ df
 
 ### Graphing cells
 
-Graph asks for the kind of graph and its markers, then does the same as
-DataFrame and adds a second cell that graphs the DataFrame with Seaborn, the
-way a chart of the cells is drawn. Both cells run, so the table shows and then
-the graph:
+Graph asks what kind of graph to make, of which columns, then does the same as
+DataFrame and adds a second cell that graphs the DataFrame with Seaborn. Both
+cells run, so the table shows and then the graph:
 
 ```python
-# df as a graph: its first column across, the others up.
+# df as a graph: 'Sales' and 'Cost' against 'Month'.
 sns.set_theme(style='whitegrid')
 long = df.melt(id_vars=['Month'], value_vars=['Sales', 'Cost'], var_name='Series', value_name='Value')
 graph = sns.relplot(
@@ -200,29 +199,39 @@ graph = sns.relplot(
 )
 ```
 
-The Graph dialog says what it will graph ("Graph Sales and Cost against
-Month.") and has two choices:
+The Graph dialog has these choices:
 
-- **Graph type:** Line or Scatter.
+- **Graph type:** Line, Scatter, or Categorical scatter. Line and Scatter are
+  drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
+  a column of categories (text such as species or months) across and jitters
+  each category's points so they don't all sit on one line.
+- **X axis:** any of the selected columns. Text in it gives categories, in
+  the sheet's order.
+- **Y axis:** one of the other columns with numbers, or **All other columns
+  with numbers**, which graphs each as its own series, named in the legend
+  (a single series is named on the y axis).
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
-  Diamond, Triangle up, Triangle down, Plus, Cross, or Star. A scatter graph
-  needs markers to show its points, so None isn't available for it: choosing
-  Scatter switches None to Circle, and choosing Line again switches it back.
+  Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter graphs
+  need markers to show their points, so None isn't available for them:
+  choosing one switches None to Circle, and choosing Line again switches it
+  back.
 
-The dialog starts from your last choices while EzSheet is open. Cancel adds
-nothing. If the cells can't be graphed, the status bar says why before the
-dialog appears.
+The axes start at sensible defaults, as a chart's are: the first column
+across, and all the others with numbers up (a column of text alone can't go
+up). For a categorical scatter, the first column with text goes across
+instead. The defaults follow the graph type until you choose an X axis
+yourself, and the Y axis follows the X axis until you choose it.
 
-- The first selected column is the x axis, and each other column is a series
-  of y values, named by its column label (in the legend, or on the y axis for
-  a single series). Text x values are categories, in the sheet's order.
+The type and marker start from your last choices while EzSheet is open. Cancel
+adds nothing. If the cells can't be graphed (just one column, or no numbers),
+the status bar says why before the dialog appears.
+
 - The choices are in the cell's code too: change `kind='line'` to
   `kind='scatter'`, or add or change `marker='o'` (any Matplotlib marker), and
   run the cell again (Shift+Return).
 - Text in the y columns isn't graphed, and rows without an x value are left
   out. Unlike a chart, a line joins the points on either side of a missing
   value instead of leaving a gap.
-- It needs at least two columns, with some numbers in the y columns.
 - The graph is a picture of the data when the cell ran, saved with the
   notebook. `graph` is Seaborn's FacetGrid, so later cells can adjust it, for
   example `graph.set(title='Sales')` followed by `graph.figure`.
@@ -231,21 +240,27 @@ dialog appears.
 
 To change a graph that's already in the notebook, choose Graph with no data,
 or just one column, selected (clicking any one cell does it). A single column
-can't be graphed, so the Graph dialog then has a **Graph**
-list of the notebook's graphs, named for their DataFrame and columns, such as
-"df2: Sales and Cost against Month". It starts at the graph in the current
-notebook cell, or else the newest one, and choosing a graph shows its type and
-marker. Change them and click OK:
+can't be graphed, so the Graph dialog then has a **Graph** list of the
+notebook's graphs, named for their DataFrame and columns, such as "df2: Sales
+and Cost against Month". It starts at the graph in the current notebook cell,
+or else the newest one, and choosing a graph shows its type, axes, and marker.
+Change them and click OK:
 
-- Only `kind=` and `marker=` in the graph's code change, so anything else you
-  changed in the cell stays. It's an edit in the cell, so Cmd+Z there brings
-  back the old code.
-- The cell runs again to redraw the graph. If Python has restarted since its
-  DataFrame was made (or the sheet was opened since), the imports cell and the
-  DataFrame's cell run first.
-- Any cell drawing one `sns.relplot(...)` graph counts, including ones you
-  write, as long as its `kind=` and `marker=`, if it has them, are written out,
-  such as `kind='line'` and `marker='o'`.
+- Changing only the type or marker changes just `kind=`, `marker=`, and
+  whether `relplot` or `catplot` draws it, so anything else you changed in the
+  cell stays.
+- Changing the axes writes the graph's cell afresh, from the data in its
+  DataFrame's cell, so changes you made to the graph's cell by hand are
+  replaced. The axes can be changed only if that cell is found, written as
+  EzSheet writes it; otherwise they're shown but greyed out.
+- Either way, it's an edit in the cell, so Cmd+Z there brings back the old
+  code. The cell runs again to redraw the graph. If Python has restarted since
+  its DataFrame was made (or the sheet was opened since), the imports cell and
+  the DataFrame's cell run first.
+- Any cell drawing one `sns.relplot(...)` or `sns.catplot(...)` graph of a
+  kind the dialog has counts, including ones you write, as long as its `kind=`
+  and `marker=`, if it has them, are written out, such as `kind='line'` and
+  `marker='o'`.
 - If the notebook has no graphs, the status bar says so, and how to make one.
 
 ### Loading data into the sheet

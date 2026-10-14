@@ -196,17 +196,18 @@ def data_block(model, cells) -> set[tuple[int, int]]:
 
 
 @dataclass
-class _Frame:
-    """The DataFrame that selected cells make: its column labels, and each
-    column's values (below the header row, if there is one)."""
+class FrameData:
+    """A DataFrame's column labels, and each column's values: as selected
+    cells make it (below the header row, if there is one), or as a DataFrame
+    cell's code writes it out."""
 
-    where: str  # the cells' block, such as A1:C4
-    header_row: int | None  # the sheet row giving the column labels
     labels: list[str]
     columns: list[list]
+    where: str = ""  # the cells' block, such as A1:C4
+    header_row: int | None = None  # the sheet row giving the column labels
 
 
-def _frame(model, cells) -> _Frame:
+def _frame(model, cells) -> FrameData:
     rows = sorted({row for row, _ in cells})
     cols = sorted({col for _, col in cells})
 
@@ -227,7 +228,7 @@ def _frame(model, cells) -> _Frame:
             label = f"{label} ({column_name(col)})"  # keep labels unique
         labels.append(label)
     data_rows = rows[1:] if header else rows
-    return _Frame(where=f"{cell_name(rows[0], cols[0])}:{cell_name(rows[-1], cols[-1])}",
+    return FrameData(where=f"{cell_name(rows[0], cols[0])}:{cell_name(rows[-1], cols[-1])}",
                   header_row=rows[0] if header else None, labels=labels,
                   columns=[[value(row, col) for row in data_rows] for col in cols])
 
@@ -256,73 +257,137 @@ def dataframe_code(model, cells, name: str = "df", import_pandas: bool = True) -
 
 # --- Graphing them with Seaborn ---
 
+GRAPH_KINDS = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter"}  # kind -> its name
+CATEGORICAL = {"strip"}  # drawn with catplot, x being categories; the rest with relplot
+NEEDS_MARKERS = {"scatter", "strip"}  # their points are nothing but markers
+
+
 class GraphError(ValueError):
     """The selected cells can't be graphed; the message says why."""
 
 
-def _graph_frame(model, cells) -> _Frame:
-    frame = _frame(model, cells)
-    if len(frame.labels) < 2:
-        raise GraphError("Select at least two columns: the first for x, the others for y.")
-    if not any(isinstance(v, float) for column in frame.columns[1:] for v in column):
-        raise GraphError("There are no numbers to graph in the y columns.")
-    return frame
+@dataclass
+class GraphChoice:
+    """What the Graph dialog chose: the kind of graph, its marker, the x
+    column, and the y columns (more than one: a series each)."""
+
+    kind: str
+    marker: str | None
+    x: str
+    ys: list[str]
 
 
-def graph_columns(model, cells) -> tuple[str, list[str]]:
-    """The labels of the x column and the y columns a graph of the cells
-    would have; GraphError if the cells can't be graphed."""
-    frame = _graph_frame(model, cells)
-    return frame.labels[0], frame.labels[1:]
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+@dataclass
+class GraphColumns:
+    """The columns a graph can use: their labels, and whether each has
+    numbers (so it can go up the y axis) and text (categories)."""
+
+    labels: list[str]
+    numbers: list[bool]
+    text: list[bool]
+
+    @classmethod
+    def of(cls, frame: FrameData) -> "GraphColumns":
+        columns = cls(frame.labels, [any(_is_number(v) for v in column) for column in frame.columns],
+                      [any(isinstance(v, str) for v in column) for column in frame.columns])
+        if len(columns.labels) < 2:
+            raise GraphError("Select at least two columns: one for x, and others for y.")
+        if not any(columns.numbers):
+            raise GraphError("There are no numbers to graph in the selected columns.")
+        return columns
+
+    def y_options(self, x: str) -> list[str]:
+        """The columns that can go up the y axis against x: those with numbers."""
+        return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != x]
+
+    def default_x(self, kind: str) -> str:
+        """The first column that leaves another with numbers for y; for a
+        categorical scatter, the first such with text, as its categories."""
+        usable = [label for label in self.labels if self.y_options(label)]
+        if kind in CATEGORICAL:
+            usable = [label for label, text in zip(self.labels, self.text) if text and label in usable] or usable
+        return usable[0]
+
+    def default_ys(self, x: str) -> list[str]:
+        return self.y_options(x)
+
+    def default_choice(self, kind: str, marker: str | None) -> GraphChoice:
+        x = self.default_x(kind)
+        return GraphChoice(kind, marker, x, self.default_ys(x))
+
+
+def graph_columns(model, cells) -> GraphColumns:
+    """The columns a graph of the cells could use; GraphError if the cells
+    can't be graphed."""
+    return GraphColumns.of(_frame(model, cells))
 
 
 def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None,
+               x: str | None = None, ys: list[str] | None = None,
                import_pandas: bool = True, import_seaborn: bool = True) -> str:
     """Python that graphs the DataFrame `frame_name`, which dataframe_code
-    makes of the same cells, with Seaborn, the way a chart of them is drawn:
-    the first column across (text gives category labels, in the sheet's
-    order), and each other column a series up, named by its label. `kind` is
-    "line" or "scatter", and `marker` a Matplotlib marker such as "o" for
-    each point (None: none on a line, Seaborn's circles on a scatter graph).
-    Text in the y columns is left out. GraphError if the cells can't be
-    graphed. `import_pandas` and `import_seaborn` false leave out those
-    imports (an earlier cell has them).
+    makes of the same cells, with Seaborn (see frame_graph_code). GraphError
+    if the cells can't be graphed."""
+    return frame_graph_code(_frame(model, cells), frame_name, kind, marker, x, ys, import_pandas, import_seaborn)
+
+
+def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line", marker: str | None = None,
+                     x: str | None = None, ys: list[str] | None = None,
+                     import_pandas: bool = True, import_seaborn: bool = True) -> str:
+    """Python that graphs a DataFrame with Seaborn: column `x` across (text
+    gives categories, in the sheet's order) and each of the `ys` columns up,
+    a series each, named by its label (by default, as in a chart, the first
+    column across and the others with numbers up). `kind` is "line" or
+    "scatter" (relplot), or "strip" (catplot's categorical scatter), and
+    `marker` a Matplotlib marker such as "o" for each point (None: none on
+    a line, Seaborn's dots otherwise). Text in the y columns is left out.
+    `import_pandas` and `import_seaborn` false leave out those imports (an
+    earlier cell has them). GraphError if it can't be graphed.
     """
-    if kind not in ("line", "scatter"):
-        raise ValueError(f"kind must be 'line' or 'scatter', not {kind!r}")
-    frame = _graph_frame(model, cells)
-    x_label, y_labels = frame.labels[0], frame.labels[1:]
-    x_values, y_columns = frame.columns[0], frame.columns[1:]
+    if kind not in GRAPH_KINDS:
+        raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
+    columns = GraphColumns.of(frame)
+    x = x if x is not None else columns.default_x(kind)
+    ys = list(ys) if ys is not None else columns.default_ys(x)
+    if x not in columns.labels or not ys or any(y not in columns.y_options(x) for y in ys):
+        raise ValueError(f"can't graph {ys!r} against {x!r}")
+    values = dict(zip(frame.labels, frame.columns))
 
     fixes = []  # changes Seaborn needs, made to a copy of the DataFrame
-    if any(isinstance(v, str) for v in x_values) and any(isinstance(v, float) for v in x_values):
-        fixes.append(f"data[{x_label!r}] = data[{x_label!r}].astype('string')  # numbers and text: all labels")
-    for label, column in zip(y_labels, y_columns):
-        if any(isinstance(v, str) for v in column):
-            fixes.append(f"data[{label!r}] = pd.to_numeric(data[{label!r}], errors='coerce')  # text isn't graphed")
+    if any(isinstance(v, str) for v in values[x]) and any(_is_number(v) for v in values[x]):
+        fixes.append(f"data[{x!r}] = data[{x!r}].astype('string')  # numbers and text: all labels")
+    for y in ys:
+        if any(isinstance(v, str) for v in values[y]):
+            fixes.append(f"data[{y!r}] = pd.to_numeric(data[{y!r}], errors='coerce')  # text isn't graphed")
 
     lines = ["import pandas as pd"] if import_pandas and any("pd." in fix for fix in fixes) else []
     lines += ["import seaborn as sns"] if import_seaborn else []
     lines += [""] if lines else []
-    up = "the second" if len(y_labels) == 1 else "the others"
-    lines += [f"# {frame_name} as a graph: its first column across, {up} up.", "sns.set_theme(style='whitegrid')"]
+    named = [repr(y) for y in ys]  # repr: a label can't break out of the comment
+    series = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+    lines += [f"# {frame_name} as a graph: {series} against {x!r}.", "sns.set_theme(style='whitegrid')"]
     data = frame_name
     if fixes:
         lines += [f"data = {frame_name}.copy()", *fixes]
         data = "data"
-    if len(y_labels) == 1:
-        plotted = f"data={data}, x={x_label!r}, y={y_labels[0]!r}"
+    if len(ys) == 1:
+        plotted = f"data={data}, x={x!r}, y={ys[0]!r}"
     else:  # one column of values, with another naming each value's series
-        series, value = _unused("Series", frame.labels), _unused("Value", frame.labels)
-        lines.append(f"long = {data}.melt(id_vars=[{x_label!r}], value_vars={y_labels!r}, "
-                     f"var_name={series!r}, value_name={value!r})")
-        plotted = f"data=long, x={x_label!r}, y={value!r}, hue={series!r}"
-    other = "scatter" if kind == "line" else "line"
+        series_name, value = _unused("Series", frame.labels), _unused("Value", frame.labels)
+        lines.append(f"long = {data}.melt(id_vars=[{x!r}], value_vars={ys!r}, "
+                     f"var_name={series_name!r}, value_name={value!r})")
+        plotted = f"data=long, x={x!r}, y={value!r}, hue={series_name!r}"
+    function = "catplot" if kind in CATEGORICAL else "relplot"
+    other = {"line": "  # or 'scatter'", "scatter": "  # or 'line'"}.get(kind, "")
     marker = f"marker={marker!r}, " if marker else ""
     lines += [
-        "graph = sns.relplot(",
+        f"graph = sns.{function}(",
         f"    {plotted},",
-        f"    kind={kind!r},  # or {other!r}",
+        f"    kind={kind!r},{other}",
         f"    {marker}height=4, aspect=1.5,",
         ")",
     ]

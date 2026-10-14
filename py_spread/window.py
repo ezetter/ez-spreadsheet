@@ -46,10 +46,12 @@ from .load_data import answer, data_request, frames, frames_request, sheet_write
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
     IMPORTS_CELL,
+    GraphChoice,
     GraphError,
     Notebook,
     data_block,
     dataframe_code,
+    frame_graph_code,
     graph_code,
     graph_columns,
     importing_cell,
@@ -1139,19 +1141,19 @@ class MainWindow(QMainWindow):
         if not cells or len({col for _, col in selected}) == 1:
             return self.change_notebook_graph()
         try:
-            x_label, y_labels = graph_columns(self.model, cells)
+            columns = graph_columns(self.model, cells)
         except GraphError as e:
             self._show_status(f"Can't make a graph: {e}")
             return None
-        choice = self._ask_graph_options(x_label, y_labels)
+        choice = self._ask_graph_options(columns)
         if choice is None:
             return None
-        self.graph_kind, self.graph_marker = choice
+        self.graph_kind, self.graph_marker = choice.kind, choice.marker
         name = next_frame_name(self.notebook)
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
-        graph = graph_code(self.model, cells, name, *choice, import_pandas=pandas is None,
-                           import_seaborn=seaborn is None)
+        graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys,
+                           import_pandas=pandas is None, import_seaborn=seaborn is None)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
         self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
@@ -1159,43 +1161,54 @@ class MainWindow(QMainWindow):
 
     def change_notebook_graph(self) -> str | None:
         """Graph with no data or one column selected: choose one of the
-        notebook's graphs in the Graph dialog, which starts with its type and
-        marker, and redraw it with the ones chosen. Returns its cell id, or
+        notebook's graphs in the Graph dialog, which starts with its type,
+        columns, and marker, and redraw it with the ones chosen. New columns
+        mean writing its cell afresh, from its DataFrame's cell; otherwise
+        just its kind and marker change in the code. Returns its cell id, or
         None if there are no graphs or the dialog was cancelled."""
         graphs = find_graphs(self.notebook)
         if not graphs:
             self._show_status("The notebook has no graphs to change. To make one, select two or more "
-                              "columns of data: the first for x, the others for y.")
+                              "columns of data, then choose Graph.")
             return None
         ids = [graph.cell_id for graph in graphs]
         current_id = self.notebook_window.current_id if self.notebook_window is not None else None
         choice = self._ask_graph_change(graphs, ids.index(current_id) if current_id in ids else len(ids) - 1)
         if choice is None:
             return None
-        index, kind, marker = choice
+        index, chosen = choice
         graph = graphs[index]
-        source = change_graph(self.notebook.cell(graph.cell_id).source, kind, marker)
+        pandas = importing_cell(self.notebook, "pandas", graph.cell_id)
+        seaborn = importing_cell(self.notebook, "seaborn", graph.cell_id)
+        source = self.notebook.cell(graph.cell_id).source
+        try:
+            if graph.data is not None and (chosen.x, chosen.ys) != (graph.x_label, graph.y_labels):
+                source = frame_graph_code(graph.data, graph.frame, chosen.kind, chosen.marker, chosen.x,
+                                          chosen.ys, import_pandas=pandas is None, import_seaborn=seaborn is None)
+            else:
+                source = change_graph(source, chosen.kind, chosen.marker)
+        except (ValueError, GraphError) as e:
+            self._show_error("Couldn't change the graph.", str(e))
+            return None
         window = self.show_notebook()
         window.replace_source(graph.cell_id, source)
         window.set_current(graph.cell_id, focus=True)
         # After a restart, or in a reopened sheet, the imports and the DataFrame have to run again first.
-        window.run_needing(graph.cell_id, [importing_cell(self.notebook, "pandas", graph.cell_id),
-                                           importing_cell(self.notebook, "seaborn", graph.cell_id),
-                                           frame_cell(self.notebook, graph.cell_id, graph.frame)])
+        window.run_needing(graph.cell_id, [pandas, seaborn, frame_cell(self.notebook, graph.cell_id, graph.frame)])
         self._show_status(f"Redrawing the graph {graph_labels(graphs)[index]}.")
         return graph.cell_id
 
-    def _ask_graph_change(self, graphs, current: int) -> tuple[int, str, str | None] | None:
-        """The Graph dialog for changing a graph: (which, kind, marker), or None if cancelled."""
+    def _ask_graph_change(self, graphs, current: int) -> tuple[int, GraphChoice] | None:
+        """The Graph dialog for changing a graph: (which, the choices), or None if cancelled."""
         dialog = GraphDialog(self, graphs=graphs, current=current)
         if dialog.exec() != QDialog.Accepted:
             return None
-        return dialog.chosen_graph(), dialog.kind(), dialog.marker()
+        return dialog.chosen_graph(), dialog.choice()
 
-    def _ask_graph_options(self, x_label: str, y_labels: list[str]) -> tuple[str, str | None] | None:
-        """The Graph dialog: (kind, marker), or None if cancelled."""
-        dialog = GraphDialog(self, x_label, y_labels, self.graph_kind, self.graph_marker)
-        return (dialog.kind(), dialog.marker()) if dialog.exec() == QDialog.Accepted else None
+    def _ask_graph_options(self, columns) -> GraphChoice | None:
+        """The Graph dialog for a new graph of these GraphColumns: the choices, or None if cancelled."""
+        dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker)
+        return dialog.choice() if dialog.exec() == QDialog.Accepted else None
 
     def load_data_to_sheet(self) -> None:
         """Ask the notebook's Python for its DataFrames, then which one to
