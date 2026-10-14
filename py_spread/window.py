@@ -1084,26 +1084,68 @@ class MainWindow(QMainWindow):
         return cell_id
 
     def send_graph_to_notebook(self) -> str | None:
-        """Ask what kind of graph, of which columns (in the Chart dialog), then
-        put the selected cells in a DataFrame in a new notebook cell, and a
-        Seaborn graph of it in the next; open the notebook and run them. With
-        no data or just one column selected, which can't be graphed, change
-        one of the notebook's graphs instead. Returns the graph cell's id, or
-        None if the cells can't be graphed (the status bar says why) or the
-        dialog was cancelled."""
+        """Notebook > Chart. With charts in the notebook, the Chart dialog
+        lists them, and New chart: change one, or make a new one. Without,
+        it's straight to a new one. A new chart is of the selected cells, or
+        (with no more than one cell selected) of the whole sheet's data; it
+        goes in the notebook as a DataFrame cell and a Seaborn chart cell,
+        which run. Returns the chart cell's id, or None if there's nothing
+        that can be charted (an error says why) or the dialog was cancelled."""
         self._commit_pending_edit()
+        cells, source, problem = self._chart_data()
+        columns = None
+        if problem is None:
+            try:
+                columns = graph_columns(self.model, cells)
+            except GraphError as e:
+                problem = str(e)
+        graphs = find_graphs(self.notebook)
+        if not graphs:
+            if problem is not None:
+                self._show_error(f"Can't make a chart of {source}.", problem)
+                return None
+            choice = self._ask_graph_options(columns, source)
+            return None if choice is None else self._make_chart(cells, source, choice)
+        answer = self._ask_chart(graphs, self._first_chart(graphs), columns, source, problem)
+        if answer is None:
+            return None
+        index, choice = answer
+        if index is None:
+            return self._make_chart(cells, source, choice)
+        return self._change_chart(graphs, index, choice)
+
+    def _chart_data(self) -> tuple[set, str, str | None]:
+        """What a new chart is of: the selected cells, or, with no more than
+        one cell selected, the whole sheet's data. (cells, how to name them,
+        what's wrong if there's nothing there)."""
         selected = self._selected_cells()
-        cells = data_block(self.model, selected)
-        if not cells or len({col for _, col in selected}) == 1:
-            return self.change_notebook_graph()
-        try:
-            columns = graph_columns(self.model, cells)
-        except GraphError as e:
-            self._show_status(f"Can't make a chart: {e}")
+        if len(selected) > 1:
+            cells = data_block(self.model, selected)
+            if not cells:
+                return set(), "the selected cells", "The selection is empty."
+            rows, cols = [row for row, _ in cells], [col for _, col in cells]
+            return cells, f"the selected cells, {cell_name(min(rows), min(cols))}:{cell_name(max(rows), max(cols))}", None
+        used = self.model.used_range()
+        if used is None:
+            return set(), "the sheet", "The sheet is empty."
+        top, left, bottom, right = used
+        cells = {(row, col) for row in range(top, bottom + 1) for col in range(left, right + 1)}
+        return cells, f"the whole sheet, {cell_name(top, left)}:{cell_name(bottom, right)}", None
+
+    def _first_chart(self, graphs) -> int | None:
+        """Which item the Chart dialog's list starts at: New chart (None) with
+        several cells selected; otherwise the chart in the notebook's current
+        cell, or else the newest."""
+        if len(self._selected_cells()) > 1:
             return None
-        choice = self._ask_graph_options(columns)
-        if choice is None:
-            return None
+        ids = [graph.cell_id for graph in graphs]
+        current_id = self.notebook_window.current_id if self.notebook_window is not None else None
+        return ids.index(current_id) if current_id in ids else len(ids) - 1
+
+    def _make_chart(self, cells, source: str, choice: GraphChoice) -> str:
+        """Put the cells in a DataFrame in a new notebook cell, and the chart
+        chosen of it in the next; open the notebook and run them. Returns the
+        chart cell's id."""
         self.graph_kind, self.graph_marker = choice.kind, choice.marker
         name = next_frame_name(self.notebook)
         self.show_notebook()  # a new notebook gets its imports cell first
@@ -1112,28 +1154,14 @@ class MainWindow(QMainWindow):
                            choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
-        self._show_status(f"Sent the selection to the notebook as {name}, with a chart of it.")
+        self._show_status(f"Sent {source} to the notebook as {name}, with a chart of it.")
         return graph_id
 
-    def change_notebook_graph(self) -> str | None:
-        """Chart with no data or one column selected: choose one of the
-        notebook's graphs in the Chart dialog, which starts with its type,
-        columns, and marker, and redraw it with the ones chosen. New columns
-        (across, up, or for the hue) mean writing its cell afresh, from its
-        DataFrame's cell; otherwise just its kind and marker change in the
-        code. Returns its cell id, or
-        None if there are no graphs or the dialog was cancelled."""
-        graphs = find_graphs(self.notebook)
-        if not graphs:
-            self._show_status("The notebook has no charts to change. To make one, select two or more "
-                              "columns of data, then choose Chart.")
-            return None
-        ids = [graph.cell_id for graph in graphs]
-        current_id = self.notebook_window.current_id if self.notebook_window is not None else None
-        choice = self._ask_graph_change(graphs, ids.index(current_id) if current_id in ids else len(ids) - 1)
-        if choice is None:
-            return None
-        index, chosen = choice
+    def _change_chart(self, graphs, index: int, chosen: GraphChoice) -> str | None:
+        """Redraw one of the notebook's charts with the choices made. New
+        columns (across, up, or for the hue) mean writing its cell afresh,
+        from its DataFrame's cell; otherwise just its kind and marker change
+        in the code. Returns its cell id, or None if it couldn't be changed."""
         graph = graphs[index]
         pandas = importing_cell(self.notebook, "pandas", graph.cell_id)
         seaborn = importing_cell(self.notebook, "seaborn", graph.cell_id)
@@ -1160,16 +1188,21 @@ class MainWindow(QMainWindow):
         self._show_status(f"Redrawing the chart {graph_labels(graphs)[index]}.")
         return graph.cell_id
 
-    def _ask_graph_change(self, graphs, current: int) -> tuple[int, GraphChoice] | None:
-        """The Chart dialog for changing a chart: (which, the choices), or None if cancelled."""
-        dialog = GraphDialog(self, graphs=graphs, current=current)
+    def _ask_chart(self, graphs, current: int | None, columns, source: str,
+                   problem: str | None) -> tuple[int | None, GraphChoice] | None:
+        """The Chart dialog with its list of the notebook's charts and New
+        chart (current None): (which, None for a new one; the choices), or
+        None if cancelled. `problem` says why a new chart of `source` can't
+        be made."""
+        dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, graphs=graphs, current=current,
+                             new_source=source, new_problem=problem)
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog.chosen_graph(), dialog.choice()
 
-    def _ask_graph_options(self, columns) -> GraphChoice | None:
+    def _ask_graph_options(self, columns, source: str) -> GraphChoice | None:
         """The Chart dialog for a new chart of these GraphColumns: the choices, or None if cancelled."""
-        dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker)
+        dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, new_source=source)
         return dialog.choice() if dialog.exec() == QDialog.Accepted else None
 
     def load_data_to_sheet(self) -> None:

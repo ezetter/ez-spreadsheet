@@ -620,6 +620,15 @@ class SheetModel(QAbstractTableModel):
             self._cols = cols
             self.endInsertColumns()
 
+    def used_range(self) -> tuple[int, int, int, int] | None:
+        """(top, left, bottom, right) of the block holding every cell with
+        something in it, or None if the sheet is empty."""
+        if not self._cells:
+            return None
+        rows = [row for row, _ in self._cells]
+        cols = [col for _, col in self._cells]
+        return min(rows), min(cols), max(rows), max(cols)
+
     def displayed_rows(self) -> list[list[str]]:
         """What each cell shows, from A1 to the last non-empty row and column."""
         if not self._cells:

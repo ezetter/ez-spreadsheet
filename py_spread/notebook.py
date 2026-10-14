@@ -302,9 +302,9 @@ class GraphColumns:
         columns = cls(frame.labels, [any(_is_number(v) for v in column) for column in frame.columns],
                       [any(isinstance(v, str) for v in column) for column in frame.columns])
         if len(columns.labels) < 2:
-            raise GraphError("Select at least two columns: one for x, and another for y.")
+            raise GraphError("A chart needs at least two columns: one for x, and another for y.")
         if not any(columns.numbers):
-            raise GraphError("There are no numbers to chart in the selected columns.")
+            raise GraphError("There are no numbers to chart.")
         return columns
 
     def category(self, label: str) -> bool:

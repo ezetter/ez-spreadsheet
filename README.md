@@ -163,9 +163,11 @@ df
 
 ### Charting cells
 
-Chart asks what kind of chart to make, of which columns, then does the same as
-DataFrame and adds a second cell that charts the DataFrame with Seaborn. Both
-cells run, so the table shows and then the chart:
+Chart makes a chart of the selected cells, or, if no more than one cell is
+selected, of the whole sheet (the block holding all its data). It asks what
+kind of chart to make, of which columns, then does the same as DataFrame and
+adds a second cell that charts the DataFrame with Seaborn. Both cells run, so
+the table shows and then the chart:
 
 ```python
 # df as a chart: 'Sales' against 'Month', colored by 'Region'.
@@ -217,9 +219,10 @@ yourself, and the Y axis follows the X axis until you choose it. Choosing a
 new X axis clears the Hue if it was that column.
 
 The type (including Swarm plot) and marker start from your last choices
-while EzSheet is open. Cancel
-adds nothing. If the cells can't be charted (just one column, or no numbers),
-the status bar says why before the dialog appears.
+while EzSheet is open. Cancel adds nothing. If the cells can't be charted (the
+selection or the sheet is empty, or has just one column, or no numbers), an
+error says why, before the dialog appears. (With charts already in the
+notebook, the dialog's Chart list says it instead; see below.)
 
 - The choices are in the cell's code too: change `kind='line'` to
   `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`), or add
@@ -233,13 +236,19 @@ the status bar says why before the dialog appears.
 
 ### Changing a chart
 
-To change a chart that's already in the notebook, choose Chart with no data,
-or just one column, selected (clicking any one cell does it). A single column
-can't be charted, so the Chart dialog then has a **Chart** list of the
-notebook's charts, named for their DataFrame and columns, such as "df2: Sales
-and Cost against Month". It starts at the chart in the current notebook cell,
-or else the newest one, and choosing a chart shows its type, axes, hue, and
-marker. Change them and click OK:
+Once the notebook has charts, choosing Chart always shows a **Chart** list at
+the top of the Chart dialog: **New chart**, then the notebook's charts, named
+for their DataFrame and columns, such as "df2: Sales and Cost against Month".
+
+- **New chart** makes a new one, of the selected cells or the whole sheet, as
+  above. Above the list, the dialog says what it's of ("A new chart of the
+  whole sheet, A1:C13."), or, if those cells can't be charted, why not, and OK
+  is unavailable until you choose a chart to change instead.
+- The list starts at New chart when several cells are selected; otherwise, at
+  the chart in the current notebook cell, or else the newest chart.
+
+Choosing a chart shows its type, axes, hue, and marker. Change them and click
+OK:
 
 - Changing only the type or marker changes just `kind=`, `marker=`, and
   whether `relplot` or `catplot` draws it, so anything else you changed in the
@@ -260,7 +269,6 @@ marker. Change them and click OK:
   kind the dialog has counts, including ones you write, as long as its `kind=`
   and `marker=`, if it has them, are written out, such as `kind='line'` and
   `marker='o'`.
-- If the notebook has no charts, the status bar says so, and how to make one.
 - Charts made when they were called graphs (in cells saying `# df as a graph`
   and `graph = sns.relplot(...)`) count too, and keep the name `graph` when
   only their type or marker changes.

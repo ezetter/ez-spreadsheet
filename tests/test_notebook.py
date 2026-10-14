@@ -912,13 +912,13 @@ def test_graph_from_the_notebook_menu(window, dialogs):
     assert window.notebook_window.isVisible()
     assert "as df, with a chart" in window.statusBar().currentMessage()
     assert "kind='line'" in graph_cell.source and "marker" not in graph_cell.source
-    dialogs.graph_answer = ("scatter", "s")
+    dialogs.graph_change_answer = ("new", "scatter", "s")  # now there's a chart, New chart in the list
     window.view.select_range(0, 0, 3, 1)
     window.graph_action.trigger()
     source = window.notebook.cells[-1].source
     assert "df2 as a chart" in source and "kind='scatter'" in source and "marker='s'" in source
-    window.graph_action.trigger()
-    assert dialogs.graph_prompts[-1][1] == ("scatter", "s")  # the dialog starts from the last choices
+    assert dialogs.graph_change_prompts[-1][1] is None  # cells selected: it starts at New chart
+    assert (window.graph_kind, window.graph_marker) == ("scatter", "s")  # where new ones start next time
 
 
 def test_cancelling_the_graph_dialog(window, dialogs):
@@ -930,50 +930,94 @@ def test_cancelling_the_graph_dialog(window, dialogs):
 
 
 @pytest.mark.parametrize("selection, problem", [
-    ((0, 2, 3, 3), "Select at least two columns"),  # C and D, but D is empty
-    ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't graphed
-    ((10, 0, 12, 2), "no charts to change"),  # empty: for changing a graph, but there are none
-    ((0, 0, 3, 0), "no charts to change"),  # one column: likewise
+    ((0, 2, 3, 3), "at least two columns"),  # C and D, but D is empty
+    ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't charted
+    ((10, 0, 12, 2), "The selection is empty."),
+    ((0, 0, 3, 0), "at least two columns"),  # one column
 ])
 def test_graph_problems(window, dialogs, selection, problem):
     if problem is None:
         window.view.select_range(*selection)
         assert window.send_graph_to_notebook() is not None
         return
-    window.model.set_cells({(0, 1): "Sales", (1, 1): "x", (2, 1): "y", (3, 1): "z"})  # no numbers
     window.view.select_range(*selection)
     assert window.send_graph_to_notebook() is None
-    assert problem in window.statusBar().currentMessage()
+    assert problem in dialogs.errors[-1]  # an error, before any dialog
     assert window.notebook.is_empty and window.notebook_window is None
-    assert dialogs.graph_prompts == []  # told before the dialog, not after
+    assert dialogs.graph_prompts == []
 
 
-def test_graph_needs_numbers(window):
+def test_graph_needs_numbers(window, dialogs):
     window.model.set_cells({(1, 1): "x", (2, 1): "y", (3, 1): ""})
     window.view.select_range(0, 0, 3, 1)
     assert window.send_graph_to_notebook() is None
-    assert "no numbers to chart" in window.statusBar().currentMessage()
+    assert dialogs.errors == ["There are no numbers to chart."]
 
 
 # --- Changing a graph (Graph with no data selected) ---
 
-def make_graph(window, columns=1) -> str:
-    """A graph of A1:B4 (or more columns): its cell's id. The notebook is shown."""
+def make_graph(window, dialogs, columns=1) -> str:
+    """A new chart of A1:B4 (or more columns): its cell's id. The notebook is shown."""
     window.view.select_range(0, 0, 3, columns)
-    return window.send_graph_to_notebook()
+    saved, dialogs.graph_change_answer = dialogs.graph_change_answer, ("new", *dialogs.graph_answer)
+    graph_id = window.send_graph_to_notebook()  # (New chart in the list, once there are charts)
+    dialogs.graph_change_answer = saved
+    return graph_id
 
 
-def test_no_graphs_to_change(window, dialogs):
-    window.view.select_range(10, 0, 12, 2)  # empty
+def test_whole_sheet_when_one_cell_is_selected(window, dialogs):
+    window.view.select_range(2, 2, 2, 2)
+    graph_id = window.send_graph_to_notebook()
+    assert dialogs.graph_prompts == [(["Month", "Sales", "Note"], ("line", None))]  # all of A1:C4
+    assert window.notebook.cells[1].source.startswith("# Cells A1:C4 of the sheet")
+    assert "Sent the whole sheet, A1:C4 to the notebook as df" in window.statusBar().currentMessage()
+    assert graph_id == window.notebook.cells[2].id
+
+
+@pytest.mark.parametrize("cells, problem", [
+    ({}, "The sheet is empty."),
+    ({(0, 0): "a", (0, 1): "b"}, "There are no numbers to chart."),
+    ({(0, 0): "x", (1, 0): "1"}, "A chart needs at least two columns: one for x, and another for y."),
+])
+def test_whole_sheet_that_cant_be_charted(app, dialogs, cells, problem):
+    window = MainWindow()
+    window.kernel = FakeKernel()
+    window.model.set_cells(cells)
     assert window.send_graph_to_notebook() is None
-    assert "no charts to change" in window.statusBar().currentMessage()
-    assert dialogs.graph_change_prompts == [] and dialogs.graph_prompts == []
+    assert dialogs.errors == [problem] and dialogs.graph_prompts == []
+    window.setWindowModified(False)
+    window.close()
+
+
+def test_new_chart_from_the_list(window, dialogs):
+    make_graph(window, dialogs)
+    window.view.select_range(0, 0, 3, 2)
+    dialogs.graph_change_answer = ("new", "scatter", "o")
+    graph_id = window.send_graph_to_notebook()
+    assert dialogs.graph_change_prompts[-1][1] is None  # several cells selected: New chart first
+    assert dialogs.chart_prompts[-1][1:] == ("the selected cells, A1:C4", None)
+    assert "df2 as a chart" in window.notebook.cell(graph_id).source
+    window.view.select_range(10, 1, 10, 1)  # one cell: the whole sheet
+    window.send_graph_to_notebook()
+    assert dialogs.chart_prompts[-1][1:] == ("the whole sheet, A1:C4", None)
+    assert dialogs.graph_change_prompts[-1][1] == 1  # the newest chart first
+    assert "df3 as a chart" in window.notebook.cells[-1].source
+
+
+def test_list_when_a_new_chart_cant_be_made(window, dialogs):
+    graph_id = make_graph(window, dialogs)
+    window.view.select_range(10, 0, 12, 2)  # empty
+    dialogs.graph_change_answer = ("new", "line", None)
+    assert window.send_graph_to_notebook() is None  # no OK for New chart
+    assert dialogs.chart_prompts[-1][2] == "The selection is empty." and not dialogs.errors
+    dialogs.graph_change_answer = (0, "scatter", "o")  # but a chart can still be changed
+    assert window.send_graph_to_notebook() == graph_id
 
 
 def test_change_a_graph(window, dialogs):
-    graph_id = make_graph(window)
+    graph_id = make_graph(window, dialogs)
     runs = len(window.kernel.runs)
-    window.view.select_range(10, 0, 12, 2)
+    window.view.select_range(10, 0, 10, 0)  # one cell: the list starts at the newest chart
     dialogs.graph_change_answer = (0, "scatter", "s")
     assert window.send_graph_to_notebook() == graph_id
     [(graphs, current)] = dialogs.graph_change_prompts
@@ -995,7 +1039,7 @@ def test_change_a_graph(window, dialogs):
     lambda window: window.kernel.state_changed.emit("starting"),  # as after Python crashed
 ])
 def test_dataframe_made_again_after_a_restart(window, dialogs, new_process):
-    graph_id = make_graph(window)
+    graph_id = make_graph(window, dialogs)
     imports_id, frame_id = (cell.id for cell in window.notebook.cells[:2])
     new_process(window)  # pd, sns, and df are gone
     runs = len(window.kernel.runs)
@@ -1006,7 +1050,7 @@ def test_dataframe_made_again_after_a_restart(window, dialogs, new_process):
 
 
 def test_dataframe_made_again_in_a_reopened_sheet(window, dialogs, tmp_path):
-    make_graph(window)
+    make_graph(window, dialogs)
     window.save_to(str(tmp_path / "s.ezs"))
     window.open_path(str(tmp_path / "s.ezs"))
     imports_id, frame_id, graph_id = (cell.id for cell in window.notebook.cells)
@@ -1018,10 +1062,10 @@ def test_dataframe_made_again_in_a_reopened_sheet(window, dialogs, tmp_path):
 
 
 def test_starts_with_the_current_graph(window, dialogs):
-    first = make_graph(window)
-    make_graph(window, columns=2)
+    first = make_graph(window, dialogs)
+    make_graph(window, dialogs, columns=2)
     window.notebook_window.set_current(first)
-    window.view.select_range(10, 0, 12, 2)
+    window.view.select_range(10, 0, 10, 0)
     window.send_graph_to_notebook()  # cancelled
     graphs, current = dialogs.graph_change_prompts[-1]
     assert len(graphs) == 2 and graphs[current].cell_id == first
@@ -1036,19 +1080,21 @@ def test_starts_with_the_current_graph(window, dialogs):
     (2, 2, 2, 2),  # one cell, with data
     (20, 3, 22, 3),  # one empty column
 ])
-def test_one_column_changes_a_graph(window, dialogs, selection):
-    graph_id = make_graph(window)
+def test_charts_offered_whatever_the_selection(window, dialogs, selection):
+    graph_id = make_graph(window, dialogs)
     cells_before = len(window.notebook.cells)
     window.view.select_range(*selection)
     dialogs.graph_change_answer = (0, "scatter", "x")
     assert window.send_graph_to_notebook() == graph_id
+    several = selection[:2] != selection[2:]
+    assert dialogs.graph_change_prompts[-1][1] == (None if several else 0)  # New chart, or the chart
     assert dialogs.graph_prompts == [(["Month", "Sales"], ("line", None))]  # only the first graph's
     assert len(dialogs.graph_change_prompts) == 1 and len(window.notebook.cells) == cells_before
     assert "marker='x'" in window.notebook.cell(graph_id).source
 
 
 def test_change_a_graphs_columns(window, dialogs):
-    graph_id = make_graph(window, columns=2)  # Month, Sales, Note
+    graph_id = make_graph(window, dialogs, columns=2)  # Month, Sales, Note
     window.view.select_range(10, 0, 12, 2)
     dialogs.graph_change_answer = (0, "strip", "D", "Month", ["Sales"])
     window.send_graph_to_notebook()
@@ -1070,7 +1116,7 @@ def test_swarm_graph_with_hue(window, dialogs):
 
 
 def test_change_a_graphs_hue(window, dialogs):
-    graph_id = make_graph(window, columns=2)
+    graph_id = make_graph(window, dialogs, columns=2)
     window.view.select_range(10, 0, 12, 2)
     dialogs.graph_change_answer = (0, "line", None, "Month", ["Sales"], "Note")
     window.send_graph_to_notebook()
@@ -1085,7 +1131,7 @@ def test_change_a_graphs_hue(window, dialogs):
 
 
 def test_change_a_graph_to_sideways(window, dialogs):
-    graph_id = make_graph(window, columns=2)  # Month, Sales, Note
+    graph_id = make_graph(window, dialogs, columns=2)  # Month, Sales, Note
     window.view.select_range(10, 0, 12, 2)
     dialogs.graph_change_answer = (0, "strip", "o", "Sales", ["Note"])
     window.send_graph_to_notebook()
@@ -1109,7 +1155,7 @@ def test_years_up_as_categories(window, dialogs):
 
 
 def test_type_change_keeps_hand_edits(window, dialogs):
-    graph_id = make_graph(window)
+    graph_id = make_graph(window, dialogs)
     nb = window.notebook_window
     nb.replace_source(graph_id, window.notebook.cell(graph_id).source.replace("height=4", "height=7"))
     window.view.select_range(10, 0, 12, 2)
@@ -1120,7 +1166,7 @@ def test_type_change_keeps_hand_edits(window, dialogs):
 
 
 def test_cancel_changes_nothing(window, dialogs):
-    graph_id = make_graph(window)
+    graph_id = make_graph(window, dialogs)
     source, runs = window.notebook.cell(graph_id).source, len(window.kernel.runs)
     window.view.select_range(10, 0, 12, 2)
     assert window.send_graph_to_notebook() is None
@@ -1308,7 +1354,7 @@ def test_real_kernel_draws_a_categorical_scatter(app, dialogs):
         for answer in (("strip", "o", "Width", ["Species"]),  # sideways: text up
                        ("swarm", "o", "Width", ["Width2"], None, True)):  # and numbers up as categories
             window.model.set_cells({(0, 3): "Width2", (1, 3): "1", (2, 3): "2", (3, 3): "1"})
-            dialogs.graph_answer = answer
+            dialogs.graph_change_answer = ("new", *answer)  # there are charts now: New chart in the list
             window.view.select_range(0, 0, 3, 3)
             sideways_id = window.send_graph_to_notebook()
             assert wait_for(lambda: not nb.running)

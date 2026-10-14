@@ -122,22 +122,22 @@ def two_graphs():
 
 def test_dialog_lists_the_graphs(app):
     dialog = GraphDialog(None, graphs=two_graphs(), current=1)
-    assert [dialog.graph_box.itemText(i) for i in range(2)] == [
-        "df: Sales against Month", "df2: Rain and Sun against Day"]
+    assert [dialog.graph_box.itemText(i) for i in range(3)] == [
+        "New chart", "df: Sales against Month", "df2: Rain and Sun against Day"]
     assert (dialog.chosen_graph(), dialog.kind(), dialog.marker()) == (1, "scatter", "D")
 
 
 def test_choosing_a_graph_shows_its_settings(app):
     dialog = GraphDialog(None, graphs=two_graphs(), current=1)
-    dialog.graph_box.setCurrentIndex(0)
+    dialog.graph_box.setCurrentIndex(1)  # after New chart
     assert (dialog.chosen_graph(), dialog.kind(), dialog.marker()) == (0, "line", None)
     assert dialog.marker_box.model().item(0).isEnabled()  # None is fine for a line
-    dialog.graph_box.setCurrentIndex(1)
+    dialog.graph_box.setCurrentIndex(2)
     assert (dialog.kind(), dialog.marker()) == ("scatter", "D")
 
 
 def test_marker_the_list_lacks(app):
-    dialog = GraphDialog(None, graphs=[GraphCell("a", "line", "p", "df", "x", ["y"])])
+    dialog = GraphDialog(None, graphs=[GraphCell("a", "line", "p", "df", "x", ["y"])], current=0)
     assert dialog.marker() == "p"
 
 
@@ -189,7 +189,7 @@ def test_found_graphs_know_their_data(sales, app):
 def test_changing_dialog_shows_the_graphs_columns(app):
     columns = GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False])
     graph = GraphCell("a", "strip", "D", "df", "Month", ["Cost"], FrameData(["Month", "Sales", "Cost"], []), columns)
-    dialog = GraphDialog(None, graphs=[graph])
+    dialog = GraphDialog(None, graphs=[graph], current=0)
     assert (dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()) == ("strip", "Month", ["Cost"], "D")
     assert dialog.x_box.isEnabled() and dialog.y_box.count() == 2 and dialog.hue() is None
     dialog.kind_box.setCurrentIndex(0)
@@ -197,7 +197,7 @@ def test_changing_dialog_shows_the_graphs_columns(app):
 
 
 def test_changing_dialog_without_the_data(app):
-    dialog = GraphDialog(None, graphs=[GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"])])
+    dialog = GraphDialog(None, graphs=[GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"])], current=0)
     assert not dialog.x_box.isEnabled() and not dialog.y_box.isEnabled()
     assert dialog.choice().x == "Month" and dialog.ys() == ["Sales", "Cost"]
 
@@ -206,14 +206,14 @@ def test_hue_in_the_changing_dialog(app):
     columns = GraphColumns(["Month", "Sales", "Region"], [False, True, False], [True, False, True])
     graph = GraphCell("a", "scatter", "o", "df", "Month", ["Sales"], FrameData(["Month", "Sales", "Region"], []),
                       columns, hue="Region")
-    assert GraphDialog(None, graphs=[graph]).choice().hue == "Region"
+    assert GraphDialog(None, graphs=[graph], current=0).choice().hue == "Region"
 
 
 def test_older_series_graph_in_the_changing_dialog(app):
     columns = GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False])
     graph = GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"], FrameData(["Month", "Sales", "Cost"], []),
                       columns)
-    dialog = GraphDialog(None, graphs=[graph])
+    dialog = GraphDialog(None, graphs=[graph], current=0)
     assert dialog.ys() == ["Sales", "Cost"] and dialog.y_box.currentText() == "Sales, Cost"
     assert not dialog.hue_box.isEnabled() and dialog.hue() is None  # colored a series each
     dialog.y_box.setCurrentIndex(0)
@@ -234,3 +234,32 @@ def test_charts_made_before_they_were_called_charts(sales):
     older = code.replace("as a chart", "as a graph").replace("chart = sns.", "graph = sns.")
     assert read_graph(older).frame == "df2"
     assert "graph = sns.relplot(" in change_graph(older, "scatter", "o")  # its own name stays
+
+
+def test_new_chart_in_the_list(app):
+    columns = GraphColumns(["Month", "Sales"], [False, True], [True, False])
+    dialog = GraphDialog(None, columns, "scatter", "D", graphs=two_graphs(), current=None,
+                         new_source="the whole sheet, A1:B4")
+    assert dialog.graph_box.currentText() == "New chart" and dialog.chosen_graph() is None
+    assert dialog.summary.text() == "A new chart of the whole sheet, A1:B4."
+    assert (dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()) == ("scatter", "Month", ["Sales"], "D")
+    dialog.graph_box.setCurrentIndex(2)  # df2's chart
+    assert (dialog.chosen_graph(), dialog.x()) == (1, "Day") and "Change this chart" in dialog.summary.text()
+    dialog.graph_box.setCurrentIndex(0)  # and back: the new chart's own starting choices
+    assert (dialog.kind(), dialog.x(), dialog.marker()) == ("scatter", "Month", "D")
+
+
+def test_new_chart_that_cant_be_made(app):
+    dialog = GraphDialog(None, None, graphs=two_graphs(), current=None, new_source="the sheet",
+                         new_problem="The sheet is empty.")
+    assert dialog.summary.text() == "A new chart of the sheet can't be made. The sheet is empty."
+    assert not dialog.ok_button.isEnabled() and not dialog.kind_box.isEnabled()
+    dialog.graph_box.setCurrentIndex(1)  # an existing chart can still be changed
+    assert dialog.ok_button.isEnabled() and dialog.kind_box.isEnabled()
+
+
+def test_no_list_without_charts(app):
+    columns = GraphColumns(["Month", "Sales"], [False, True], [True, False])
+    dialog = GraphDialog(None, columns, new_source="the selected cells, A1:B4")
+    assert dialog.graph_box is None and dialog.chosen_graph() is None
+    assert dialog.summary.text() == "A new chart of the selected cells, A1:B4."

@@ -5,6 +5,7 @@ notebook's charts. (The code calls charts graphs.)"""
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
+from .appearance import error_color
 from .notebook import CATEGORICAL, GRAPH_TYPES, NEEDS_MARKERS, GraphChoice
 
 MARKERS = {  # Matplotlib's marker code -> its name in the dialog
@@ -21,6 +22,7 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
 NO_HUE = "None"
+NEW_CHART = "New chart"
 CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the chart sideways: "
                   "categories down the side, numbers across. A column of text always is.")
 
@@ -47,29 +49,34 @@ class GraphDialog(QDialog):
     to show their points, so None is unavailable for them; choosing one
     switches None to circles, and Line switches them back.
 
-    Given the notebook's `graphs` (GraphCells), it's for changing one of
-    them instead: a Chart list chooses which, starting at graphs[current],
-    and the controls show what it draws now. Its columns can be changed if
-    its DataFrame's cell was found."""
+    Given the notebook's `graphs` (GraphCells), a Chart list chooses New
+    chart or one of them to change, starting at graphs[current] (None: New
+    chart); the controls show what a chart draws now, and its columns can be
+    changed if its DataFrame's cell was found. A new chart is of `columns`,
+    from `new_source` (such as "the selected cells, A1:C4"), or can't be
+    made, for the reason `new_problem` gives."""
 
     def __init__(self, parent=None, columns=None, kind: str = "line", marker: str | None = None,
-                 graphs=None, current: int = 0):
+                 graphs=None, current: int | None = None, new_source: str = "", new_problem: str | None = None):
         super().__init__(parent)
         self.setWindowTitle("Chart")
         self.setMinimumWidth(self.fontMetrics().averageCharWidth() * 48)
         self.graphs = list(graphs or [])
         self.columns = columns
+        self._new = (columns, kind, marker)  # what a new chart starts from
+        self.new_source, self.new_problem = new_source, new_problem
         layout = QVBoxLayout(self)
-        if self.graphs:
-            summary = QLabel("Change one of the notebook's charts. It's redrawn when you click OK.")
-            summary.setWordWrap(True)
-            layout.addWidget(summary)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
 
         self.form = form = QFormLayout()
         self.graph_box = None
         if self.graphs:
             self.graph_box = QComboBox()
-            self.graph_box.addItems(graph_labels(self.graphs))
+            self.graph_box.addItem(NEW_CHART, None)
+            for index, label in enumerate(graph_labels(self.graphs)):
+                self.graph_box.addItem(label, index)
             form.addRow("Chart:", self.graph_box)
         self.kind_box = QComboBox()
         for key, name in GRAPH_TYPES.items():
@@ -99,6 +106,7 @@ class GraphDialog(QDialog):
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
         layout.addWidget(box)
+        self.ok_button = box.button(QDialogButtonBox.Ok)
 
         self._loading = False
         self._none_replaced = False  # a scatter graph swapped None for circles, to undo on Line
@@ -113,17 +121,17 @@ class GraphDialog(QDialog):
         self.y_box.currentIndexChanged.connect(lambda _index: self._y_changed())
         self.marker_box.activated.connect(self._marker_chosen)
         if self.graphs:
-            self.graph_box.setCurrentIndex(current)
-            self.graph_box.currentIndexChanged.connect(self._show_graph)
-            self._show_graph(current)
+            self.graph_box.setCurrentIndex(0 if current is None else current + 1)
+            self.graph_box.currentIndexChanged.connect(lambda _index: self._show_item())
+            self._show_item()
         else:
-            self._show(kind, marker, None, None, None, False)
+            self._show_new()
 
     # --- What was chosen ---
 
     def chosen_graph(self) -> int | None:
-        """Which of the graphs to change (an index), when changing one."""
-        return self.graph_box.currentIndex() if self.graph_box is not None else None
+        """Which of the graphs to change (an index), or None for a new chart."""
+        return self.graph_box.currentData() if self.graph_box is not None else None
 
     def kind(self) -> str:
         kind = self.kind_box.currentData()
@@ -150,8 +158,32 @@ class GraphDialog(QDialog):
 
     # --- Showing settings ---
 
+    def _show_item(self) -> None:
+        index = self.graph_box.currentData()
+        if index is None:
+            self._show_new()
+        else:
+            self._show_graph(index)
+
+    def _show_new(self) -> None:
+        """New chart: its columns from the cells being charted, starting at
+        the defaults; or, if they can't be charted, why not (and no OK)."""
+        columns, kind, marker = self._new
+        self.columns = columns
+        self._x_chosen = self._y_chosen = False
+        problem = self.new_problem
+        if problem is not None:
+            self._say(f"A new chart of {self.new_source} can't be made. {problem}", error=True)
+        else:
+            self._say(f"A new chart of {self.new_source}." if self.new_source else "")
+        self._allow(problem is None)
+        self._show(kind, marker, None, None, None, False)
+
     def _show_graph(self, index: int) -> None:
         graph = self.graphs[index]
+        self._x_chosen = self._y_chosen = True  # a chart's own columns stay, whatever the type
+        self._say("Change this chart. It's redrawn when you click OK.")
+        self._allow(True)
         self.columns = graph.columns
         if graph.columns is not None and graph.x_label not in graph.columns.labels:
             self.columns = None  # its x isn't one of its DataFrame's columns: changed by hand
@@ -237,6 +269,16 @@ class GraphDialog(QDialog):
         self.hue_box.setCurrentIndex(max(0, self.hue_box.findData(hue)) if hue in options else 0)
         self._loading = False
         self._y_changed()
+
+    def _say(self, text: str, error: bool = False) -> None:
+        self.summary.setText(text)
+        self.summary.setVisible(bool(text))
+        self.summary.setStyleSheet(f"color: {error_color(self.palette())};" if error else "")
+
+    def _allow(self, allowed: bool) -> None:
+        """Whether the type and marker can be chosen, and OK clicked."""
+        for widget in (self.kind_box, self.swarm_box, self.marker_box, self.ok_button):
+            widget.setEnabled(allowed)
 
     # --- Following changes ---
 
