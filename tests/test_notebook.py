@@ -505,9 +505,10 @@ def test_tool_in_toolbar_menus_and_context_menu(window, monkeypatch):
     insert = [m for m in window.menuBar().actions() if m.text() == "Insert"][0].menu()
     for menu in (window.notebook_button.menu(), notebook_submenu(insert), notebook_submenu(window.context_menu)):
         actions = menu.actions()
-        assert [actions[0], *actions[2:]] == [window.open_notebook_action, window.dataframe_action,
-                                              window.graph_action]
-        assert [action.text() for action in actions] == ["Open", "", "DataFrame", "Graph"]
+        assert [actions[0], actions[2], actions[3], actions[5]] == [
+            window.open_notebook_action, window.dataframe_action, window.graph_action, window.load_data_action]
+        assert [action.text() for action in actions] == ["Open", "", "DataFrame", "Graph", "",
+                                                         "Load Data to Sheet…"]
 
 
 def test_open_shows_the_notebook_as_it_is(window, tmp_path):

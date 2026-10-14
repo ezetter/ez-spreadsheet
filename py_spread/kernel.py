@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import threading
 import weakref
+from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
 
@@ -23,6 +24,15 @@ POLL = 0.1  # seconds between checks for Stop or a dead kernel while code runs
 
 _STOP = object()
 _RESTART = object()
+
+
+@dataclass
+class _Evaluation:
+    """A quiet question for the kernel: run `code`, then give `expression`'s value."""
+
+    request_id: str
+    code: str
+    expression: str
 _runners = weakref.WeakSet()  # shut down at exit, so no kernel process outlives the app
 
 
@@ -36,6 +46,7 @@ class KernelRunner(QObject):
     finished = Signal(str, object, str)  # cell id, execution count, "ok"/"error"/"aborted"
     cancelled = Signal(str)  # cell id: taken off the queue without running
     failed = Signal(str)  # the kernel couldn't start; the message says why
+    evaluated = Signal(str, object, str)  # request id, the value's repr (None if it failed), why it failed
 
     def __init__(self, parent=None, kernel_name: str = KERNEL_NAME):
         super().__init__(parent)
@@ -55,6 +66,14 @@ class KernelRunner(QObject):
         """Queue a cell to run after any already queued."""
         self._ensure_thread()
         self._jobs.put((cell_id, code))
+
+    def evaluate(self, request_id: str, code: str, expression: str) -> None:
+        """After any queued cells, quietly run `code` and evaluate
+        `expression` in the notebook's variables: no outputs, history, or run
+        number. `evaluated` gives the value's repr. It never starts a kernel
+        (one that isn't running has no variables to ask about)."""
+        self._ensure_thread()
+        self._jobs.put(_Evaluation(request_id, code, expression))
 
     def interrupt(self) -> None:
         """Stop the running cell (as Ctrl-C would) and drop the queued ones."""
@@ -95,7 +114,7 @@ class KernelRunner(QObject):
             self._thread.start()
 
     def _cancel_queued(self) -> None:
-        """Drop the queued cells, keeping any queued Restart or Stop."""
+        """Drop the queued cells and questions, keeping any queued Restart or Stop."""
         keep = []
         while True:
             try:
@@ -104,6 +123,8 @@ class KernelRunner(QObject):
                 break
             if isinstance(job, tuple):
                 self.cancelled.emit(job[0])
+            elif isinstance(job, _Evaluation):
+                self.evaluated.emit(job.request_id, None, "Python was stopped before it could answer.")
             else:
                 keep.append(job)
         for job in keep:
@@ -119,6 +140,9 @@ class KernelRunner(QObject):
             if job is _RESTART:
                 self._stop_kernel()
                 self._start_kernel()
+                continue
+            if isinstance(job, _Evaluation):
+                self._evaluate(job)
                 continue
             cell_id, code = job
             if not self._start_kernel():
@@ -197,6 +221,34 @@ class KernelRunner(QObject):
         self.finished.emit(cell_id, count, status)
         self.state_changed.emit("idle")
         return status
+
+    def _evaluate(self, job: _Evaluation) -> None:
+        if self._manager is None or not self._manager.is_alive():
+            self.evaluated.emit(job.request_id, None, "Python isn't running.")
+            return
+        client = self._client
+        msg_id = client.execute(job.code, silent=True, store_history=False, allow_stdin=False,
+                                user_expressions={"value": job.expression})
+        while True:  # the reply carries the value; nothing comes as output
+            try:
+                reply = client.get_shell_msg(timeout=POLL)
+            except queue.Empty:
+                if self._stopping.is_set():
+                    self.evaluated.emit(job.request_id, None, "Python was stopped before it could answer.")
+                    return
+                if not self._manager.is_alive():
+                    self.evaluated.emit(job.request_id, None, "Python stopped.")
+                    self.state_changed.emit("stopped")
+                    return
+                continue
+            if reply["parent_header"].get("msg_id") == msg_id:
+                break
+        content = reply["content"]
+        value = content.get("user_expressions", {}).get("value", {}) if content.get("status") == "ok" else content
+        if value.get("status") != "ok":
+            self.evaluated.emit(job.request_id, None, f"{value.get('ename', 'Error')}: {value.get('evalue', '')}")
+            return
+        self.evaluated.emit(job.request_id, value.get("data", {}).get("text/plain"), "")
 
     def _stop_kernel(self) -> None:
         client, manager, socket_dir = self._client, self._manager, self._socket_dir

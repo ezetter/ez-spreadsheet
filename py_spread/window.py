@@ -2,6 +2,7 @@
 
 import dataclasses
 import os
+import uuid
 
 from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QStandardPaths, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication, QKeySequence, QPen, QUndoCommand
@@ -41,6 +42,8 @@ from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .kernel import KernelRunner
 from .graph_dialog import GraphDialog, graph_labels
 from .graphs import change_graph, find_graphs, frame_cell
+from .load_data import answer, data_request, frames, frames_request, sheet_writes
+from .load_data_dialog import LoadDataDialog
 from .notebook import (
     GraphError,
     Notebook,
@@ -657,15 +660,23 @@ class MainWindow(QMainWindow):
             "the first column is x, the others are y")
         self.graph_action.triggered.connect(lambda _checked=False: self.send_graph_to_notebook())
         self.graph_kind, self.graph_marker = "line", None  # the Graph dialog's last choices
+        self.load_data_action = QAction("Load Data to Sheet…", self)
+        self.load_data_action.setToolTip("Put one of the notebook's DataFrames in the sheet, at the current cell")
+        self.load_data_action.triggered.connect(lambda _checked=False: self.load_data_to_sheet())
+        self._evaluations = {}  # request id -> what to do with the notebook's answer
+        self._evaluating_with = None  # the kernel whose answers come to _on_evaluated
         self._add_notebook_menu(menu)
 
     def _add_notebook_menu(self, menu=None) -> QMenu:
-        """A Notebook menu (Open, DataFrame, Graph): a submenu of `menu`, or one of its own."""
+        """A Notebook menu (Open, DataFrame, Graph, Load Data to Sheet): a
+        submenu of `menu`, or one of its own."""
         submenu = menu.addMenu("Notebook") if menu is not None else QMenu("Notebook", self)
         submenu.addAction(self.open_notebook_action)
         submenu.addSeparator()
         submenu.addAction(self.dataframe_action)
         submenu.addAction(self.graph_action)
+        submenu.addSeparator()
+        submenu.addAction(self.load_data_action)
         return submenu
 
     def _build_chart_button(self, toolbar):
@@ -1172,6 +1183,71 @@ class MainWindow(QMainWindow):
         """The Graph dialog: (kind, marker), or None if cancelled."""
         dialog = GraphDialog(self, x_label, y_labels, self.graph_kind, self.graph_marker)
         return (dialog.kind(), dialog.marker()) if dialog.exec() == QDialog.Accepted else None
+
+    def load_data_to_sheet(self) -> None:
+        """Ask the notebook's Python for its DataFrames, then which one to
+        load, and put its data in the sheet at the current cell. Python
+        answers in the background (after any cells still running), so the
+        rest happens when it does."""
+        self._commit_pending_edit()
+        if not self.kernel.has_kernel:
+            self._show_status("The notebook's Python isn't running, so there are no DataFrames to load. "
+                              "Run the notebook's cells first.")
+            return
+        self._show_status("Looking for DataFrames in the notebook…")
+        self._ask_notebook(*frames_request(), self._frames_found)
+
+    def _frames_found(self, value, error: str) -> None:
+        if value is None:
+            self._show_status(f"Couldn't look for DataFrames: {error}")
+            return
+        found = frames(value)
+        if not found:
+            self._show_status("The notebook has no DataFrames to load. Make one in a cell and run it first.")
+            return
+        current = self.view.currentIndex()
+        top, left = (current.row(), current.column()) if current.isValid() else (0, 0)
+        name = self._ask_frame_to_load(found, cell_name(top, left))
+        if name is None:
+            self._show_status("")
+            return
+        self._show_status(f"Loading {name}…")
+        self._ask_notebook(*data_request(name),
+                           lambda value, error: self._frame_data_arrived(name, top, left, value, error))
+
+    def _frame_data_arrived(self, name: str, top: int, left: int, value, error: str) -> None:
+        if value is None:
+            self._show_error(f"Couldn't load {name}.", error)
+            return
+        data = answer(value)
+        writes = sheet_writes(data, top, left)
+        height, width = len(data["rows"]) + 1, len(data["columns"])
+        self.model.ensure_size(top + height, left + width)
+        self.model.set_cells(writes, "Load Data")
+        self.view.select_range(top, left, top + height - 1, left + max(width, 1) - 1)
+        rows = height - 1
+        self._show_status(f"Loaded {name} at {cell_name(top, left)}: {rows:,} row{'s' if rows != 1 else ''} "
+                          f"× {width} column{'s' if width != 1 else ''}, with its column names above.")
+
+    def _ask_frame_to_load(self, found: list[tuple[str, int, int]], cell: str) -> str | None:
+        """The Load Data to Sheet dialog: the chosen DataFrame's name, or None if cancelled."""
+        dialog = LoadDataDialog(self, found, cell)
+        return dialog.chosen() if dialog.exec() == QDialog.Accepted else None
+
+    def _ask_notebook(self, code: str, expression: str, done) -> None:
+        """Quietly evaluate `expression` (after `code`) in the notebook's Python;
+        done(its repr or None, why not) when the answer comes."""
+        if self._evaluating_with is not self.kernel:
+            self.kernel.evaluated.connect(self._on_evaluated)
+            self._evaluating_with = self.kernel
+        request_id = uuid.uuid4().hex
+        self._evaluations[request_id] = done
+        self.kernel.evaluate(request_id, code, expression)
+
+    def _on_evaluated(self, request_id: str, value, error: str) -> None:
+        done = self._evaluations.pop(request_id, None)
+        if done is not None:
+            done(value, error)
 
     def _run_in_notebook(self, sources: list[str]) -> list[str]:
         """Open the notebook, add cells with these sources at its end, and

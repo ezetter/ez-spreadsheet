@@ -28,6 +28,8 @@ class Dialogs:
         self.graph_prompts = []  # (x label, y labels, the choices it started with) each time it's shown
         self.graph_change_answer = None  # changing a graph: (which, kind, marker); None cancels
         self.graph_change_prompts = []  # (the graphs offered, the one it started with)
+        self.load_answer = None  # Load Data to Sheet: the DataFrame's name; None cancels
+        self.load_prompts = []  # (the DataFrames offered, the cell named) each time
 
 
 @pytest.fixture(autouse=True)
@@ -74,5 +76,11 @@ def dialogs(monkeypatch):
         return dialogs.graph_change_answer
 
     monkeypatch.setattr(MainWindow, "_ask_graph_change", ask_graph_change)
+
+    def ask_frame_to_load(window, found, cell):
+        dialogs.load_prompts.append((list(found), cell))
+        return dialogs.load_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_frame_to_load", ask_frame_to_load)
     monkeypatch.setattr(MainWindow, "_show_error", lambda window, text, detail: dialogs.errors.append(detail))
     return dialogs

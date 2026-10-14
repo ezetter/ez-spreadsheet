@@ -45,7 +45,8 @@ creates the file.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 - A secondary click (right-click, Control-click, or a two-finger click) on the
   grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, Fill,
-  Name Cell…, Name Column…, Notebook (Open, DataFrame, or Graph), and Ask Claude…. Clicking
+  Name Cell…, Name Column…, Notebook (Open, DataFrame, Graph, or Load Data to
+  Sheet…), and Ask Claude…. Clicking
   inside the selection keeps it; clicking elsewhere selects that cell first.
 
 ## Zoom
@@ -134,8 +135,9 @@ hand.
 Select cells (a block, or several columns, including whole columns picked in
 the column headers), then click the Notebook button on the toolbar, or choose
 Insert > Notebook or Notebook on the secondary-click menu. Its menu has
-**Open**, which just opens the notebook as it is (as View > Notebook does),
-and **DataFrame** and **Graph**, which add the selected cells to it.
+**Open**, which just opens the notebook as it is (as View > Notebook does);
+**DataFrame** and **Graph**, which add the selected cells to it; and **Load
+Data to Sheet…**, which brings a DataFrame back into the sheet.
 
 ### Sending cells as a DataFrame
 
@@ -234,6 +236,30 @@ marker. Change them and click OK:
   write, as long as its `kind=` and `marker=`, if it has them, are written out,
   such as `kind='line'` and `marker='o'`.
 - If the notebook has no graphs, the status bar says so, and how to make one.
+
+### Loading data into the sheet
+
+Notebook > Load Data to Sheet… puts one of the notebook's pandas DataFrames
+in the sheet, such as a result worked out in the notebook. EzSheet asks the
+notebook's Python which DataFrames it has (quietly: nothing shows in the
+notebook, and no run numbers are used) and lists them with their sizes, such
+as "by_month: 12 rows × 2 columns". Choose one, and its data goes into the
+sheet with its top-left corner at the current cell:
+
+- The column names make the first row, and the rows follow. An index that
+  means something, such as the months of `sales.groupby('Month').sum()` or the
+  statistics' names of `df.describe()`, makes the first column; one that's
+  just row numbers is left out.
+- Numbers become numbers, missing values (NaN, None) leave their cells empty,
+  and everything else (text, dates, True and False) is text.
+- It replaces whatever was in those cells, as one step that Undo reverses. The
+  sheet grows if the data doesn't fit, and the new data is selected.
+- The DataFrames are the ones that exist now, in the Python the notebook's
+  cells have run in. If Python isn't running (say, the sheet was just opened)
+  or has no DataFrames, the status bar says so: run the cells that make them
+  first. If cells are still running, the list comes once they finish.
+- DataFrames over 100,000 values are listed but can't be loaded, as they'd make
+  the sheet slow.
 
 ### Working in the notebook
 
