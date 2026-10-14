@@ -249,9 +249,17 @@ start a new one. Undoing back to the last save counts as no unsaved changes.
 
 ## Saving and opening
 
-The File menu has New (Cmd+N), Open (Cmd+O), Save (Cmd+S), and Save As
-(Cmd+Shift+S). The window title shows the file name, and you're asked before
-unsaved changes are discarded by New, Open, or closing the window.
+The File menu has New (Cmd+N), Open (Cmd+O), Open Recent, Save (Cmd+S), and
+Save As (Cmd+Shift+S). The window title shows the file name, and you're asked
+before unsaved changes are discarded by New, Open, Open Recent, or closing the
+window.
+
+File > Open Recent lists the last 10 sheets you opened or saved, newest
+first. Hovering over one shows where it is, and two sheets with the same name
+show their folders. A sheet that's been moved, renamed, or deleted is taken
+off the list when you choose it, and Clear Menu empties the list. The list is
+kept with EzSheet's preferences, so it's there the next time you start
+EzSheet. A new sheet joins it when it's first saved.
 
 Sheets are saved as `.ezs` files: JSON holding each cell's raw text
 (formulas, not their results) under its cell name, the angle unit for `SIN`,

@@ -41,6 +41,7 @@ from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .kernel import KernelRunner
 from .notebook import Notebook, data_block, dataframe_code, next_frame_name
 from .notebook_window import NotebookWindow, kernel_folder
+from .recent import add_recent_file, clear_recent_files, menu_labels, recent_files, remove_recent_file
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
@@ -359,6 +360,10 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
             action.triggered.connect(lambda _checked=False, s=slot: s())
             menu.addAction(action)
+            if name == "Open…":
+                self.recent_menu = menu.addMenu("Open Recent")
+                self.recent_menu.setToolTipsVisible(True)  # each sheet's full path
+                self._update_recent_menu()
         menu.addSeparator()
         for name, slot in (("Import CSV…", self.import_csv), ("Export CSV…", self.export_csv)):
             action = QAction(name, self)
@@ -1080,7 +1085,45 @@ class MainWindow(QMainWindow):
             self._show_error("Couldn't open the sheet.", str(e))
             return False
         self._load(sheet, path)
+        self._remember_recent(path)
         return True
+
+    def open_recent(self, path: str) -> bool:
+        """Open a sheet from File > Open Recent. One that's no longer there is
+        taken off the list."""
+        if not self.maybe_save():
+            return False
+        if not os.path.isfile(path):
+            self._show_error("Couldn't open the sheet.",
+                             f"{path} isn't there anymore. It may have been moved, renamed, or deleted, "
+                             "so it's been taken off Open Recent.")
+            remove_recent_file(path)
+            self._update_recent_menu()
+            return False
+        return self.open_path(path)
+
+    def clear_recent(self) -> None:
+        clear_recent_files()
+        self._update_recent_menu()
+
+    def _remember_recent(self, path: str) -> None:
+        add_recent_file(path)
+        self._update_recent_menu()
+
+    def _update_recent_menu(self) -> None:
+        """List the recent sheets, newest first, then Clear Menu."""
+        menu = self.recent_menu
+        menu.clear()
+        paths = recent_files()
+        for path, label in zip(paths, menu_labels(paths)):
+            action = menu.addAction(label.replace("&", "&&"))  # a lone & would underline the next letter
+            action.setToolTip(path)
+            action.triggered.connect(lambda _checked=False, p=path: self.open_recent(p))
+        if paths:
+            menu.addSeparator()
+        clear = menu.addAction("Clear Menu")
+        clear.setEnabled(bool(paths))
+        clear.triggered.connect(lambda _checked=False: self.clear_recent())
 
     def open_or_create(self, path: str) -> bool:
         """Open a file, or if there's nothing there yet, start an empty sheet
@@ -1122,6 +1165,7 @@ class MainWindow(QMainWindow):
         self.model.undo_stack.setClean()
         self._notebook_dirty = False
         self.setWindowModified(False)
+        self._remember_recent(path)
         return True
 
     def import_csv(self) -> None:
