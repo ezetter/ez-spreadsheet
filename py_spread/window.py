@@ -517,7 +517,7 @@ class MainWindow(QMainWindow):
         row_header = self.view.verticalHeader()
         row_header.setContextMenuPolicy(Qt.CustomContextMenu)
         row_header.customContextMenuRequested.connect(self._show_row_header_menu)
-        self.view.selectionModel().selectionChanged.connect(self._update_insert_text)
+        self.view.selectionModel().selectionChanged.connect(self._update_line_actions)
 
     def _show_context_menu(self, pos):
         self._commit_pending_edit()
@@ -795,8 +795,8 @@ class MainWindow(QMainWindow):
 
     def _show_header_menu(self, pos):
         """A secondary click on a column header: select the column (keeping a
-        selection of whole columns it's in), and offer to insert columns or
-        name it."""
+        selection of whole columns it's in), and offer to insert or delete
+        columns, or name it."""
         col = self.view.horizontalHeader().logicalIndexAt(pos)
         if col < 0:
             return
@@ -805,6 +805,7 @@ class MainWindow(QMainWindow):
             self.view.select_range(0, col, self.model.rowCount() - 1, col)
         menu = QMenu(self)
         menu.addAction(self.insert_cells_action)
+        menu.addAction(self.delete_cells_action)
         menu.addSeparator()
         menu.addAction("Name Column…", lambda: self.name_column(col))
         menu.popup(self.view.horizontalHeader().mapToGlobal(pos))
@@ -812,7 +813,7 @@ class MainWindow(QMainWindow):
 
     def _show_row_header_menu(self, pos):
         """A secondary click on a row header: select the row (keeping a
-        selection of whole rows it's in), and offer to insert rows."""
+        selection of whole rows it's in), and offer to insert or delete rows."""
         row = self.view.verticalHeader().logicalIndexAt(pos)
         if row < 0:
             return
@@ -821,6 +822,7 @@ class MainWindow(QMainWindow):
             self.view.select_range(row, 0, row, self.model.columnCount() - 1)
         menu = QMenu(self)
         menu.addAction(self.insert_cells_action)
+        menu.addAction(self.delete_cells_action)
         menu.popup(self.view.verticalHeader().mapToGlobal(pos))
         self.header_menu = menu
 
@@ -1248,22 +1250,58 @@ class MainWindow(QMainWindow):
         self._show_status(f"Inserted {len(indexes)} blank {noun}.")
         return True
 
-    def _update_insert_text(self, *_args) -> None:
-        """Insert Cells… becomes Insert Columns (or Rows) for whole columns (or rows)."""
+    def _update_line_actions(self, *_args) -> None:
+        """Insert Cells… and Delete Cells… become Insert Columns and Delete
+        Columns (or Rows) for whole columns (or rows)."""
         lines = self.view.whole_lines()
         if lines is None:
-            text = "Insert Cells…"
+            insert, delete = "Insert Cells…", "Delete Cells…"
         else:
             kind, indexes = lines
-            text = f"Insert {(kind[:-1] if len(indexes) == 1 else kind).capitalize()}"
-        self.insert_cells_action.setText(text)
+            noun = (kind[:-1] if len(indexes) == 1 else kind).capitalize()
+            insert, delete = f"Insert {noun}", f"Delete {noun}"
+        self.insert_cells_action.setText(insert)
+        self.delete_cells_action.setText(delete)
+
+    def delete_lines(self, kind: str, indexes: list[int]) -> bool:
+        """Delete whole "rows" or "columns", moving the rest up or left with
+        their heights or widths, as one undo step. What moved into their place
+        is selected."""
+        self._commit_pending_edit()
+        noun = kind[:-1] if len(indexes) == 1 else kind
+        header = self.view.horizontalHeader() if kind == "columns" else self.view.verticalHeader()
+        before = _section_ratios(header)
+        blocks = runs(indexes)
+        stack = self.model.undo_stack
+        stack.beginMacro(f"Delete {noun.capitalize()}")
+        for start, count in reversed(blocks):  # from the end, so the others don't move first
+            if kind == "columns":
+                self.model.delete_columns(start, count)
+            else:
+                self.model.delete_rows(start, count)
+        gone = set(indexes)
+        after = [ratio for i, ratio in enumerate(before) if i not in gone]
+        after += [1.0] * (header.count() - len(after))  # the sheet keeps its size
+        stack.push(_SectionSizesCommand(header, before, after))
+        stack.endMacro()
+        selected, removed = [], 0
+        for start, count in blocks:
+            selected += range(start - removed, start - removed + count)
+            removed += count
+        self.view.select_lines(kind, selected)
+        self._show_status(f"Deleted {len(indexes)} {noun}.")
+        return True
 
     def _ask_insert_shift(self, problems: dict[str, str]) -> str | None:
         return ask_shift(InsertCellsDialog, self, self.insert_shift, problems)
 
     def delete_cells(self) -> bool:
-        """Ask which way to shift, then delete the selected cells and close the gap."""
+        """Ask which way to shift, then delete the selected cells and close the
+        gap; or, with whole rows or columns selected, delete them."""
         self._commit_pending_edit()
+        lines = self.view.whole_lines()
+        if lines is not None:
+            return self.delete_lines(*lines)
         top, left, bottom, right = self.view.selection_bounds()
         problems = {}  # shifts that can't work here, disabled in the dialog
         for key in SHIFT_LABELS:

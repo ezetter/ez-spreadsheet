@@ -403,6 +403,29 @@ class SheetModel(QAbstractTableModel):
         problem = self.delete_problem(top, left, bottom, right, shift)
         if problem:
             return problem
+        self._delete(top, left, bottom, right, shift, "Delete Cells")
+        return None
+
+    def delete_rows(self, row: int, count: int = 1) -> None:
+        """Delete `count` rows from `row` on, moving the rows below up, as one
+        undoable step. References to deleted cells become #REF! and ranges
+        shrink, as with delete_cells; names of deleted cells are kept, as
+        #REF!. The sheet keeps its size."""
+        self._delete(row, 0, row + count - 1, self._cols - 1, "up", "Delete Rows" if count > 1 else "Delete Row")
+
+    def delete_columns(self, col: int, count: int = 1) -> None:
+        """Delete `count` columns from `col` on, moving the columns to their
+        right left, as one undoable step, as delete_rows does. A deleted
+        column's name goes with it; other column names move with their
+        columns (so t5 still means the same cell)."""
+        last = col + count - 1
+        columns = {name: None if col <= c <= last else c - count if c > last else c
+                   for name, c in self._column_names.items()}
+        self._delete(0, col, self._rows - 1, last, "left", "Delete Columns" if count > 1 else "Delete Column",
+                     columns)
+
+    def _delete(self, top: int, left: int, bottom: int, right: int, shift: str, description: str,
+                columns: dict[str, int | None] | None = None) -> None:
         height, width = bottom - top + 1, right - left + 1
         vertical = shift in ("up", "down")
 
@@ -438,8 +461,7 @@ class SheetModel(QAbstractTableModel):
                 return None
             return new_start, new_end
 
-        self._rearrange(move, move_range, "Delete Cells")
-        return None
+        self._rearrange(move, move_range, description, columns)
 
     def _occupied(self) -> set:
         """Cells with text, a number format, or a style."""

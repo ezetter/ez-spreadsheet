@@ -392,7 +392,8 @@ Columns**) and inserts that many blank columns before them, without asking:
 the selected columns and everything to their right move right. With whole
 rows selected (click a row header), it's **Insert Row** (or **Rows**), and
 everything from there down moves down. It's also on the secondary-click menus
-of the grid, the column headers, and the row headers.
+of the grid, the column headers, and the row headers. Deleting them works the
+same way (see [Deleting rows and columns](#deleting-rows-and-columns)).
 
 - Columns selected separately (Cmd-click their headers) each get a blank
   column before them; likewise rows.
@@ -423,6 +424,23 @@ asks which way the remaining cells should move to fill it:
   that's deleted entirely becomes `#REF!`.
 - Number formats and bold/italic move with their cells. The whole delete is
   one step that Undo reverses, and the dialog remembers your last choice.
+
+### Deleting rows and columns
+
+With whole columns or rows selected, Edit > Delete Cells… becomes **Delete
+Column(s)** or **Delete Row(s)** and deletes them without asking: the columns
+to their right move left, or the rows below move up. It's on the same
+secondary-click menus as Insert, including the column and row headers.
+
+- Rows or columns selected separately are each deleted. What moved into their
+  place is selected afterwards.
+- As with Delete Cells, references to deleted cells become `#REF!` and ranges
+  shrink, and a name whose cell is deleted shows `#REF!` until you give it a new
+  cell. A deleted column's name is removed; other column names move with their
+  columns, so `t5` still means the same cell.
+- Column widths and row heights move with their columns and rows. The sheet
+  keeps its size, with blank rows or columns at the end. The whole delete is
+  one step that Undo reverses.
 
 ## CSV import and export
 
@@ -559,8 +577,9 @@ the secondary-click menu, and on a column header's), and name, say, column C
 - Formulas > Names… lists column names along with cell names; a column is
   written `C:C` there.
 - Column names stay with their column when cells are inserted or deleted; cell
-  references in formulas still follow their cells. Inserting whole columns is
-  different: column names move with their columns (see
+  references in formulas still follow their cells. Inserting or deleting whole
+  columns is different: column names move with their columns, and a deleted
+  column's name is removed (see
   [Inserting rows and columns](#inserting-rows-and-columns)).
 
 ## AutoSum (Σ)

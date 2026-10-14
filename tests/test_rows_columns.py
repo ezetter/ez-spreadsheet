@@ -113,17 +113,19 @@ def test_recognizes_whole_columns_and_rows(window):
     assert window.view.whole_lines() is None  # the whole sheet
 
 
-def test_menu_item_names_what_it_inserts(window):
-    action = window.insert_cells_action
-    assert action.text() == "Insert Cells…"
+def test_menu_items_name_what_they_insert_and_delete(window):
+    def texts():
+        return window.insert_cells_action.text(), window.delete_cells_action.text()
+
+    assert texts() == ("Insert Cells…", "Delete Cells…")
     select_columns(window, 1, 1)
-    assert action.text() == "Insert Column"
+    assert texts() == ("Insert Column", "Delete Column")
     select_columns(window, 1, 3)
-    assert action.text() == "Insert Columns"
+    assert texts() == ("Insert Columns", "Delete Columns")
     select_rows(window, 2, 4)
-    assert action.text() == "Insert Rows"
+    assert texts() == ("Insert Rows", "Delete Rows")
     window.view.select_range(1, 1, 2, 2)
-    assert action.text() == "Insert Cells…"
+    assert texts() == ("Insert Cells…", "Delete Cells…")
 
 
 def test_insert_columns_without_asking(window, dialogs):
@@ -191,7 +193,8 @@ def test_heights_move_with_their_rows(window):
 def test_column_header_menu(window):
     select_columns(window, 1, 2)
     window._show_header_menu(QPoint(window.view.columnViewportPosition(2) + 5, 5))
-    assert [a.text() for a in window.header_menu.actions()] == ["Insert Columns", "", "Name Column…"]
+    assert [a.text() for a in window.header_menu.actions()] == ["Insert Columns", "Delete Columns", "",
+                                                                "Name Column…"]
     assert window.view.whole_lines() == ("columns", [1, 2])  # clicked inside the selection: kept
     window.header_menu.hide()
     window._show_header_menu(QPoint(window.view.columnViewportPosition(4) + 5, 5))
@@ -203,7 +206,88 @@ def test_row_header_menu(window):
     header = window.view.verticalHeader()
     window._show_row_header_menu(QPoint(5, header.sectionViewportPosition(3) + 5))
     assert window.view.whole_lines() == ("rows", [3])
-    assert [a.text() for a in window.header_menu.actions()] == ["Insert Row"]
+    assert [a.text() for a in window.header_menu.actions()] == ["Insert Row", "Delete Row"]
     window.header_menu.actions()[0].trigger()
     assert window.model.get_cell(4, 0) == "y"
+    window.header_menu.hide()
+
+
+# --- Deleting whole rows and columns ---
+
+def test_delete_columns(model):
+    model.name_column(3, "u")
+    model.name_column(1, "t")
+    model.name_cell(0, 1, "r")
+    model.set_cells({(1, 4): "=u2+t1", (2, 4): "=SUM(A1:C1)*u1"})
+    model.delete_columns(1)
+    assert model.get_cell(0, 1) == "3" and model.get_cell(0, 2) == "=A1+#REF!+B1"
+    assert model.get_cell(1, 2) == "=SUM(A1:B1)"  # the range shrinks
+    assert model.get_cell(1, 3) == "=u2+#REF!"  # u moved with its column; t went with B
+    assert model.get_cell(2, 3) == "=SUM(A1:B1)*u1" and model.value(1, 2) == 4  # 1 + 3
+    assert model.column_names() == {"u": 2} and model.cell_names() == {"r": None}  # r shows #REF!
+    assert model.columnCount() == 5 and model.undo_stack.undoText() == "Delete Column"
+    model.undo_stack.undo()
+    assert model.column_names() == {"t": 1, "u": 3} and model.get_cell(1, 4) == "=u2+t1"
+
+
+def test_delete_rows(model):
+    model.name_column(2, "t")
+    model.set_cell(6, 0, "=t5+C1")
+    model.delete_rows(1, 2)
+    assert model.get_cell(2, 2) == "7" and model.get_cell(4, 0) == "=t3+C1"
+    assert model.get_cell(1, 3) == "" and model.rowCount() == 10  # the SUM row is gone; same size
+    assert model.undo_stack.undoText() == "Delete Rows"
+
+
+def test_last_row_and_column_can_go(model):
+    model.set_cells({(9, 0): "end", (0, 4): "edge"})
+    model.delete_rows(9)
+    model.delete_columns(4)
+    assert model.get_cell(9, 0) == "" and model.get_cell(0, 4) == ""
+
+
+def test_delete_columns_without_asking(window, dialogs):
+    select_columns(window, 1, 2)
+    window.delete_cells_action.trigger()
+    assert dialogs.delete_problems is None  # no Delete Cells dialog
+    model = window.model
+    assert [model.get_cell(0, c) for c in range(3)] == ["a", "d", ""]
+    assert model.get_cell(1, 1) == "=#REF!"  # it pointed at B1
+    assert window.view.whole_lines() == ("columns", [1, 2])  # where they were
+    assert window.statusBar().currentMessage() == "Deleted 2 columns."
+    assert window.undo_action.text() == "Undo Delete Columns"
+    window.undo_action.trigger()
+    assert [model.get_cell(0, c) for c in range(4)] == ["a", "b", "c", "d"] and model.get_cell(1, 3) == "=B1"
+
+
+def test_delete_separate_rows(window):
+    model, rows = window.model, window.model.rowCount() - 1
+    from PySide6.QtCore import QItemSelection, QItemSelectionModel
+    select_rows(window, 0, 0)
+    cols = model.columnCount() - 1
+    window.view.selectionModel().select(QItemSelection(model.index(2, 0), model.index(2, cols)),
+                                        QItemSelectionModel.Select)
+    assert window.view.whole_lines() == ("rows", [0, 2])
+    window.delete_cells()
+    assert [model.get_cell(r, 0) for r in range(3)] == ["", "y", ""]  # rows 2 and 4 are left
+    assert window.view.whole_lines() == ("rows", [0, 1]) and model.rowCount() == rows + 1
+
+
+def test_widths_close_up_with_deleted_columns(window):
+    header = window.view.horizontalHeader()
+    default = header.defaultSectionSize()
+    header.resizeSection(1, 40)
+    header.resizeSection(3, 250)
+    select_columns(window, 1, 1)
+    window.delete_cells()
+    assert (header.sectionSize(1), header.sectionSize(2)) == (default, 250)
+    window.undo_action.trigger()
+    assert (header.sectionSize(1), header.sectionSize(3)) == (40, 250)
+
+
+def test_header_menus_delete(window):
+    header = window.view.verticalHeader()
+    window._show_row_header_menu(QPoint(5, header.sectionViewportPosition(2) + 5))
+    window.header_menu.actions()[1].trigger()  # Delete Row
+    assert [window.model.get_cell(r, 0) for r in range(3)] == ["a", "", "y"]
     window.header_menu.hide()
