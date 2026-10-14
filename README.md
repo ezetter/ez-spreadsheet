@@ -42,6 +42,15 @@ creates the file.
 - Return (or double-click, or F2) edits the current cell without clearing it.
 - Return commits and moves down; Tab commits and moves right; Escape cancels.
 - Delete/Backspace clears the selected cells.
+- Shift+Cmd+Up (or Down, Left, Right) extends the selection to the edge of the
+  data: from the current cell through the cells with something in them, to
+  the last before an empty cell, or to the edge of the sheet, whichever comes
+  first. If the next cell is already empty, it goes on to the next cell with
+  something in it (or the edge), so pressing again keeps going. With several
+  cells selected, the whole selection extends together, as far as the current
+  cell's column (or row, for Left and Right) goes; for example, select three
+  cells side by side and press Shift+Cmd+Up to select all three columns up to
+  the top of the data. The current cell stays where it was.
 - The bar above the grid shows the current cell's reference and raw contents (the formula, not its result), and can be used to edit it. Leaving the bar commits the edit.
 - A secondary click (right-click, Control-click, or a two-finger click) on the
   grid opens a menu with Cut, Copy, Paste, Insert Cells…, Delete Cells…, Fill,

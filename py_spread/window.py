@@ -158,6 +158,9 @@ class CellDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+_ARROWS = {Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0), Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1)}
+
+
 class SheetView(QTableView):
     """Table view with spreadsheet-style keyboard and mouse behavior."""
 
@@ -208,7 +211,59 @@ class SheetView(QTableView):
             if key == Qt.Key_Escape:
                 self.escape_pressed.emit()
                 return
+            # Shift+Cmd+arrow (Cmd is Control to Qt on macOS, and arrows count as keypad keys there)
+            if key in _ARROWS and event.modifiers() & ~Qt.KeypadModifier == Qt.ShiftModifier | Qt.ControlModifier:
+                self.extend_to_data_edge(*_ARROWS[key])
+                return
         super().keyPressEvent(event)
+
+    def extend_to_data_edge(self, d_row: int, d_col: int) -> None:
+        """Shift+Cmd+arrow: extend the selection in that direction, all its
+        columns (up or down) or rows (left or right) together, as far as the
+        current cell's column (or row) goes from the selection's edge: through
+        the cells with something in them to the last before an empty cell, or
+        to the sheet's edge. Where the next cell is empty, it goes on through
+        the empty ones to the next cell with something in it (or the edge), so
+        pressing again keeps going. The current cell stays where it is."""
+        model = self.model()
+        top, left, bottom, right = self.selection_bounds()
+        current = self.currentIndex()
+        vertical, step = d_row != 0, d_row or d_col
+        if vertical:  # the current cell's column decides, if it's in the selection
+            line = current.column() if current.isValid() and left <= current.column() <= right else left
+            start = top if step < 0 else bottom
+        else:
+            line = current.row() if current.isValid() and top <= current.row() <= bottom else top
+            start = left if step < 0 else right
+        end = self._data_edge(line, start, step, vertical)
+        if vertical:
+            top, bottom = min(top, end), max(bottom, end)
+            far = model.index(end, line)
+        else:
+            left, right = min(left, end), max(right, end)
+            far = model.index(line, end)
+        self.selectionModel().select(QItemSelection(model.index(top, left), model.index(bottom, right)),
+                                     QItemSelectionModel.Select)
+        self.scrollTo(far)
+
+    def _data_edge(self, line: int, start: int, step: int, vertical: bool) -> int:
+        """Where extending from `start` along a column (vertical) or row ends."""
+        model = self.model()
+        last = (model.rowCount() if vertical else model.columnCount()) - 1
+
+        def filled(at: int) -> bool:
+            return bool(model.get_cell(at, line) if vertical else model.get_cell(line, at))
+
+        at = start + step
+        if not 0 <= at <= last:
+            return start  # already at the edge
+        if filled(at):  # through the cells with something in them
+            while 0 <= at + step <= last and filled(at + step):
+                at += step
+            return at
+        while not filled(at) and 0 <= at + step <= last:  # through the empty ones, to the next filled
+            at += step
+        return at
 
     def mousePressEvent(self, event):
         if not (self._pick_cell(event) or self._insert_reference(event)):
