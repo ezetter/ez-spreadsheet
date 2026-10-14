@@ -211,11 +211,33 @@ class SheetView(QTableView):
             if key == Qt.Key_Escape:
                 self.escape_pressed.emit()
                 return
-            # Shift+Cmd+arrow (Cmd is Control to Qt on macOS, and arrows count as keypad keys there)
-            if key in _ARROWS and event.modifiers() & ~Qt.KeypadModifier == Qt.ShiftModifier | Qt.ControlModifier:
+            # Cmd+arrow and Shift+Cmd+arrow (Cmd is Control to Qt on macOS, and arrows count as
+            # keypad keys there)
+            modifiers = event.modifiers() & ~Qt.KeypadModifier
+            if key in _ARROWS and modifiers == Qt.ShiftModifier | Qt.ControlModifier:
                 self.extend_to_data_edge(*_ARROWS[key])
                 return
+            if key in _ARROWS and modifiers == Qt.ControlModifier:
+                self.move_to_data_edge(*_ARROWS[key])
+                return
         super().keyPressEvent(event)
+
+    def move_to_data_edge(self, d_row: int, d_col: int) -> None:
+        """Cmd+arrow: move the current cell to the edge of the data that way:
+        through the cells with something in them to the last before an empty
+        cell, or, if the next cell is empty, on to the next cell with
+        something in it, or else to the sheet's edge (as Shift+Cmd+arrow
+        extends a selection)."""
+        current = self.currentIndex()
+        if not current.isValid():
+            return
+        vertical, step = d_row != 0, d_row or d_col
+        line, start = (current.column(), current.row()) if vertical else (current.row(), current.column())
+        end = self._data_edge(line, start, step, vertical)
+        target = self.model().index(end, line) if vertical else self.model().index(line, end)
+        # (Not setCurrentIndex: with Cmd held, Qt would leave the selection as it was.)
+        self.selectionModel().setCurrentIndex(target, QItemSelectionModel.ClearAndSelect)
+        self.scrollTo(target)
 
     def extend_to_data_edge(self, d_row: int, d_col: int) -> None:
         """Shift+Cmd+arrow: extend the selection in that direction, all its

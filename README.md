@@ -42,11 +42,13 @@ creates the file.
 - Return (or double-click, or F2) edits the current cell without clearing it.
 - Return commits and moves down; Tab commits and moves right; Escape cancels.
 - Delete/Backspace clears the selected cells.
-- Shift+Cmd+Up (or Down, Left, Right) extends the selection to the edge of the
-  data: from the current cell through the cells with something in them, to
-  the last before an empty cell, or to the edge of the sheet, whichever comes
-  first. If the next cell is already empty, it goes on to the next cell with
-  something in it (or the edge), so pressing again keeps going. With several
+- Cmd+Up (or Down, Left, Right) moves to the edge of the data: from the
+  current cell through the cells with something in them, to the last before an
+  empty cell, or to the edge of the sheet, whichever comes first. If the next
+  cell is already empty, it goes on to the next cell with something in it (or
+  the edge), so pressing again keeps going, past gaps.
+- Shift+Cmd+Up (or Down, Left, Right) extends the selection the same way,
+  instead of moving. With several
   cells selected, the whole selection extends together, as far as the current
   cell's column (or row, for Left and Right) goes; for example, select three
   cells side by side and press Shift+Cmd+Up to select all three columns up to

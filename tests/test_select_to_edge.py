@@ -112,3 +112,46 @@ def test_other_arrow_keys_still_move(window):
     window.view.select_range(3, 1, 3, 1)
     press(window, Qt.Key_Up, Qt.ShiftModifier)  # Shift alone extends by one cell, as before
     assert selected(window) == column(1, 2, 3)
+
+
+# --- Cmd+arrow: moving there ---
+
+def current(window) -> tuple[int, int]:
+    index = window.view.currentIndex()
+    return index.row(), index.column()
+
+
+def test_cmd_up_moves_through_the_data_and_past_gaps(window):
+    window.view.select_range(7, 1, 7, 1)  # B8
+    press(window, Qt.Key_Up, Qt.ControlModifier)
+    assert current(window) == (6, 1) and selected(window) == {(6, 1)}  # B7, the last before the empty B6
+    press(window, Qt.Key_Up, Qt.ControlModifier)
+    assert current(window) == (4, 1)  # past the gap, to B5
+    press(window, Qt.Key_Up, Qt.ControlModifier)
+    assert current(window) == (0, 1)  # through the data to the top
+    press(window, Qt.Key_Up, Qt.ControlModifier)
+    assert current(window) == (0, 1)  # already at the edge
+
+
+def test_cmd_down_left_and_right(window):
+    window.view.select_range(0, 1, 0, 1)
+    press(window, Qt.Key_Down, Qt.ControlModifier)
+    assert current(window) == (4, 1)
+    press(window, Qt.Key_Right, Qt.ControlModifier)
+    assert current(window) == (4, 3)  # B5, C5, D5
+    press(window, Qt.Key_Right, Qt.ControlModifier)
+    assert current(window) == (4, window.model.columnCount() - 1)  # nothing more: the sheet's edge
+    press(window, Qt.Key_Left, Qt.ControlModifier)
+    assert current(window) == (4, 3)
+
+
+def test_cmd_arrow_collapses_a_selection(window):
+    window.view.select_range(1, 1, 3, 2)  # B2:C4, current B2
+    press(window, Qt.Key_Down, Qt.ControlModifier | Qt.KeypadModifier)  # as macOS sends it
+    assert current(window) == (4, 1) and selected(window) == {(4, 1)}
+
+
+def test_plain_arrows_still_move_one_cell(window):
+    window.view.select_range(3, 1, 3, 1)
+    press(window, Qt.Key_Up, Qt.NoModifier)
+    assert current(window) == (2, 1)
