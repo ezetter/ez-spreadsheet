@@ -384,6 +384,27 @@ asks which way the cells in the way should go: down, right, up, or left.
 - Number formats and bold/italic move with their cells. The whole insert is
   one step that Undo reverses, and the dialog remembers your last choice.
 
+### Inserting rows and columns
+
+With whole columns selected (click a column header, or drag or Shift-click
+across several), Edit > Insert Cells… becomes **Insert Column** (or **Insert
+Columns**) and inserts that many blank columns before them, without asking:
+the selected columns and everything to their right move right. With whole
+rows selected (click a row header), it's **Insert Row** (or **Rows**), and
+everything from there down moves down. It's also on the secondary-click menus
+of the grid, the column headers, and the row headers.
+
+- Columns selected separately (Cmd-click their headers) each get a blank
+  column before them; likewise rows.
+- Formulas follow their cells, as with Insert Cells, and so do cell names.
+  Column names move with their columns, so with column C named `t`, inserting
+  a column before it makes `t` column D, and `t5` still means the same cell.
+- Column widths and row heights you've set move with their columns and rows;
+  the new ones get the normal size.
+- The sheet grows if anything would be pushed past its edge. The new blank
+  rows or columns are selected, and the whole insert is one step that Undo
+  reverses.
+
 ## Deleting cells
 
 Edit > Delete Cells… removes the selected cells and closes the gap. A dialog
@@ -538,7 +559,9 @@ the secondary-click menu, and on a column header's), and name, say, column C
 - Formulas > Names… lists column names along with cell names; a column is
   written `C:C` there.
 - Column names stay with their column when cells are inserted or deleted; cell
-  references in formulas still follow their cells.
+  references in formulas still follow their cells. Inserting whole columns is
+  different: column names move with their columns (see
+  [Inserting rows and columns](#inserting-rows-and-columns)).
 
 ## AutoSum (Σ)
 

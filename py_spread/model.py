@@ -357,6 +357,30 @@ class SheetModel(QAbstractTableModel):
         self._rearrange(move, None, "Insert Cells")
         return None
 
+    def insert_rows(self, row: int, count: int = 1) -> None:
+        """Insert `count` blank rows before `row`, moving it and every row
+        below down, as one undoable step. Formulas and cell names follow their
+        cells, and the sheet grows to fit."""
+        self._insert(_shifter(row, 0, row + count - 1, self._cols - 1, "down"),
+                     "Insert Rows" if count > 1 else "Insert Row")
+
+    def insert_columns(self, col: int, count: int = 1) -> None:
+        """Insert `count` blank columns before `col`, moving it and every
+        column to its right over, as one undoable step. Column names move with
+        their columns (so t5 still means the same cell); formulas and cell
+        names follow their cells, and the sheet grows to fit."""
+        columns = {name: c + count if c >= col else c for name, c in self._column_names.items()}
+        self._insert(_shifter(0, col, self._rows - 1, col + count - 1, "right"),
+                     "Insert Columns" if count > 1 else "Insert Column", columns)
+
+    def _insert(self, move, description: str, columns: dict[str, int] | None = None) -> None:
+        destinations = [move(*key) for key in self._occupied()]
+        destinations += [move(*cell) for _name, cell in self._names.values() if cell]  # empty named cells too
+        rows = max((r for r, _ in destinations), default=-1) + 1
+        cols = max([c for _, c in destinations] + list((columns or {}).values()), default=-1) + 1
+        self.ensure_size(rows, cols)
+        self._rearrange(move, None, description, columns)
+
     def delete_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
         """Why a block can't be deleted with this shift, or None if it can. The
         cells that close the gap come from the opposite side, so there must be
@@ -421,14 +445,16 @@ class SheetModel(QAbstractTableModel):
         """Cells with text, a number format, or a style."""
         return set(self._cells) | set(self._formats) | set(self._styles)
 
-    def _rearrange(self, move, move_range, description: str) -> None:
+    def _rearrange(self, move, move_range, description: str, columns: dict[str, int] | None = None) -> None:
         """Move every cell (with its format and style) to move(row, col), or
-        remove it if that's None, rewriting formulas to follow, as one step."""
+        remove it if that's None, rewriting formulas to follow, as one step.
+        `columns`, if given, are the column names' new columns."""
         occupied = self._occupied()
+        names_now = self.name_set()
         cells, formats, styles = {}, {}, {}
         for key, text in self._cells.items():
             if (dest := move(*key)) is not None:
-                cells[dest] = (move_references(text, move, move_range, self.name_set())
+                cells[dest] = (move_references(text, move, move_range, names_now, columns)
                                if is_formula(text) else text)
         for table, moved in ((self._formats, formats), (self._styles, styles)):
             for key, value in table.items():
@@ -444,6 +470,7 @@ class SheetModel(QAbstractTableModel):
             {key: formats.get(key) for key in keys},
             {key: styles.get(key) for key in keys},
             moved_names,
+            columns,
         )
 
     # --- Cell names ---

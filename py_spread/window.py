@@ -4,7 +4,7 @@ import dataclasses
 import os
 
 from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QStandardPaths, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication, QKeySequence, QPen
+from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication, QKeySequence, QPen, QUndoCommand
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -253,6 +253,36 @@ class SheetView(QTableView):
         cols = [index.column() for index in indexes]
         return min(rows), min(cols), max(rows), max(cols)
 
+    def whole_lines(self) -> tuple[str, list[int]] | None:
+        """("columns", their indexes) if the selection is whole columns (all
+        of their rows), ("rows", ...) if it's whole rows, else None. Selecting
+        the whole sheet is neither."""
+        ranges = list(self.selectionModel().selection())
+        if not ranges:
+            return None
+        rows, cols = self.model().rowCount(), self.model().columnCount()
+        columns = all(r.top() == 0 and r.bottom() == rows - 1 for r in ranges)
+        whole_rows = all(r.left() == 0 and r.right() == cols - 1 for r in ranges)
+        if columns == whole_rows:
+            return None
+        if columns:
+            return "columns", sorted({c for r in ranges for c in range(r.left(), r.right() + 1)})
+        return "rows", sorted({row for r in ranges for row in range(r.top(), r.bottom() + 1)})
+
+    def select_lines(self, kind: str, indexes: list[int]) -> None:
+        """Select whole "rows" or "columns", making the first one's first cell current."""
+        model = self.model()
+        selection = QItemSelection()
+        for start, count in runs(indexes):
+            if kind == "columns":
+                selection.select(model.index(0, start), model.index(model.rowCount() - 1, start + count - 1))
+            else:
+                selection.select(model.index(start, 0), model.index(start + count - 1, model.columnCount() - 1))
+        first = model.index(0, indexes[0]) if kind == "columns" else model.index(indexes[0], 0)
+        self.selectionModel().setCurrentIndex(first, QItemSelectionModel.NoUpdate)
+        self.selectionModel().select(selection, QItemSelectionModel.ClearAndSelect)
+        self.scrollTo(first)
+
     def select_range(self, top: int, left: int, bottom: int, right: int) -> None:
         """Select a block of cells, make its top-left current, and scroll to it."""
         model = self.model()
@@ -267,6 +297,45 @@ class SheetView(QTableView):
         row = min(max(current.row() + d_row, 0), self.model().rowCount() - 1)
         col = min(max(current.column() + d_col, 0), self.model().columnCount() - 1)
         self.setCurrentIndex(self.model().index(row, col))
+
+
+def runs(indexes: list[int]) -> list[tuple[int, int]]:
+    """Sorted row or column indexes as (first, count) runs: [1, 2, 5] is [(1, 2), (5, 1)]."""
+    found = []
+    for index in sorted(set(indexes)):
+        if found and found[-1][0] + found[-1][1] == index:
+            found[-1] = (found[-1][0], found[-1][1] + 1)
+        else:
+            found.append((index, 1))
+    return found
+
+
+def _section_ratios(header) -> list[float]:
+    """Each section's size as a multiple of the default, so it survives zooming."""
+    default = header.defaultSectionSize()
+    return [header.sectionSize(i) / default for i in range(header.count())]
+
+
+class _SectionSizesCommand(QUndoCommand):
+    """Column widths or row heights moving with inserted columns or rows, as
+    part of the insert's undo step."""
+
+    def __init__(self, header, before: list[float], after: list[float]):
+        super().__init__()
+        self.header, self.before, self.after = header, before, after
+
+    def redo(self):
+        self._apply(self.after)
+
+    def undo(self):
+        self._apply(self.before)
+
+    def _apply(self, ratios: list[float]) -> None:
+        header, default = self.header, self.header.defaultSectionSize()
+        for i in range(header.count()):
+            size = max(1, round((ratios[i] if i < len(ratios) else 1.0) * default))
+            if header.sectionSize(i) != size:
+                header.resizeSection(i, size)
 
 
 def _rescale_header(header, base_size: int, old_zoom: int, new_zoom: int) -> None:
@@ -445,6 +514,10 @@ class MainWindow(QMainWindow):
         header = self.view.horizontalHeader()
         header.setContextMenuPolicy(Qt.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_menu)
+        row_header = self.view.verticalHeader()
+        row_header.setContextMenuPolicy(Qt.CustomContextMenu)
+        row_header.customContextMenuRequested.connect(self._show_row_header_menu)
+        self.view.selectionModel().selectionChanged.connect(self._update_insert_text)
 
     def _show_context_menu(self, pos):
         self._commit_pending_edit()
@@ -721,15 +794,35 @@ class MainWindow(QMainWindow):
         return dialog.chosen_name() if dialog.exec() == QDialog.Accepted else None
 
     def _show_header_menu(self, pos):
-        """A secondary click on a column header: select the column, offer to name it."""
+        """A secondary click on a column header: select the column (keeping a
+        selection of whole columns it's in), and offer to insert columns or
+        name it."""
         col = self.view.horizontalHeader().logicalIndexAt(pos)
         if col < 0:
             return
-        self.view.select_range(0, col, self.model.rowCount() - 1, col)
+        lines = self.view.whole_lines()
+        if lines is None or lines[0] != "columns" or col not in lines[1]:
+            self.view.select_range(0, col, self.model.rowCount() - 1, col)
         menu = QMenu(self)
+        menu.addAction(self.insert_cells_action)
+        menu.addSeparator()
         menu.addAction("Name Column…", lambda: self.name_column(col))
         menu.popup(self.view.horizontalHeader().mapToGlobal(pos))
         self.header_menu = menu  # kept alive while it's shown
+
+    def _show_row_header_menu(self, pos):
+        """A secondary click on a row header: select the row (keeping a
+        selection of whole rows it's in), and offer to insert rows."""
+        row = self.view.verticalHeader().logicalIndexAt(pos)
+        if row < 0:
+            return
+        lines = self.view.whole_lines()
+        if lines is None or lines[0] != "rows" or row not in lines[1]:
+            self.view.select_range(row, 0, row, self.model.columnCount() - 1)
+        menu = QMenu(self)
+        menu.addAction(self.insert_cells_action)
+        menu.popup(self.view.verticalHeader().mapToGlobal(pos))
+        self.header_menu = menu
 
     def edit_names(self) -> bool:
         """Show every cell and column name, to rename, redefine, add, or delete."""
@@ -1097,8 +1190,13 @@ class MainWindow(QMainWindow):
         self.redo_action.setText(f"Redo {text}".strip())
 
     def insert_cells(self) -> bool:
-        """Ask which way to shift, then insert blank cells in place of the selection."""
+        """Ask which way to shift, then insert blank cells in place of the
+        selection; or, with whole rows or columns selected, insert rows or
+        columns."""
         self._commit_pending_edit()
+        lines = self.view.whole_lines()
+        if lines is not None:
+            return self.insert_lines(*lines)
         top, left, bottom, right = self.view.selection_bounds()
         problems = {}  # shifts that can't work here, disabled in the dialog
         for key in SHIFT_LABELS:
@@ -1118,6 +1216,47 @@ class MainWindow(QMainWindow):
         self._show_status(f"Inserted {cells} blank cell{'s' if cells != 1 else ''}; "
                           f"{SHIFT_LABELS[shift].lower()}.")
         return True
+
+    def insert_lines(self, kind: str, indexes: list[int]) -> bool:
+        """Insert blank "rows" or "columns" before each run of the ones given
+        (as many as there are in the run), moving the rest down or right with
+        their widths or heights, as one undo step. The new ones are selected."""
+        self._commit_pending_edit()
+        noun = kind[:-1] if len(indexes) == 1 else kind
+        header = self.view.horizontalHeader() if kind == "columns" else self.view.verticalHeader()
+        before = _section_ratios(header)
+        blocks = runs(indexes)
+        stack = self.model.undo_stack
+        stack.beginMacro(f"Insert {noun.capitalize()}")
+        for start, count in reversed(blocks):  # from the end, so the others don't move first
+            if kind == "columns":
+                self.model.insert_columns(start, count)
+            else:
+                self.model.insert_rows(start, count)
+        after = [1.0] * header.count()  # the new ones at the default size
+        for old, ratio in enumerate(before):
+            new = old + sum(count for start, count in blocks if start <= old)
+            if new < len(after):
+                after[new] = ratio
+        stack.push(_SectionSizesCommand(header, before, after))
+        stack.endMacro()
+        inserted, moved = [], 0
+        for start, count in blocks:
+            inserted += range(start + moved, start + moved + count)
+            moved += count
+        self.view.select_lines(kind, inserted)
+        self._show_status(f"Inserted {len(indexes)} blank {noun}.")
+        return True
+
+    def _update_insert_text(self, *_args) -> None:
+        """Insert Cells… becomes Insert Columns (or Rows) for whole columns (or rows)."""
+        lines = self.view.whole_lines()
+        if lines is None:
+            text = "Insert Cells…"
+        else:
+            kind, indexes = lines
+            text = f"Insert {(kind[:-1] if len(indexes) == 1 else kind).capitalize()}"
+        self.insert_cells_action.setText(text)
 
     def _ask_insert_shift(self, problems: dict[str, str]) -> str | None:
         return ask_shift(InsertCellsDialog, self, self.insert_shift, problems)

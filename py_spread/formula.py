@@ -131,7 +131,7 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     return "=" + "".join(pieces)
 
 
-def move_references(formula: str, move, move_range=None, names=()) -> str:
+def move_references(formula: str, move, move_range=None, names=(), columns_after=None) -> str:
     """Rewrite a formula's references for cells that have moved, such as when
     cells are inserted or deleted. `move(row, col)` gives a cell's new (row,
     col), or None if it's gone (that reference becomes #REF!). `move_range`,
@@ -142,7 +142,8 @@ def move_references(formula: str, move, move_range=None, names=()) -> str:
     `names` are handled as in shift_references: cell names don't move (their
     definitions do), a column alias follows its cell (staying an alias while
     the cell stays in the named column), and a moved reference spelled like a
-    name gets a $."""
+    name gets a $. `columns_after` gives the column names' columns once
+    they've moved too (inserting whole columns), if they have."""
     names = as_names(names)
     body = formula[1:]
     try:
@@ -177,8 +178,8 @@ def move_references(formula: str, move, move_range=None, names=()) -> str:
                 replace(_token_span(match)[0], _token_span(last)[1], REF_ERROR)
             elif new != old:
                 replace(_token_span(match)[0], _token_span(last)[1],
-                        f"{_cell_token_text(match, new[0], found[1], names, True)}:"
-                        f"{_cell_token_text(last, new[1], last_found[1], names, True)}")
+                        f"{_cell_token_text(match, new[0], found[1], names, True, columns_after)}:"
+                        f"{_cell_token_text(last, new[1], last_found[1], names, True, columns_after)}")
             i += 3
             continue
         old, alias = found
@@ -186,7 +187,7 @@ def move_references(formula: str, move, move_range=None, names=()) -> str:
         if new is None or min(new) < 0:
             replace(*_token_span(match), REF_ERROR)
         elif new != old:
-            replace(*_token_span(match), _cell_token_text(match, new, alias, names, i in endpoints))
+            replace(*_token_span(match), _cell_token_text(match, new, alias, names, i in endpoints, columns_after))
         i += 1
     pieces.append(body[pos:])
     return "=" + "".join(pieces)
@@ -208,10 +209,13 @@ def _token_cell(match: re.Match, names, corner: bool):
     return _ref_cell(match), None
 
 
-def _cell_token_text(match: re.Match, cell: tuple[int, int], alias, names, corner: bool) -> str:
-    """How to write a reference to `cell` in place of the token matched."""
+def _cell_token_text(match: re.Match, cell: tuple[int, int], alias, names, corner: bool,
+                     columns_after=None) -> str:
+    """How to write a reference to `cell` in place of the token matched.
+    (`columns_after`: where the column names are once moved, if they have.)"""
     if alias is not None:
-        if cell[1] == names.columns[alias]:
+        named = (columns_after or names.columns).get(alias, names.columns[alias])
+        if cell[1] == named:
             return f"{alias}{cell[0] + 1}"  # still in the named column
         return f"${column_name(cell[1])}{cell[0] + 1}"  # moved out of it: like $C1
     return _ref_text(match, cell, names, corner)
