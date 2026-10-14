@@ -132,10 +132,25 @@ Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by
 a real Jupyter (IPython) kernel, with pandas, NumPy, Matplotlib, and Seaborn at
 hand.
 
+A new notebook starts with a cell that imports them, which runs as soon as the
+notebook opens, so `pd` and `sns` are ready for any cell:
+
+```python
+import pandas as pd
+import seaborn as sns
+```
+
+The cells EzSheet adds for DataFrames and graphs rely on it rather than
+repeating the imports, and whenever they run, the imports cell runs first if
+Python hasn't run it yet (after a restart, or in a sheet just opened). A
+notebook made before this, without an imports cell, keeps getting the imports
+in each added cell instead.
+
 Select cells (a block, or several columns, including whole columns picked in
 the column headers), then click the Notebook button on the toolbar, or choose
 Insert > Notebook or Notebook on the secondary-click menu. Its menu has
-**Open**, which just opens the notebook as it is (as View > Notebook does);
+**Open**, which just opens the notebook (as View > Notebook does), adding
+nothing but a new notebook's imports cell;
 **DataFrame** and **Graph**, which add the selected cells to it; and **Load
 Data to Sheet…**, which brings a DataFrame back into the sheet.
 
@@ -145,8 +160,6 @@ DataFrame opens the notebook with a new cell that makes a pandas DataFrame of
 the data and shows it, and the cell runs:
 
 ```python
-import pandas as pd
-
 # Cells A1:C4 of the sheet, with row 1 as the column names.
 df = pd.DataFrame({
     'Month': ['Jan', 'Feb', 'Mar'],
@@ -177,8 +190,6 @@ way a chart of the cells is drawn. Both cells run, so the table shows and then
 the graph:
 
 ```python
-import seaborn as sns
-
 # df as a graph: its first column across, the others up.
 sns.set_theme(style='whitegrid')
 long = df.melt(id_vars=['Month'], value_vars=['Sales', 'Cost'], var_name='Series', value_name='Value')
@@ -230,8 +241,8 @@ marker. Change them and click OK:
   changed in the cell stays. It's an edit in the cell, so Cmd+Z there brings
   back the old code.
 - The cell runs again to redraw the graph. If Python has restarted since its
-  DataFrame was made (or the sheet was opened since), the DataFrame's cell runs
-  first.
+  DataFrame was made (or the sheet was opened since), the imports cell and the
+  DataFrame's cell run first.
 - Any cell drawing one `sns.relplot(...)` graph counts, including ones you
   write, as long as its `kind=` and `marker=`, if it has them, are written out,
   such as `kind='line'` and `marker='o'`.

@@ -478,11 +478,17 @@ class NotebookWindow(QWidget):
                 self.set_current(cell_id)
                 self.add_cell_below()
 
-    def run_needing(self, cell_id: str, needed: str | None) -> None:
-        """Run a cell, first running the `needed` cell (such as the one making
-        a graph's DataFrame) if the current Python process hasn't run it."""
-        if needed is not None and needed not in self.ran and needed not in self.running:
-            self.run_cell(needed)
+    def run_needed(self, needed) -> None:
+        """Run the `needed` cells (ids, or None for none), in order, that the
+        current Python process hasn't run (and isn't about to), such as the
+        imports cell or the one making a graph's DataFrame."""
+        for cell_id in dict.fromkeys(needed):
+            if cell_id is not None and cell_id not in self.ran and cell_id not in self.running:
+                self.run_cell(cell_id)
+
+    def run_needing(self, cell_id: str, needed) -> None:
+        """Run a cell, after the `needed` ones it relies on (see run_needed)."""
+        self.run_needed(needed)
         self.run_cell(cell_id)
 
     def run_current(self, advance: bool = False) -> None:

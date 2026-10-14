@@ -45,12 +45,14 @@ from .graphs import change_graph, find_graphs, frame_cell
 from .load_data import answer, data_request, frames, frames_request, sheet_writes
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
+    IMPORTS_CELL,
     GraphError,
     Notebook,
     data_block,
     dataframe_code,
     graph_code,
     graph_columns,
+    importing_cell,
     next_frame_name,
 )
 from .notebook_window import NotebookWindow, kernel_folder
@@ -1092,12 +1094,15 @@ class MainWindow(QMainWindow):
     # --- Notebook ---
 
     def show_notebook(self):
-        """Open the sheet's notebook window (making it the first time)."""
+        """Open the sheet's notebook window (making it the first time). A new
+        notebook starts with a cell importing pandas and seaborn, which runs."""
         if self.notebook_window is None:
             self.notebook_window = NotebookWindow(self.notebook, self.kernel, parent=self, save=self.save)
             self.notebook_window.zoom_changed.connect(self._update_zoom_actions)
             self.notebook_window.set_sheet_name(os.path.basename(self.file_path) if self.file_path
                                                 else "Untitled")
+        if self.notebook.is_empty:
+            self.notebook_window.run_cell(self.notebook_window.add_cell_below(IMPORTS_CELL))
         self.notebook_window.show()
         self.notebook_window.raise_()
         self.notebook_window.activateWindow()
@@ -1113,7 +1118,9 @@ class MainWindow(QMainWindow):
             self._show_status("The selection is empty. Select cells with data to make a DataFrame of them.")
             return None
         name = next_frame_name(self.notebook)
-        [cell_id] = self._run_in_notebook([dataframe_code(self.model, cells, name)])
+        self.show_notebook()  # a new notebook gets its imports cell first
+        pandas = importing_cell(self.notebook, "pandas")
+        [cell_id] = self._run_in_notebook([dataframe_code(self.model, cells, name, pandas is None)], [pandas])
         self._show_status(f"Sent the selection to the notebook as {name}.")
         return cell_id
 
@@ -1141,8 +1148,12 @@ class MainWindow(QMainWindow):
             return None
         self.graph_kind, self.graph_marker = choice
         name = next_frame_name(self.notebook)
-        graph = graph_code(self.model, cells, name, *choice)
-        _frame_id, graph_id = self._run_in_notebook([dataframe_code(self.model, cells, name), graph])
+        self.show_notebook()  # a new notebook gets its imports cell first
+        pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
+        graph = graph_code(self.model, cells, name, *choice, import_pandas=pandas is None,
+                           import_seaborn=seaborn is None)
+        _frame_id, graph_id = self._run_in_notebook(
+            [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
         self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
         return graph_id
 
@@ -1167,8 +1178,10 @@ class MainWindow(QMainWindow):
         window = self.show_notebook()
         window.replace_source(graph.cell_id, source)
         window.set_current(graph.cell_id, focus=True)
-        # After a restart, or in a reopened sheet, the DataFrame has to be made again first.
-        window.run_needing(graph.cell_id, frame_cell(self.notebook, graph.cell_id, graph.frame))
+        # After a restart, or in a reopened sheet, the imports and the DataFrame have to run again first.
+        window.run_needing(graph.cell_id, [importing_cell(self.notebook, "pandas", graph.cell_id),
+                                           importing_cell(self.notebook, "seaborn", graph.cell_id),
+                                           frame_cell(self.notebook, graph.cell_id, graph.frame)])
         self._show_status(f"Redrawing the graph {graph_labels(graphs)[index]}.")
         return graph.cell_id
 
@@ -1249,12 +1262,14 @@ class MainWindow(QMainWindow):
         if done is not None:
             done(value, error)
 
-    def _run_in_notebook(self, sources: list[str]) -> list[str]:
+    def _run_in_notebook(self, sources: list[str], needed=()) -> list[str]:
         """Open the notebook, add cells with these sources at its end, and
-        run them in order. Returns their ids."""
+        run them in order, after any `needed` cells (such as the imports) that
+        haven't run in this Python process. Returns their ids."""
         window = self.show_notebook()
         if window.current_id is not None:
             window.set_current(self.notebook.cells[-1].id)  # new cells go at the end
+        window.run_needed(needed)
         ids = []
         for source in sources:
             ids.append(window.add_cell_below(source))

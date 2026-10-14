@@ -259,7 +259,7 @@ def test_real_kernel_loads_data(app, dialogs):
         window.load_data_to_sheet()
         assert wait_for(lambda: model.get_cell(10, 0) == "Month")
         assert [model.get_cell(11, c) for c in range(3)] == ["Jan", "1", 'a"b'] and model.get_cell(13, 2) == "é"
-        assert nb.widgets[cell].prompt.text() == "[1]:"  # the questions didn't count as runs
+        assert nb.widgets[cell].prompt.text() == "[2]:"  # after the imports; the questions didn't count
     finally:
         window.notebook_window.hide()
         window.setWindowModified(False)

@@ -17,6 +17,9 @@ from .references import cell_name, column_name
 
 NBFORMAT, NBFORMAT_MINOR = 4, 5
 KERNELSPEC = {"name": "python3", "display_name": "Python 3", "language": "python"}
+IMPORTS_CELL = "import pandas as pd\nimport seaborn as sns"  # a new notebook's first cell
+_IMPORTS = {"pandas": re.compile(r"^import pandas as pd\s*$", re.M),
+            "seaborn": re.compile(r"^import seaborn as sns\s*$", re.M)}
 
 
 @dataclass
@@ -160,6 +163,13 @@ def cells_from_json(document) -> list[NotebookCell]:
 
 # --- Sending cells to the notebook as a DataFrame ---
 
+def importing_cell(notebook: Notebook, module: str, before: str | None = None) -> str | None:
+    """The first cell (above the cell `before`, if given) that imports
+    "pandas" as pd or "seaborn" as sns, such as a new notebook's first cell."""
+    cells = notebook.cells[:notebook.index_of(before)] if before is not None else notebook.cells
+    return next((cell.id for cell in cells if _IMPORTS[module].search(cell.source)), None)
+
+
 def next_frame_name(notebook: Notebook) -> str:
     """df, or df2, df3, ... if earlier cells already assign df."""
     used = set()
@@ -222,7 +232,7 @@ def _frame(model, cells) -> _Frame:
                   columns=[[value(row, col) for row in data_rows] for col in cols])
 
 
-def dataframe_code(model, cells, name: str = "df") -> str:
+def dataframe_code(model, cells, name: str = "df", import_pandas: bool = True) -> str:
     """Python that makes a pandas DataFrame, called `name`, of the selected
     (row, col) cells' values, and shows it.
 
@@ -230,11 +240,14 @@ def dataframe_code(model, cells, name: str = "df") -> str:
     (and there's more than one row), it gives the column labels; otherwise a
     column's name (Formulas > Name Column…) or its letter does. Numbers are
     numbers ($1,200 is 1200); empty cells, error values, and cells inside the
-    block that weren't selected are missing values (NaN).
+    block that weren't selected are missing values (NaN). With
+    `import_pandas` false, it leaves out "import pandas as pd" (an earlier
+    cell has it).
     """
     frame = _frame(model, cells)
     note = f", with row {frame.header_row + 1} as the column names" if frame.header_row is not None else ""
-    lines = ["import pandas as pd", "", f"# Cells {frame.where} of the sheet{note}.", f"{name} = pd.DataFrame({{"]
+    lines = ["import pandas as pd", ""] if import_pandas else []
+    lines += [f"# Cells {frame.where} of the sheet{note}.", f"{name} = pd.DataFrame({{"]
     for label, values in zip(frame.labels, frame.columns):
         lines.append(f"    {label!r}: [{', '.join(_python_value(v) for v in values)}],")
     lines += ["})", name]
@@ -263,7 +276,8 @@ def graph_columns(model, cells) -> tuple[str, list[str]]:
     return frame.labels[0], frame.labels[1:]
 
 
-def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None) -> str:
+def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None,
+               import_pandas: bool = True, import_seaborn: bool = True) -> str:
     """Python that graphs the DataFrame `frame_name`, which dataframe_code
     makes of the same cells, with Seaborn, the way a chart of them is drawn:
     the first column across (text gives category labels, in the sheet's
@@ -271,7 +285,8 @@ def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker:
     "line" or "scatter", and `marker` a Matplotlib marker such as "o" for
     each point (None: none on a line, Seaborn's circles on a scatter graph).
     Text in the y columns is left out. GraphError if the cells can't be
-    graphed.
+    graphed. `import_pandas` and `import_seaborn` false leave out those
+    imports (an earlier cell has them).
     """
     if kind not in ("line", "scatter"):
         raise ValueError(f"kind must be 'line' or 'scatter', not {kind!r}")
@@ -286,10 +301,11 @@ def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker:
         if any(isinstance(v, str) for v in column):
             fixes.append(f"data[{label!r}] = pd.to_numeric(data[{label!r}], errors='coerce')  # text isn't graphed")
 
-    lines = ["import pandas as pd"] if any("pd." in fix for fix in fixes) else []
+    lines = ["import pandas as pd"] if import_pandas and any("pd." in fix for fix in fixes) else []
+    lines += ["import seaborn as sns"] if import_seaborn else []
+    lines += [""] if lines else []
     up = "the second" if len(y_labels) == 1 else "the others"
-    lines += ["import seaborn as sns", "", f"# {frame_name} as a graph: its first column across, {up} up.",
-              "sns.set_theme(style='whitegrid')"]
+    lines += [f"# {frame_name} as a graph: its first column across, {up} up.", "sns.set_theme(style='whitegrid')"]
     data = frame_name
     if fixes:
         lines += [f"data = {frame_name}.copy()", *fixes]

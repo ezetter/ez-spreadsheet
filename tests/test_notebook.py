@@ -14,12 +14,14 @@ from py_spread.model import SheetModel
 from py_spread.notebook import (
     Notebook,
     NotebookFormatError,
+    IMPORTS_CELL,
     GraphError,
     cells_from_json,
     data_block,
     dataframe_code,
     graph_code,
     graph_columns,
+    importing_cell,
     next_frame_name,
 )
 from py_spread.graph_dialog import MARKERS, GraphDialog, describe
@@ -33,7 +35,7 @@ def block(top, left, bottom, right):
 
 
 def frame(code: str, name: str = "df") -> pd.DataFrame:
-    namespace = {}
+    namespace = {"pd": pd}  # as the imports cell gives it
     exec(code, namespace)  # the generated cell, run as the kernel would
     return namespace[name]
 
@@ -265,6 +267,27 @@ def test_descriptions():
     assert describe("x", ["a", "b", "c"]) == "Graph a, b, and c against x."
 
 
+def test_importing_cells(app):
+    notebook = Notebook()
+    first = notebook.add_cell("x = 1").id
+    both = notebook.add_cell(IMPORTS_CELL).id
+    later = notebook.add_cell("import pandas as pd\ny = 2").id
+    assert importing_cell(notebook, "pandas") == both and importing_cell(notebook, "seaborn") == both
+    assert importing_cell(notebook, "pandas", before=both) is None
+    assert importing_cell(notebook, "pandas", before=later) == both
+    assert importing_cell(Notebook(), "seaborn") is None and first
+
+
+def test_code_without_its_imports(sheet, app):
+    cells = block(0, 0, 3, 1)
+    assert dataframe_code(sheet, cells, "df", import_pandas=False).startswith("# Cells A1:B4")
+    graph = graph_code(sheet, cells, "df", import_pandas=False, import_seaborn=False)
+    assert graph.startswith("# df as a graph") and "pd.to_numeric" not in graph  # Sales is all numbers
+    sheet.set_cell(2, 1, "n/a")
+    assert graph_code(sheet, cells, "df", import_pandas=False, import_seaborn=False).startswith("# df as a graph")
+    assert graph_code(sheet, cells, "df", import_seaborn=False).startswith("import pandas as pd\n\n# df")
+
+
 def test_frame_names(app):
     notebook = Notebook()
     assert next_frame_name(notebook) == "df"
@@ -456,11 +479,14 @@ def test_send_to_notebook(window):
     cell_id = window.send_to_notebook()
     notebook_window = window.notebook_window
     assert notebook_window.isVisible()
-    assert window.kernel.runs == [(cell_id, window.notebook.cell(cell_id).source)]
-    assert "df = pd.DataFrame({" in window.notebook.cell(cell_id).source
-    assert window.notebook.cell(cell_id).execution_count == 1
+    imports, cell = window.notebook.cells  # a new notebook: its imports cell comes first
+    assert imports.source == IMPORTS_CELL == "import pandas as pd\nimport seaborn as sns"
+    assert window.kernel.runs == [(imports.id, IMPORTS_CELL), (cell_id, cell.source)]
+    assert cell.source.startswith("# Cells A1:C4 of the sheet") and "import" not in cell.source
+    assert "df = pd.DataFrame({" in cell.source
+    assert cell.execution_count == 2
     widget = notebook_window.widgets[cell_id]
-    assert widget.prompt.text() == "[1]:" and "result 1" in widget.output_view.toPlainText()
+    assert widget.prompt.text() == "[2]:" and "result 2" in widget.output_view.toPlainText()
     assert window.isWindowModified()
     assert "as df" in window.statusBar().currentMessage()
 
@@ -511,18 +537,46 @@ def test_tool_in_toolbar_menus_and_context_menu(window, monkeypatch):
                                                          "Load Data to Sheet…"]
 
 
-def test_open_shows_the_notebook_as_it_is(window, tmp_path):
-    window.save_to(str(tmp_path / "s.ezs"))
+def test_open_starts_a_new_notebook_with_its_imports(window):
     window.view.select_range(0, 0, 3, 2)
     window.open_notebook_action.trigger()
     nb = window.notebook_window
-    assert nb.isVisible() and window.notebook.is_empty and window.kernel.runs == []
-    assert not window.isWindowModified()  # nothing was added
+    [imports] = window.notebook.cells
+    assert nb.isVisible() and imports.source == IMPORTS_CELL
+    assert window.kernel.runs == [(imports.id, IMPORTS_CELL)]  # run, so pd and sns are ready
     cell_id = window.send_to_notebook()
     nb.hide()
     window.open_notebook_action.trigger()
-    assert nb.isVisible() and [c.id for c in window.notebook.cells] == [cell_id]
-    assert len(window.kernel.runs) == 1  # opening ran nothing
+    assert nb.isVisible() and [c.id for c in window.notebook.cells] == [imports.id, cell_id]
+    assert len(window.kernel.runs) == 2  # opening it again added and ran nothing
+
+
+def test_opening_a_notebook_with_cells_adds_nothing(window, tmp_path):
+    window.notebook.load({"cells": [{"cell_type": "code", "source": "x = 1", "outputs": []}]})
+    window.open_notebook_action.trigger()
+    assert [c.source for c in window.notebook.cells] == ["x = 1"] and window.kernel.runs == []
+
+
+def test_a_notebook_without_imports_keeps_them_in_its_cells(window):
+    window.notebook.load({"cells": [{"cell_type": "code", "source": "x = 1", "outputs": []}]})
+    window.view.select_range(0, 0, 3, 1)
+    window.send_to_notebook()
+    assert window.notebook.cells[-1].source.startswith("import pandas as pd\n")
+    window.graph_action.trigger()
+    assert window.notebook.cells[-1].source.startswith("import seaborn as sns\n")
+    assert len(window.notebook.cells) == 4  # no imports cell was added
+
+
+def test_imports_run_again_before_new_cells(window, tmp_path):
+    window.view.select_range(0, 0, 3, 1)
+    window.send_to_notebook()
+    window.save_to(str(tmp_path / "s.ezs"))
+    window.open_path(str(tmp_path / "s.ezs"))  # a new Python process: nothing has run
+    imports = window.notebook.cells[0].id
+    runs = len(window.kernel.runs)
+    window.view.select_range(0, 0, 3, 1)
+    window.graph_action.trigger()
+    assert [run[0] for run in window.kernel.runs[runs:]] == [imports, *(c.id for c in window.notebook.cells[-2:])]
     view_menu = [m for m in window.menuBar().actions() if m.text() == "View"][0].menu()
     assert window.show_notebook_action in view_menu.actions()
 
@@ -564,9 +618,9 @@ def test_shift_return_runs_and_moves_on(window):
     first = nb.add_cell_below("1 + 1")
     QTest.keyClick(nb.widgets[first].editor, Qt.Key_Return, Qt.ShiftModifier)
     assert window.kernel.runs[-1] == (first, "1 + 1")
-    assert len(window.notebook.cells) == 2 and nb.current_id == window.notebook.cells[1].id
+    assert len(window.notebook.cells) == 3 and nb.current_id == window.notebook.cells[2].id  # after the imports
     QTest.keyClick(nb.widgets[first].editor, Qt.Key_Return, Qt.ControlModifier)  # run in place
-    assert window.kernel.runs[-1][0] == first and len(window.notebook.cells) == 2
+    assert window.kernel.runs[-1][0] == first and len(window.notebook.cells) == 3
 
 
 def test_editor_indents(window):
@@ -581,17 +635,18 @@ def test_editor_indents(window):
 
 def test_toolbar_commands(window):
     nb = window.show_notebook()
+    imports = window.notebook.cells[0].id
     a = nb.add_cell_below("a")
     b = nb.add_cell_below("b")
     nb.actions_by_name["Run All"].trigger()
-    assert [run[0] for run in window.kernel.runs] == [a, b]
+    assert [run[0] for run in window.kernel.runs[1:]] == [imports, a, b]
     nb.actions_by_name["↑"].trigger()
-    assert [c.id for c in window.notebook.cells] == [b, a]
+    assert [c.id for c in window.notebook.cells] == [imports, b, a]
     nb.actions_by_name["Interrupt"].trigger()
     nb.actions_by_name["Restart"].trigger()
     assert (window.kernel.interrupts, window.kernel.restarts) == (1, 1)
     nb.actions_by_name["Delete"].trigger()
-    assert [c.id for c in window.notebook.cells] == [a]
+    assert [c.id for c in window.notebook.cells] == [imports, a]
 
 
 def test_kernel_status_and_problems(window):
@@ -615,7 +670,7 @@ def test_closing_notebook_hides_it(window):
     nb = window.show_notebook()
     nb.add_cell_below("x")
     assert nb.close()  # accepted, so it never holds up quitting
-    assert not nb.isVisible() and window.show_notebook() is nb and len(window.notebook.cells) == 1
+    assert not nb.isVisible() and window.show_notebook() is nb and len(window.notebook.cells) == 2
 
 
 def test_closing_sheet_stops_kernel_and_hides_notebook(app):
@@ -638,10 +693,11 @@ def test_graph_from_the_notebook_menu(window, dialogs):
     window.view.select_range(0, 0, window.model.rowCount() - 1, 1)  # columns A and B: Month, Sales
     window.graph_action.trigger()
     assert dialogs.graph_prompts == [("Month", ["Sales"], ("line", None))]
-    frame_cell, graph_cell = window.notebook.cells
-    assert [run[0] for run in window.kernel.runs] == [frame_cell.id, graph_cell.id]  # both run, in order
-    assert frame_cell.source == dataframe_code(window.model, block(0, 0, 3, 1))
+    imports, frame_cell, graph_cell = window.notebook.cells
+    assert [run[0] for run in window.kernel.runs] == [imports.id, frame_cell.id, graph_cell.id]  # in order
+    assert frame_cell.source == dataframe_code(window.model, block(0, 0, 3, 1), "df", import_pandas=False)
     assert "graph = sns.relplot(" in graph_cell.source and "x='Month', y='Sales'" in graph_cell.source
+    assert graph_cell.source.startswith("# df as a graph") and "import" not in graph_cell.source
     assert window.notebook_window.isVisible()
     assert "as df, with a graph" in window.statusBar().currentMessage()
     assert "kind='line'" in graph_cell.source and "marker" not in graph_cell.source
@@ -717,7 +773,7 @@ def test_change_a_graph(window, dialogs):
     nb = window.notebook_window
     assert nb.widgets[graph_id].editor.toPlainText() == source and nb.current_id == graph_id
     assert [run[0] for run in window.kernel.runs[runs:]] == [graph_id]  # its DataFrame is still there
-    assert len(window.notebook.cells) == 2  # nothing added
+    assert len(window.notebook.cells) == 3  # nothing added
     assert "Redrawing the graph df: Sales against Month" in window.statusBar().currentMessage()
     nb.widgets[graph_id].editor.undo()  # the change is an edit in the cell, so Undo there reverts it
     assert "kind='line'" in window.notebook.cell(graph_id).source
@@ -729,25 +785,25 @@ def test_change_a_graph(window, dialogs):
 ])
 def test_dataframe_made_again_after_a_restart(window, dialogs, new_process):
     graph_id = make_graph(window)
-    frame_id = window.notebook.cells[0].id
-    new_process(window)  # df is gone
+    imports_id, frame_id = (cell.id for cell in window.notebook.cells[:2])
+    new_process(window)  # pd, sns, and df are gone
     runs = len(window.kernel.runs)
     window.view.select_range(10, 0, 12, 2)
     dialogs.graph_change_answer = (0, "line", "o")
     window.send_graph_to_notebook()
-    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, graph_id]
+    assert [run[0] for run in window.kernel.runs[runs:]] == [imports_id, frame_id, graph_id]
 
 
 def test_dataframe_made_again_in_a_reopened_sheet(window, dialogs, tmp_path):
     make_graph(window)
     window.save_to(str(tmp_path / "s.ezs"))
     window.open_path(str(tmp_path / "s.ezs"))
-    frame_id, graph_id = (cell.id for cell in window.notebook.cells)
+    imports_id, frame_id, graph_id = (cell.id for cell in window.notebook.cells)
     runs = len(window.kernel.runs)
     window.view.select_range(10, 0, 12, 2)
     dialogs.graph_change_answer = (0, "scatter", None)
     window.send_graph_to_notebook()
-    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, graph_id]
+    assert [run[0] for run in window.kernel.runs[runs:]] == [imports_id, frame_id, graph_id]
 
 
 def test_starts_with_the_current_graph(window, dialogs):
