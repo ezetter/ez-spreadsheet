@@ -25,7 +25,7 @@ class Dialogs:
         self.insert_problems = None  # the choices it was told to disable
         self.delete_shift = "up"  # likewise for the Delete Cells dialog
         self.delete_problems = None
-        # The Graph dialog's (kind, marker), or (kind, marker, x, ys[, hue]); None cancels. Columns
+        # The Graph dialog's (kind, marker), or (kind, marker, x, ys[, hue[, y_categories]]); None cancels. Columns
         # left out are the defaults (for a new graph) or the graph's own (when changing one).
         self.graph_answer = ("line", None)
         self.graph_prompts = []  # (the column labels, the choices it started with) each time it's shown
@@ -75,7 +75,7 @@ def dialogs(monkeypatch):
         kind, marker, *axes = dialogs.graph_answer
         x = axes[0] if axes else columns.default_x(kind)
         return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x),
-                           axes[2] if len(axes) > 2 else None)
+                           axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
 
@@ -87,7 +87,8 @@ def dialogs(monkeypatch):
         graph = graphs[index]
         return index, GraphChoice(kind, marker, axes[0] if axes else graph.x_label,
                                   axes[1] if len(axes) > 1 else graph.y_labels,
-                                  axes[2] if len(axes) > 2 else graph.hue)
+                                  axes[2] if len(axes) > 2 else graph.hue,
+                                  axes[3] if len(axes) > 3 else graph.y_categories)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_change", ask_graph_change)
 

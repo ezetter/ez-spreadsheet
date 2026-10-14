@@ -218,3 +218,11 @@ def test_older_series_graph_in_the_changing_dialog(app):
     assert not dialog.hue_box.isEnabled() and dialog.hue() is None  # colored a series each
     dialog.y_box.setCurrentIndex(0)
     assert dialog.ys() == ["Sales"] and dialog.hue_box.isEnabled()
+
+
+def test_reads_numbers_up_as_categories():
+    code = "graph = sns.catplot(data=df, x='Sales', y='Year', orient='h', kind='swarm')"
+    graph = read_graph(code)
+    assert graph.y_categories and graph.kind == "swarm"
+    assert not read_graph(code.replace(", orient='h'", "")).y_categories
+    assert change_graph(code, "strip", "o").count("orient='h'") == 1  # strip or swarm, still sideways

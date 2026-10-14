@@ -271,14 +271,17 @@ class GraphError(ValueError):
 class GraphChoice:
     """What the Graph dialog chose: the kind of graph, its marker, the x
     column, the y column (in a list; graphs made before the y was a single
-    column can have several, a series each), and the hue column, if any,
-    coloring the points by its values."""
+    column could have several, a series each), the hue column, if any,
+    coloring the points by its values, and whether a categorical scatter's
+    y column is its categories, turning it sideways (as a column of text
+    always is; for one of numbers, such as years, it has to be asked for)."""
 
     kind: str
     marker: str | None
     x: str
     ys: list[str]
     hue: str | None = None
+    y_categories: bool = False
 
 
 def _is_number(value) -> bool:
@@ -317,16 +320,17 @@ class GraphColumns:
         return [label for label, numbers in zip(self.labels, self.numbers)
                 if label != x and (numbers or sideways and self.category(label))]
 
-    def x_options(self, y: str | None, kind: str = "line") -> list[str]:
+    def x_options(self, y: str | None, kind: str = "line", y_categories: bool = False) -> list[str]:
         """The columns that can go across: any, except that with categories
         up a categorical scatter (sideways), only those with numbers."""
-        if kind in CATEGORICAL and y in self.labels and self.category(y):
+        if self.sideways([y] if y in self.labels else [], kind, y_categories):
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != y]
         return list(self.labels)
 
-    def sideways(self, ys: list[str], kind: str) -> bool:
-        """Whether a categorical scatter has its categories up the y axis."""
-        return kind in CATEGORICAL and len(ys) == 1 and self.category(ys[0])
+    def sideways(self, ys: list[str], kind: str, y_categories: bool = False) -> bool:
+        """Whether a categorical scatter has its categories up the y axis: a
+        column of text, or one of numbers (such as years) taken as categories."""
+        return kind in CATEGORICAL and len(ys) == 1 and (y_categories or self.category(ys[0]))
 
     def hue_options(self, x: str) -> list[str]:
         """The columns that can color the points: any but x."""
@@ -359,17 +363,17 @@ def graph_columns(model, cells) -> GraphColumns:
 
 def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None,
                x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
-               import_pandas: bool = True, import_seaborn: bool = True) -> str:
+               y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True) -> str:
     """Python that graphs the DataFrame `frame_name`, which dataframe_code
     makes of the same cells, with Seaborn (see frame_graph_code). GraphError
     if the cells can't be graphed."""
-    return frame_graph_code(_frame(model, cells), frame_name, kind, marker, x, ys, hue,
+    return frame_graph_code(_frame(model, cells), frame_name, kind, marker, x, ys, hue, y_categories,
                             import_pandas, import_seaborn)
 
 
 def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line", marker: str | None = None,
                      x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
-                     import_pandas: bool = True, import_seaborn: bool = True) -> str:
+                     y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True) -> str:
     """Python that graphs a DataFrame with Seaborn: column `x` across (text
     gives categories, in the sheet's order) and the `ys` column up (by
     default, the first column across and the next with numbers up), with
@@ -377,7 +381,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     "line" or "scatter" (relplot), or a categorical scatter (catplot):
     "strip" jitters each category's points, "swarm" spreads them so none
     overlap. A categorical scatter can have its categories up the y axis
-    instead, with numbers across: Seaborn turns it sideways. `marker` is a Matplotlib marker such as "o" for each point
+    instead, with numbers across, turning it sideways: as a y column of text
+    does, or one of numbers (such as years) with `y_categories`. `marker` is a Matplotlib marker such as "o" for each point
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
     is left out. Several `ys` (as graphs made before the y was a single
     column could have) make a series each, colored instead of by a hue.
@@ -389,14 +394,15 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     columns = GraphColumns.of(frame)
     x = x if x is not None else columns.default_x(kind)
     ys = list(ys) if ys is not None else columns.default_ys(x)
+    sideways = columns.sideways(ys, kind, y_categories)  # the categories go up, and the numbers across
     if (x not in columns.labels or not ys or any(y not in columns.y_options(x, kind) for y in ys)
-            or len(ys) > 1 and any(columns.category(y) for y in ys)):
+            or len(ys) > 1 and any(columns.category(y) for y in ys)
+            or sideways and x not in columns.x_options(ys[0], kind, y_categories)):
         raise ValueError(f"can't graph {ys!r} against {x!r}")
     if hue is not None and (hue not in columns.hue_options(x) or len(ys) > 1):
         raise ValueError(f"can't color the graph by {hue!r}")
     values = dict(zip(frame.labels, frame.columns))
 
-    sideways = columns.sideways(ys, kind)  # the categories go up, and the numbers across
     labeled, measured = (ys[0], [x]) if sideways else (x, ys)  # the axis of labels; the columns of numbers
     fixes = []  # changes Seaborn needs, made to a copy of the DataFrame
     if any(isinstance(v, str) for v in values[labeled]) and any(_is_number(v) for v in values[labeled]):
@@ -418,6 +424,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         data = "data"
     if len(ys) == 1:
         plotted = f"data={data}, x={x!r}, y={ys[0]!r}" + (f", hue={hue!r}" if hue is not None else "")
+        plotted += ", orient='h'" if sideways else ""  # needed when the categories are numbers
     else:  # one column of values, with another naming each value's series
         series_name, value = _unused("Series", frame.labels), _unused("Value", frame.labels)
         lines.append(f"long = {data}.melt(id_vars=[{x!r}], value_vars={ys!r}, "

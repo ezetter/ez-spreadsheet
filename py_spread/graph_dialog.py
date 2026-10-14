@@ -21,6 +21,8 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
 NO_HUE = "None"
+CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the graph sideways: "
+                  "categories down the side, numbers across. A column of text always is.")
 
 
 def graph_labels(graphs) -> list[str]:
@@ -37,7 +39,9 @@ class GraphDialog(QDialog):
     values color the points (None by default), and a marker (None by
     default). Up takes a column with numbers, except that a categorical
     scatter across a column of numbers can have its categories up, turning
-    it sideways; across then takes only columns with numbers. For a new graph of `columns` (GraphColumns), the axes start at
+    it sideways: a column of text, or one of numbers (such as years) with
+    "Y axis as categories" checked. Across then takes only columns with
+    numbers. For a new graph of `columns` (GraphColumns), the axes start at
     the type's defaults, and follow the type until an X axis is chosen (and
     the Y axis follows the X until it's chosen). Scatter graphs need markers
     to show their points, so None is unavailable for them; choosing one
@@ -75,6 +79,9 @@ class GraphDialog(QDialog):
         self.swarm_box.setToolTip("Spread each category's points out so none overlap, "
                                   "instead of scattering them a little at random")
         form.addRow("", self.swarm_box)
+        self.categories_box = QCheckBox("Y axis as categories")
+        self.categories_box.setToolTip(CATEGORIES_TIP)
+        form.addRow("", self.categories_box)
         self.x_box = QComboBox()
         form.addRow("X axis:", self.x_box)
         self.y_box = QComboBox()
@@ -99,6 +106,7 @@ class GraphDialog(QDialog):
         self._y_chosen = bool(self.graphs)  # likewise, the y follows the x until chosen
         self.kind_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.swarm_box.toggled.connect(lambda _checked: self._kind_changed())
+        self.categories_box.toggled.connect(lambda _checked: self._categories_toggled())
         self.x_box.activated.connect(self._x_picked)
         self.y_box.activated.connect(self._y_picked)
         self.x_box.currentIndexChanged.connect(lambda _index: self._x_changed())
@@ -109,7 +117,7 @@ class GraphDialog(QDialog):
             self.graph_box.currentIndexChanged.connect(self._show_graph)
             self._show_graph(current)
         else:
-            self._show(kind, marker, None, None, None)
+            self._show(kind, marker, None, None, None, False)
 
     # --- What was chosen ---
 
@@ -133,8 +141,12 @@ class GraphDialog(QDialog):
     def hue(self) -> str | None:
         return None if len(self.ys()) > 1 else self.hue_box.currentData()  # several ys: a series each
 
+    def y_categories(self) -> bool:
+        """Whether a categorical scatter is sideways, with the y column its categories."""
+        return self.kind() in CATEGORICAL and self.categories_box.isChecked()
+
     def choice(self) -> GraphChoice:
-        return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue())
+        return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue(), self.y_categories())
 
     # --- Showing settings ---
 
@@ -143,9 +155,10 @@ class GraphDialog(QDialog):
         self.columns = graph.columns
         if graph.columns is not None and graph.x_label not in graph.columns.labels:
             self.columns = None  # its x isn't one of its DataFrame's columns: changed by hand
-        self._show(graph.kind, graph.marker, graph.x_label, graph.y_labels, graph.hue)
+        self._show(graph.kind, graph.marker, graph.x_label, graph.y_labels, graph.hue, graph.y_categories)
 
-    def _show(self, kind: str, marker: str | None, x: str | None, ys: list[str] | None, hue: str | None) -> None:
+    def _show(self, kind: str, marker: str | None, x: str | None, ys: list[str] | None, hue: str | None,
+              y_categories: bool) -> None:
         self._loading = True
         if marker is not None and self.marker_box.findData(marker) < 0:
             self.marker_box.addItem(marker, marker)  # one set in the code that the list doesn't have
@@ -153,8 +166,9 @@ class GraphDialog(QDialog):
         self.marker_box.setCurrentIndex(max(0, self.marker_box.findData(marker)))
         self.kind_box.setCurrentIndex(max(0, self.kind_box.findData("strip" if kind in CATEGORICAL else kind)))
         self.swarm_box.setChecked(kind == "swarm")
+        self.categories_box.setChecked(y_categories)
         known = self.columns is not None
-        for box in (self.x_box, self.y_box, self.hue_box):
+        for box in (self.x_box, self.y_box, self.hue_box, self.categories_box):
             box.setEnabled(known)
             box.setToolTip("" if known else "The columns can't be changed: the cell making the graph's "
                                              "DataFrame wasn't found, or was changed by hand.")
@@ -181,8 +195,9 @@ class GraphDialog(QDialog):
         if ys is None or len(ys) == 1 and ys[0] not in self.columns.y_options(x, kind):
             ys = self.columns.default_ys(x)
         self._loading = True
+        self._show_categories(x, ys)
         self.x_box.clear()
-        for label in self.columns.x_options(ys[0] if len(ys) == 1 else None, kind):
+        for label in self.columns.x_options(ys[0] if len(ys) == 1 else None, kind, self.y_categories()):
             self.x_box.addItem(label, label)
         self.x_box.setCurrentIndex(max(0, self.x_box.findData(x)))
         self.y_box.clear()
@@ -195,6 +210,21 @@ class GraphDialog(QDialog):
         self.y_box.setCurrentIndex(max(0, index))
         self._loading = False
         self._y_changed()
+
+    def _show_categories(self, x: str, ys: list[str]) -> None:
+        """Y axis as categories: always so for a column of text up (sideways),
+        never for one across (it's the categories), and the user's choice
+        when there are numbers both ways."""
+        y = ys[0] if len(ys) == 1 else None
+        if y is not None and self.columns.category(y):
+            checked, enabled, tip = True, False, "A column of text up is always categories."
+        elif y is None or self.columns.category(x):
+            checked, enabled, tip = False, False, "The categories are across, in the X axis column."
+        else:
+            checked, enabled, tip = self.categories_box.isChecked(), True, CATEGORIES_TIP
+        self.categories_box.setChecked(checked)
+        self.categories_box.setEnabled(enabled)
+        self.categories_box.setToolTip(tip)
 
     def _fill_hues(self, hue: str | None) -> None:
         """None, and the columns that can color the points, selecting `hue`."""
@@ -215,6 +245,7 @@ class GraphDialog(QDialog):
             return
         kind = self.kind()
         self.form.setRowVisible(self.swarm_box, kind in CATEGORICAL)
+        self.form.setRowVisible(self.categories_box, kind in CATEGORICAL)
         needs_markers = kind in NEEDS_MARKERS
         none_item = self.marker_box.model().item(0)
         none_item.setEnabled(not needs_markers)
@@ -233,6 +264,10 @@ class GraphDialog(QDialog):
                 self._set_axes(x, self.ys() if self._y_chosen else None)
                 self._fill_hues(self.hue_box.currentData() if self.hue_box.currentData() != x else None)
         self._set_axes(self.x(), self.ys())  # what works across and up depends on the type
+
+    def _categories_toggled(self) -> None:
+        if not self._loading and self.columns is not None:
+            self._set_axes(self.x(), self.ys())  # categories up: only numbers across
 
     def _x_picked(self, _index: int) -> None:
         self._x_chosen = True  # the user's choice now, whatever the type
@@ -253,7 +288,7 @@ class GraphDialog(QDialog):
         if self._loading or self.columns is None:
             return
         ys = self.ys()
-        across = self.columns.x_options(ys[0] if len(ys) == 1 else None, self.kind())
+        across = self.columns.x_options(ys[0] if len(ys) == 1 else None, self.kind(), self.y_categories())
         if [self.x_box.itemData(i) for i in range(self.x_box.count())] != across:
             self._set_axes(self.x(), ys)
             return

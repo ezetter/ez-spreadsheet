@@ -215,6 +215,12 @@ The Graph dialog has these choices:
   which turns the graph sideways: the categories run down the side and the
   numbers across. While categories are up, the X axis offers only columns
   with numbers; and changing to Line or Scatter puts numbers back up.
+- **Y axis as categories**, shown only for a categorical scatter: for numbers
+  up that are really categories, such as years, check it to turn the graph
+  sideways with each year as a category down the side (`orient='h'` in the
+  code). Unchecked, numbers up are values, and the X axis column gives the
+  categories. It's checked, and can't be changed, for a column of text up,
+  and unavailable when the X axis column is text (that's the categories).
 - **Hue:** None (the default), or any column but the X axis's. Its values
   color the points, with a legend: categories (text) each get a color, and
   numbers get shades along a scale.

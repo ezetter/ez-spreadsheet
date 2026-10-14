@@ -1153,7 +1153,7 @@ class MainWindow(QMainWindow):
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
         graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys, choice.hue,
-                           import_pandas=pandas is None, import_seaborn=seaborn is None)
+                           choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
         self._show_status(f"Sent the selection to the notebook as {name}, with a graph of it.")
@@ -1183,11 +1183,14 @@ class MainWindow(QMainWindow):
         seaborn = importing_cell(self.notebook, "seaborn", graph.cell_id)
         source = self.notebook.cell(graph.cell_id).source
         try:
-            if graph.data is not None and (chosen.x, chosen.ys, chosen.hue) != (graph.x_label, graph.y_labels,
-                                                                                 graph.hue):
+            columns_before = (graph.x_label, graph.y_labels, graph.hue, graph.columns is not None
+                              and graph.columns.sideways(graph.y_labels, graph.kind, graph.y_categories))
+            columns_after = (chosen.x, chosen.ys, chosen.hue, graph.columns is not None
+                             and graph.columns.sideways(chosen.ys, chosen.kind, chosen.y_categories))
+            if graph.data is not None and columns_after != columns_before:
                 source = frame_graph_code(graph.data, graph.frame, chosen.kind, chosen.marker, chosen.x,
-                                          chosen.ys, chosen.hue, import_pandas=pandas is None,
-                                          import_seaborn=seaborn is None)
+                                          chosen.ys, chosen.hue, chosen.y_categories,
+                                          import_pandas=pandas is None, import_seaborn=seaborn is None)
             else:
                 source = change_graph(source, chosen.kind, chosen.marker)
         except (ValueError, GraphError) as e:
