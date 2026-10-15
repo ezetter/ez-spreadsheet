@@ -229,6 +229,34 @@ def test_older_scatter_of_several_series_in_the_changing_dialog(app):
     assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["Sales", "Cost", "Sales, Cost"]
 
 
+def test_reads_col(sales):
+    graph = read_graph(graph_code(sales, cells(3), "df", "line", None, x="Sales", ys=["Cost"], col="Month"))
+    assert (graph.x_label, graph.y_labels, graph.col) == ("Sales", ["Cost"], "Month")
+    assert read_graph(graph_code(sales, cells(3))).col is None
+    every = read_graph("long = df.melt(id_vars=['Day', 'Site'], value_vars=['Rain', 'Sun'], var_name='Series', "
+                       "value_name='Value')\nchart = sns.relplot(data=long, x='Day', y='Value', hue='Series', "
+                       "col='Site', kind='line')")
+    assert (every.y_labels, every.hue, every.col) == (["Rain", "Sun"], None, "Site")
+
+
+def test_changing_a_chart_with_col_keeps_it(sales):
+    code = graph_code(sales, cells(3), "df", "line", None, x="Sales", ys=["Cost"], col="Month")
+    changed = change_graph(code, "scatter", "D")
+    assert "col='Month', col_wrap=2," in changed and "marker='D', height=2.5, aspect=1.2," in changed
+    assert read_graph(changed).col == "Month" and change_graph(changed, "line", None) == code
+
+
+def test_col_in_the_changing_dialog(app):
+    labels = ["Month", "Sales", "Region"]
+    columns = GraphColumns(labels, [False, True, False], [True, False, True])
+    graph = GraphCell("a", "line", None, "df", "Month", ["Sales"], FrameData(labels, []), columns, col="Region")
+    dialog = GraphDialog(None, graphs=[graph], current=0)
+    assert dialog.col() == "Region" and dialog.col_box.isEnabled()
+    graph.data = graph.columns = None  # its DataFrame's cell wasn't found: shown, but greyed out
+    dialog = GraphDialog(None, graphs=[graph], current=0)
+    assert dialog.col() == "Region" and not dialog.col_box.isEnabled()
+
+
 def test_reads_numbers_up_as_categories():
     code = "chart = sns.catplot(data=df, x='Sales', y='Year', orient='h', kind='swarm')"
     graph = read_graph(code)

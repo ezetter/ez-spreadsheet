@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from py_spread.notebook import GraphChoice
+from py_spread.notebook import FACETED, GraphChoice
 from py_spread.window import MainWindow
 
 
@@ -78,7 +78,8 @@ def dialogs(monkeypatch):
         kind, marker, *axes = dialogs.graph_answer
         x = axes[0] if axes else columns.default_x(kind)
         return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
-                           axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False)
+                           axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False,
+                           axes[4] if len(axes) > 4 else None)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
 
@@ -93,12 +94,14 @@ def dialogs(monkeypatch):
                 return None
             x = axes[0] if axes else columns.default_x(kind)
             return None, GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
-                                     axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False)
+                                     axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False,
+                                     axes[4] if len(axes) > 4 else None)
         graph = graphs[index]
         return index, GraphChoice(kind, marker, axes[0] if axes else graph.x_label,
                                   axes[1] if len(axes) > 1 else graph.y_labels,
                                   axes[2] if len(axes) > 2 else graph.hue,
-                                  axes[3] if len(axes) > 3 else graph.y_categories)
+                                  axes[3] if len(axes) > 3 else graph.y_categories,
+                                  axes[4] if len(axes) > 4 else graph.col if kind in FACETED else None)
 
     monkeypatch.setattr(MainWindow, "_ask_chart", ask_chart)
 

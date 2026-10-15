@@ -329,6 +329,53 @@ def test_chosen_axes(sales, pyplot):
         graph_code(sales, block(0, 0, 3, 2), "df", "line", None, x="Month", ys=["Nope"])
 
 
+@pytest.fixture
+def regions(app):
+    """Sales and Cost by month for three regions: A1:D7."""
+    model = SheetModel(rows=20, cols=6)
+    rows = [("Region", "Month", "Sales", "Cost"), ("North", "Jan", "100", "60"), ("North", "Feb", "120", "70"),
+            ("South", "Jan", "90", "50"), ("South", "Feb", "95", "55"), ("East", "Jan", "80", "40"),
+            ("East", "Feb", "85", "45")]
+    model.set_cells({(r, c): value for r, row in enumerate(rows) for c, value in enumerate(row)})
+    return model
+
+
+def panels(g) -> dict[str, int]:
+    """Each panel's title, and how many lines it has."""
+    return {ax.get_title(): len([line for line in ax.get_lines() if len(line.get_xdata())]) for ax in g.axes.flat}
+
+
+def test_col_splits_a_line_chart_into_panels(regions, pyplot):
+    code = graph_code(regions, block(0, 0, 6, 3), "df", "line", None, x="Month", ys=["Sales"], col="Region")
+    assert "# df as a chart: 'Sales' against 'Month', a panel for each 'Region'." in code
+    assert "    col='Region', col_wrap=2,  # a panel for each, 2 to a row\n" in code
+    assert "height=2.5, aspect=1.2," in code  # smaller, so two fit across the notebook
+    g = graph(regions, block(0, 0, 6, 3), "line", None, x="Month", ys=["Sales"], col="Region")
+    assert panels(g) == {"Region = North": 1, "Region = South": 1, "Region = East": 1}
+    assert g.axes.shape == (3,) and g.figure.get_size_inches()[0] < 8  # two to a row
+
+
+def test_col_with_every_column_and_a_hue(regions, pyplot):
+    code = graph_code(regions, block(0, 0, 6, 3), "df", "line", None, x="Month", ys=["Sales", "Cost"], col="Region")
+    assert "melt(id_vars=['Month', 'Region'], value_vars=['Sales', 'Cost']" in code  # the panels' categories stay
+    g = graph(regions, block(0, 0, 6, 3), "line", "o", x="Month", ys=["Sales", "Cost"], col="Region")
+    assert set(panels(g).values()) == {2} and [t.get_text() for t in g.legend.texts] == ["Sales", "Cost"]
+    g = graph(regions, block(0, 0, 6, 3), "line", None, x="Sales", ys=["Cost"], hue="Month", col="Region")
+    assert set(panels(g).values()) == {2} and [t.get_text() for t in g.legend.texts] == ["Jan", "Feb"]
+
+
+def test_col_needs_a_line_chart_and_categories(regions):
+    cells = block(0, 0, 6, 3)
+    for kind, x, col in [("scatter", "Month", "Region"), ("strip", "Month", "Region"),  # line charts only
+                         ("line", "Month", "Sales"), ("line", "Region", "Region"), ("line", "Month", "Nope")]:
+        with pytest.raises(ValueError):
+            graph_code(regions, cells, "df", kind, "o", x=x, ys=["Cost"], col=col)
+    columns = graph_columns(regions, cells)
+    assert columns.col_options("Month", ["Sales"]) == ["Region"]
+    assert columns.col_options("Sales", ["Cost"]) == ["Region", "Month"]  # categories, but not x
+    assert "col=" not in graph_code(regions, cells, "df", "line", None)
+
+
 def test_x_with_the_only_numbers_goes_up_instead(app):
     model = SheetModel(rows=10, cols=4)
     model.set_cells({(0, 0): "n", (0, 1): "t", (1, 0): "1", (1, 1): "a", (2, 0): "2", (2, 1): "b"})
@@ -506,6 +553,37 @@ def test_chosen_marker_stays(app):
 
 def test_scatter_from_the_start_gets_circles(app):
     assert GraphDialog(None, sales_columns(), "scatter", None).marker() == "o"
+
+
+def region_columns():
+    return GraphColumns(["Region", "Month", "Sales", "Cost"], [False, False, True, True], [True, True, False, False])
+
+
+def test_col_for_line_charts(app):
+    dialog = GraphDialog(None, region_columns())
+    assert dialog.form.isRowVisible(dialog.col_box) and dialog.col() is None  # None by default
+    assert dialog.x() == "Region" and items(dialog.col_box) == ["None", "Month"]  # categories, but not x
+    dialog.x_box.setCurrentIndex(dialog.x_box.findData("Month"))
+    dialog.x_box.activated.emit(dialog.x_box.currentIndex())
+    assert items(dialog.col_box) == ["None", "Region"]
+    dialog.col_box.setCurrentIndex(1)
+    assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Region")
+    dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Cost"]))
+    assert dialog.choice().col == "Region"  # whatever's up
+    dialog.kind_box.setCurrentIndex(1)  # Scatter: no panels
+    assert not dialog.form.isRowVisible(dialog.col_box) and dialog.col() is None
+    dialog.kind_box.setCurrentIndex(0)
+    assert dialog.col() == "Region"  # still chosen, for a line chart
+    dialog.x_box.setCurrentIndex(dialog.x_box.findData("Region"))  # Region across can't split it too
+    assert dialog.col() is None and items(dialog.col_box) == ["None", "Month"]
+
+
+def test_no_col_without_categories(app):
+    dialog = GraphDialog(None, sales_columns())  # Note's the only other column of text
+    assert items(dialog.col_box) == ["None", "Note"] and dialog.col_box.isEnabled()
+    dialog = GraphDialog(None, GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False]))
+    assert items(dialog.col_box) == ["None"] and not dialog.col_box.isEnabled()
+    assert "no column of categories" in dialog.col_box.toolTip()
 
 
 def test_importing_cells(app):
@@ -1159,6 +1237,32 @@ def test_change_a_graphs_hue(window, dialogs):
     source = window.notebook.cell(graph_id).source
     assert "hue='Note'" in source and "kind='scatter'" in source
     assert dialogs.graph_change_prompts[1][0][0].hue == "Note"
+
+
+def test_new_chart_with_col(window, dialogs):
+    window.view.select_range(0, 0, 3, 2)  # Month, Sales, Note
+    dialogs.graph_answer = ("line", None, "Month", ["Sales"], None, False, "Note")
+    graph_id = window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "col='Note', col_wrap=2," in source and "kind='line'" in source
+
+
+def test_change_a_graphs_col(window, dialogs):
+    graph_id = make_graph(window, dialogs, columns=2)  # Month, Sales, Note
+    window.view.select_range(10, 0, 12, 2)
+    dialogs.graph_change_answer = (0, "line", "o", "Month", ["Sales"], None, False, "Note")
+    window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert source == graph_code(window.model, block(0, 0, 3, 2), "df", "line", "o", x="Month", ys=["Sales"],
+                                col="Note", import_pandas=False, import_seaborn=False)
+    dialogs.graph_change_answer = (0, "line", None)  # the marker alone: the panels stay, read from the code
+    window.send_graph_to_notebook()
+    assert dialogs.graph_change_prompts[1][0][0].col == "Note"
+    assert "col='Note'" in window.notebook.cell(graph_id).source
+    dialogs.graph_change_answer = (0, "scatter", "o")  # Scatter has no panels
+    window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "col=" not in source and "kind='scatter'" in source and "height=4, aspect=1.5" in source
 
 
 def test_change_a_graph_to_sideways(window, dialogs):

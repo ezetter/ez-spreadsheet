@@ -1,12 +1,13 @@
-"""The Chart dialog: the kind of chart, the columns across, up, and
-coloring the points, and the marker drawn on each point, for a Seaborn
+"""The Chart dialog: the kind of chart, the columns across, up, coloring
+the points, and splitting a line chart into panels, and the marker drawn on
+each point, for a Seaborn
 chart of selected cells in the notebook, or for changing one of the
 notebook's charts. (The code calls charts graphs.)"""
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
 from .appearance import error_color
-from .notebook import ALL_SERIES, CATEGORICAL, GRAPH_TYPES, NEEDS_MARKERS, GraphChoice
+from .notebook import ALL_SERIES, CATEGORICAL, COL_WRAP, FACETED, GRAPH_TYPES, NEEDS_MARKERS, GraphChoice
 
 MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     None: "None",
@@ -22,10 +23,15 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
 NO_HUE = "None"
+NO_COL = "None"
 NEW_CHART = "New chart"
 ALL_YS = "All"  # a line chart's y: every other column with numbers, a line each
 CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the chart sideways: "
                   "categories down the side, numbers across. A column of text always is.")
+HUE_TIP = "A column whose values color the points, with a legend"
+COL_TIP = (f"A column of categories (text): a panel for each of its values, {COL_WRAP} to a row, "
+           "sharing their axes")
+NO_COLS_TIP = "There's no column of categories (text), other than the X axis's, to split the chart by."
 
 
 def graph_labels(graphs) -> list[str]:
@@ -39,8 +45,9 @@ def graph_labels(graphs) -> list[str]:
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, or Categorical scatter, which can be a
     swarm plot), the X axis column, the Y axis column, the Hue column whose
-    values color the points (None by default), and a marker (None by
-    default). Up takes a column with numbers, except that a categorical
+    values color the points (None by default), for a line chart the Col
+    column of categories splitting it into a panel for each (None by
+    default), and a marker (None by default). Up takes a column with numbers, except that a categorical
     scatter across a column of numbers can have its categories up, turning
     it sideways: a column of text, or one of numbers (such as years) with
     "Y axis as categories" checked. Across then takes only columns with
@@ -95,8 +102,11 @@ class GraphDialog(QDialog):
         self.y_box = QComboBox()
         form.addRow("Y axis:", self.y_box)
         self.hue_box = QComboBox()
-        self.hue_box.setToolTip("A column whose values color the points, with a legend")
+        self.hue_box.setToolTip(HUE_TIP)
         form.addRow("Hue:", self.hue_box)
+        self.col_box = QComboBox()
+        self.col_box.setToolTip(COL_TIP)
+        form.addRow("Col:", self.col_box)
         self.marker_box = QComboBox()
         for code, label in MARKERS.items():
             self.marker_box.addItem(label, code)
@@ -151,12 +161,17 @@ class GraphDialog(QDialog):
     def hue(self) -> str | None:
         return None if len(self.ys()) > 1 else self.hue_box.currentData()  # several ys: a series each
 
+    def col(self) -> str | None:
+        """The column splitting a line chart into panels, if any."""
+        return self.col_box.currentData() if self.kind() in FACETED else None
+
     def y_categories(self) -> bool:
         """Whether a categorical scatter is sideways, with the y column its categories."""
         return self.kind() in CATEGORICAL and self.categories_box.isChecked()
 
     def choice(self) -> GraphChoice:
-        return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue(), self.y_categories())
+        return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue(), self.y_categories(),
+                           self.col())
 
     # --- Showing settings ---
 
@@ -180,7 +195,7 @@ class GraphDialog(QDialog):
         else:
             self._say(f"A new chart of {self.new_source}." if self.new_source else "")
         self._allow(problem is None)
-        self._show(kind, marker, None, None, None, False)
+        self._show(kind, marker, None, None, None, False, None)
 
     def _show_graph(self, index: int) -> None:
         graph = self.graphs[index]
@@ -191,10 +206,11 @@ class GraphDialog(QDialog):
         self.columns = graph.columns
         if graph.columns is not None and graph.x_label not in graph.columns.labels:
             self.columns = None  # its x isn't one of its DataFrame's columns: changed by hand
-        self._show(graph.kind, graph.marker, graph.x_label, graph.y_labels, graph.hue, graph.y_categories)
+        self._show(graph.kind, graph.marker, graph.x_label, graph.y_labels, graph.hue, graph.y_categories,
+                   graph.col)
 
     def _show(self, kind: str, marker: str | None, x: str | None, ys: list[str] | None, hue: str | None,
-              y_categories: bool) -> None:
+              y_categories: bool, col: str | None) -> None:
         self._loading = True
         if marker is not None and self.marker_box.findData(marker) < 0:
             self.marker_box.addItem(marker, marker)  # one set in the code that the list doesn't have
@@ -204,7 +220,7 @@ class GraphDialog(QDialog):
         self.swarm_box.setChecked(kind == "swarm")
         self.categories_box.setChecked(y_categories)
         known = self.columns is not None
-        for box in (self.x_box, self.y_box, self.hue_box, self.categories_box):
+        for box in (self.x_box, self.y_box, self.hue_box, self.col_box, self.categories_box):
             box.setEnabled(known)
             box.setToolTip("" if known else "The columns can't be changed: the cell making the chart's "
                                              "DataFrame wasn't found, or was changed by hand.")
@@ -220,6 +236,7 @@ class GraphDialog(QDialog):
             self.y_box.addItem(", ".join(ys or []) or "?", list(ys or []))
             self._loading = False
         self._fill_hues(hue)
+        self._fill_cols(col)
         self._kind_changed()
 
     def _set_axes(self, x: str, ys: list[str] | None) -> None:
@@ -249,6 +266,7 @@ class GraphDialog(QDialog):
             self.y_box.addItem(", ".join(ys), ys)
             index = self.y_box.count() - 1
         self.y_box.setCurrentIndex(max(0, index))
+        self._fill_cols(self.col_box.currentData())  # not x or y
         self._loading = False
         self._y_changed()
 
@@ -279,6 +297,20 @@ class GraphDialog(QDialog):
         self._loading = False
         self._y_changed()
 
+    def _fill_cols(self, col: str | None) -> None:
+        """None, and the columns of categories that can split a line chart
+        into panels, selecting `col` if it's still one."""
+        known = self.columns is not None
+        options = self.columns.col_options(self.x(), self.ys()) if known else [col] if col else []
+        self.col_box.clear()
+        self.col_box.addItem(NO_COL, None)
+        for label in options:
+            self.col_box.addItem(label, label)
+        self.col_box.setCurrentIndex(max(0, self.col_box.findData(col)) if col in options else 0)
+        if known:
+            self.col_box.setEnabled(bool(options))
+            self.col_box.setToolTip(COL_TIP if options else NO_COLS_TIP)
+
     def _say(self, text: str, error: bool = False) -> None:
         self.summary.setText(text)
         self.summary.setVisible(bool(text))
@@ -297,6 +329,7 @@ class GraphDialog(QDialog):
         kind = self.kind()
         self.form.setRowVisible(self.swarm_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.categories_box, kind in CATEGORICAL)
+        self.form.setRowVisible(self.col_box, kind in FACETED)
         needs_markers = kind in NEEDS_MARKERS
         none_item = self.marker_box.model().item(0)
         none_item.setEnabled(not needs_markers)
@@ -346,8 +379,7 @@ class GraphDialog(QDialog):
             return
         several = len(ys) > 1
         self.hue_box.setEnabled(not several)
-        self.hue_box.setToolTip("Each column is its own series, in its own color." if several
-                                else "A column whose values color the points, with a legend")
+        self.hue_box.setToolTip("Each column is its own series, in its own color." if several else HUE_TIP)
 
     def _marker_chosen(self, _index: int) -> None:
         self._none_replaced = False  # the marker is now the user's choice

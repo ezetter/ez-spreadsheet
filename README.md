@@ -221,6 +221,14 @@ The Chart dialog has these choices:
   color the points, with a legend: categories (text) each get a color, and
   numbers get shades along a scale. It's unavailable with All, as each line
   already has its own color.
+- **Col**, shown only for a line chart: None (the default), or a column of
+  categories (text) other than the X axis's, such as regions. The chart is
+  split into a panel for each of its values, named above it ("Region =
+  North"), two to a row and sharing their axes (Seaborn's `col=` and
+  `col_wrap=2`). The panels are smaller than a single chart, so two fit across
+  the notebook. It works with All (each panel has a line for each column) and
+  with a hue. It's unavailable if there's no such column, and Scatter and
+  Categorical scatter leave it out.
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
@@ -232,7 +240,7 @@ line chart, All; for the other types, the next column with numbers (a column
 of text alone can't go up). For a categorical scatter, the first column with
 text goes across instead. The defaults follow the chart type until you choose an X axis
 yourself, and the Y axis follows the X axis until you choose it. Choosing a
-new X axis clears the Hue if it was that column.
+new X axis clears the Hue or Col if it was that column.
 
 The type (including Swarm plot) and marker start from your last choices
 while EzSheet is open. Cancel adds nothing. If the cells can't be charted (the
@@ -263,16 +271,16 @@ for their DataFrame and columns, such as "df2: Sales and Cost against Month".
 - The list starts at New chart when several cells are selected; otherwise, at
   the chart in the current notebook cell, or else the newest chart.
 
-Choosing a chart shows its type, axes, hue, and marker. Change them and click
+Choosing a chart shows its type, axes, hue, col, and marker. Change them and click
 OK:
 
 - Changing only the type or marker changes just `kind=`, `marker=`, and
   whether `relplot` or `catplot` draws it, so anything else you changed in the
   cell stays.
-- Changing the axes or the hue writes the chart's cell afresh, from the data in
-  its DataFrame's cell, so changes you made to the chart's cell by hand are
-  replaced. The columns can be changed only if that cell is found, written as
-  EzSheet writes it; otherwise they're shown but greyed out.
+- Changing the axes, the hue, or the col writes the chart's cell afresh, from
+  the data in its DataFrame's cell, so changes you made to the chart's cell by
+  hand are replaced. The columns can be changed only if that cell is found,
+  written as EzSheet writes it; otherwise they're shown but greyed out.
 - A chart made before the Y axis took one column may chart several, a series
   each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
   each series has its own color; choosing one column instead redraws it with

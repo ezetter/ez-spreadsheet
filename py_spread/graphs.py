@@ -35,6 +35,7 @@ class GraphCell:
     columns: GraphColumns | None = None  # what can go across and up, given the data
     hue: str | None = None  # the column coloring its points, if any
     y_categories: bool = False  # orient='h': sideways, with the y column as categories
+    col: str | None = None  # the column splitting it into panels, one for each of its values, if any
 
     @property
     def title(self) -> str:
@@ -95,6 +96,8 @@ def read_graph(source: str) -> GraphCell | None:
         hue = _literal(keywords.get("hue"))
         graph.hue = hue if isinstance(hue, str) else None
     graph.y_categories = _literal(keywords.get("orient")) in ("h", "y")
+    col = _literal(keywords.get("col"))
+    graph.col = col if isinstance(col, str) else None
     return graph
 
 

@@ -1229,7 +1229,8 @@ class MainWindow(QMainWindow):
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
         graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys, choice.hue,
-                           choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None)
+                           choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None,
+                           col=choice.col)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
         self.notebook_window.reveal(graph_id)  # so the chart can be seen when it's drawn
@@ -1238,22 +1239,24 @@ class MainWindow(QMainWindow):
 
     def _change_chart(self, graphs, index: int, chosen: GraphChoice) -> str | None:
         """Redraw one of the notebook's charts with the choices made. New
-        columns (across, up, or for the hue) mean writing its cell afresh,
-        from its DataFrame's cell; otherwise just its kind and marker change
-        in the code. Returns its cell id, or None if it couldn't be changed."""
+        columns (across, up, for the hue, or splitting it into panels) mean
+        writing its cell afresh, from its DataFrame's cell; otherwise just its
+        kind and marker change in the code. Returns its cell id, or None if
+        it couldn't be changed."""
         graph = graphs[index]
         pandas = importing_cell(self.notebook, "pandas", graph.cell_id)
         seaborn = importing_cell(self.notebook, "seaborn", graph.cell_id)
         source = self.notebook.cell(graph.cell_id).source
         try:
-            columns_before = (graph.x_label, graph.y_labels, graph.hue, graph.columns is not None
+            columns_before = (graph.x_label, graph.y_labels, graph.hue, graph.col, graph.columns is not None
                               and graph.columns.sideways(graph.y_labels, graph.kind, graph.y_categories))
-            columns_after = (chosen.x, chosen.ys, chosen.hue, graph.columns is not None
+            columns_after = (chosen.x, chosen.ys, chosen.hue, chosen.col, graph.columns is not None
                              and graph.columns.sideways(chosen.ys, chosen.kind, chosen.y_categories))
             if graph.data is not None and columns_after != columns_before:
                 source = frame_graph_code(graph.data, graph.frame, chosen.kind, chosen.marker, chosen.x,
                                           chosen.ys, chosen.hue, chosen.y_categories,
-                                          import_pandas=pandas is None, import_seaborn=seaborn is None)
+                                          import_pandas=pandas is None, import_seaborn=seaborn is None,
+                                          col=chosen.col)
             else:
                 source = change_graph(source, chosen.kind, chosen.marker)
         except (ValueError, GraphError) as e:

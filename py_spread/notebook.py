@@ -262,6 +262,8 @@ GRAPH_KINDS = ("line", "scatter", "strip", "swarm")  # Seaborn's kinds: swarm is
 CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories; the rest with relplot
 NEEDS_MARKERS = {"scatter", "strip", "swarm"}  # their points are nothing but markers
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
+FACETED = {"line"}  # kinds that can be split by a column of categories (col=), a panel for each
+COL_WRAP = 2  # panels to a row
 
 
 class GraphError(ValueError):
@@ -275,7 +277,9 @@ class GraphChoice:
     column could have several, a series each), the hue column, if any,
     coloring the points by its values, and whether a categorical scatter's
     y column is its categories, turning it sideways (as a column of text
-    always is; for one of numbers, such as years, it has to be asked for)."""
+    always is; for one of numbers, such as years, it has to be asked for),
+    and the col column, if any, splitting it into a panel for each of its
+    categories."""
 
     kind: str
     marker: str | None
@@ -283,6 +287,7 @@ class GraphChoice:
     ys: list[str]
     hue: str | None = None
     y_categories: bool = False
+    col: str | None = None
 
 
 def _is_number(value) -> bool:
@@ -337,6 +342,11 @@ class GraphColumns:
         """The columns that can color the points: any but x."""
         return [label for label in self.labels if label != x]
 
+    def col_options(self, x: str, ys: list[str]) -> list[str]:
+        """The columns that can split the chart into panels, one for each of
+        their values: those of categories (text), but x and y."""
+        return [label for label in self.labels if self.category(label) and label != x and label not in ys]
+
     def default_x(self, kind: str) -> str:
         """The first column that leaves another with numbers for y; for a
         categorical scatter, the first such with text, as its categories."""
@@ -367,17 +377,19 @@ def graph_columns(model, cells) -> GraphColumns:
 
 def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None,
                x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
-               y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True) -> str:
+               y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True,
+               col: str | None = None) -> str:
     """Python that graphs the DataFrame `frame_name`, which dataframe_code
     makes of the same cells, with Seaborn (see frame_graph_code). GraphError
     if the cells can't be graphed."""
     return frame_graph_code(_frame(model, cells), frame_name, kind, marker, x, ys, hue, y_categories,
-                            import_pandas, import_seaborn)
+                            import_pandas, import_seaborn, col)
 
 
 def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line", marker: str | None = None,
                      x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
-                     y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True) -> str:
+                     y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True,
+                     col: str | None = None) -> str:
     """Python that graphs a DataFrame with Seaborn: column `x` across (text
     gives categories, in the sheet's order) and the `ys` column up (by
     default, the first column across and the next with numbers up, or for a
@@ -391,7 +403,9 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
     is left out. Several `ys` (All, for a line chart, or as charts made
     before the y was a single column could have) make a series each,
-    colored instead of by a hue.
+    colored instead of by a hue. A line chart can be split by the `col`
+    column of categories: a panel for each of its values, side by side,
+    COL_WRAP to a row, sharing their axes.
     `import_pandas` and `import_seaborn` false leave out those imports (an
     earlier cell has them). GraphError if it can't be graphed.
     """
@@ -407,6 +421,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         raise ValueError(f"can't chart {ys!r} against {x!r}")
     if hue is not None and (hue not in columns.hue_options(x) or len(ys) > 1):
         raise ValueError(f"can't color the chart by {hue!r}")
+    if col is not None and (kind not in FACETED or col not in columns.col_options(x, ys)):
+        raise ValueError(f"can't split the chart by {col!r}")
     values = dict(zip(frame.labels, frame.columns))
 
     labeled, measured = (ys[0], [x]) if sideways else (x, ys)  # the axis of labels; the columns of numbers
@@ -423,6 +439,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     named = [repr(y) for y in ys]  # repr: a label can't break out of the comment
     series = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
     colored = f", colored by {hue!r}" if hue is not None else ""
+    colored += f", a panel for each {col!r}" if col is not None else ""
     lines += [f"# {frame_name} as a chart: {series} against {x!r}{colored}.", "sns.set_theme(style='whitegrid')"]
     data = frame_name
     if fixes:
@@ -433,18 +450,21 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         plotted += ", orient='h'" if sideways else ""  # needed when the categories are numbers
     else:  # one column of values, with another naming each value's series
         series_name, value = _unused("Series", frame.labels), _unused("Value", frame.labels)
-        lines.append(f"long = {data}.melt(id_vars=[{x!r}], value_vars={ys!r}, "
+        kept = [x] if col is None else [x, col]  # col's categories stay with their values
+        lines.append(f"long = {data}.melt(id_vars={kept!r}, value_vars={ys!r}, "
                      f"var_name={series_name!r}, value_name={value!r})")
         plotted = f"data=long, x={x!r}, y={value!r}, hue={series_name!r}"
     function = "catplot" if kind in CATEGORICAL else "relplot"
     other = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
              "swarm": "  # or 'strip'"}[kind]
     marker = f"marker={marker!r}, " if marker else ""
+    lines += [f"chart = sns.{function}(", f"    {plotted},"]
+    if col is not None:  # smaller panels, so two to a row fit the notebook
+        lines.append(f"    col={col!r}, col_wrap={COL_WRAP},  # a panel for each, {COL_WRAP} to a row")
+    size = "height=2.5, aspect=1.2" if col is not None else "height=4, aspect=1.5"
     lines += [
-        f"chart = sns.{function}(",
-        f"    {plotted},",
         f"    kind={kind!r},{other}",
-        f"    {marker}height=4, aspect=1.5,",
+        f"    {marker}{size},",
         ")",
     ]
     return "\n".join(lines)
