@@ -262,7 +262,7 @@ GRAPH_KINDS = ("line", "scatter", "strip", "swarm")  # Seaborn's kinds: swarm is
 CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories; the rest with relplot
 NEEDS_MARKERS = {"scatter", "strip", "swarm"}  # their points are nothing but markers
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
-FACETED = {"line"}  # kinds that can be split by a column of categories (col=), a panel for each
+FACETED = {"line"}  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
 
 
@@ -279,7 +279,7 @@ class GraphChoice:
     y column is its categories, turning it sideways (as a column of text
     always is; for one of numbers, such as years, it has to be asked for),
     and the col column, if any, splitting it into a panel for each of its
-    categories."""
+    values (categories, or numbers such as years)."""
 
     kind: str
     marker: str | None
@@ -344,8 +344,9 @@ class GraphColumns:
 
     def col_options(self, x: str, ys: list[str]) -> list[str]:
         """The columns that can split the chart into panels, one for each of
-        their values: those of categories (text), but x and y."""
-        return [label for label in self.labels if self.category(label) and label != x and label not in ys]
+        their values: any but x and the ys, whether of categories (text) or
+        of numbers such as years."""
+        return [label for label in self.labels if label != x and label not in ys]
 
     def default_x(self, kind: str) -> str:
         """The first column that leaves another with numbers for y; for a
@@ -355,12 +356,13 @@ class GraphColumns:
             usable = [label for label, text in zip(self.labels, self.text) if text and label in usable] or usable
         return usable[0]
 
-    def default_ys(self, x: str, kind: str = "line") -> list[str]:
-        """For a line chart, all the columns with numbers but x, a line each;
-        otherwise the first column with numbers after x, else before it."""
+    def default_ys(self, x: str, kind: str = "line", col: str | None = None) -> list[str]:
+        """For a line chart, all the columns with numbers but x and the col
+        splitting it into panels (such as years), a line each; otherwise the
+        first column with numbers after x, else before it."""
         options = self.y_options(x)  # (numbers only: a chart is sideways only if asked for)
         if kind in ALL_SERIES:
-            return options
+            return [label for label in options if label != col] or options
         after = [label for label in options if self.labels.index(label) > self.labels.index(x)]
         return [(after or options)[0]]
 
@@ -404,8 +406,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     is left out. Several `ys` (All, for a line chart, or as charts made
     before the y was a single column could have) make a series each,
     colored instead of by a hue. A line chart can be split by the `col`
-    column of categories: a panel for each of its values, side by side,
-    COL_WRAP to a row, sharing their axes.
+    column: a panel for each of its values (categories, or numbers such as
+    years, in order), side by side, COL_WRAP to a row, sharing their axes.
     `import_pandas` and `import_seaborn` false leave out those imports (an
     earlier cell has them). GraphError if it can't be graphed.
     """
@@ -413,7 +415,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     columns = GraphColumns.of(frame)
     x = x if x is not None else columns.default_x(kind)
-    ys = list(ys) if ys is not None else columns.default_ys(x, kind)
+    ys = list(ys) if ys is not None else columns.default_ys(x, kind, col)
     sideways = columns.sideways(ys, kind, y_categories)  # the categories go up, and the numbers across
     if (x not in columns.labels or not ys or any(y not in columns.y_options(x, kind) for y in ys)
             or len(ys) > 1 and any(columns.category(y) for y in ys)
@@ -432,6 +434,10 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     for column in measured:
         if any(isinstance(v, str) for v in values[column]):
             fixes.append(f"data[{column!r}] = pd.to_numeric(data[{column!r}], errors='coerce')  # text isn't charted")
+    if col is not None and None in values[col] and all(
+            _is_number(v) and float(v).is_integer() for v in values[col] if v is not None):  # years, with gaps
+        fixes += [f"data = data.dropna(subset=[{col!r}])  # rows without a {col!r} have no panel",
+                  f"data[{col!r}] = data[{col!r}].astype(int)  # whole numbers: 2020, not 2020.0"]
 
     lines = ["import pandas as pd"] if import_pandas and any("pd." in fix for fix in fixes) else []
     lines += ["import seaborn as sns"] if import_seaborn else []

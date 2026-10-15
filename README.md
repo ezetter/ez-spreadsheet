@@ -221,14 +221,17 @@ The Chart dialog has these choices:
   color the points, with a legend: categories (text) each get a color, and
   numbers get shades along a scale. It's unavailable with All, as each line
   already has its own color.
-- **Col**, shown only for a line chart: None (the default), or a column of
-  categories (text) other than the X axis's, such as regions. The chart is
-  split into a panel for each of its values, named above it ("Region =
-  North"), two to a row and sharing their axes (Seaborn's `col=` and
-  `col_wrap=2`). The panels are smaller than a single chart, so two fit across
-  the notebook. It works with All (each panel has a line for each column) and
-  with a hue. It's unavailable if there's no such column, and Scatter and
-  Categorical scatter leave it out.
+- **Col**, shown only for a line chart: None (the default), or any column
+  besides the X and Y axes': categories (text) such as regions, or numbers
+  such as years. The chart is split into a panel for each of its values,
+  named above it ("Region = North", "Year = 2024"; numbers in order), two to
+  a row and sharing their axes (Seaborn's `col=` and `col_wrap=2`). The
+  panels are smaller than a single chart, so two fit across the notebook. It
+  works with All (each panel has a line for each column) and with a hue.
+  With a column of numbers as the Col, All leaves it out, so there's no line
+  of years; and choosing it for the Y axis clears the Col instead. Rows
+  without a value in the Col column are left out. It's unavailable if
+  there's no other column, and Scatter and Categorical scatter leave it out.
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:

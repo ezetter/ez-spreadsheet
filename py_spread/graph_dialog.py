@@ -29,9 +29,10 @@ ALL_YS = "All"  # a line chart's y: every other column with numbers, a line each
 CATEGORIES_TIP = ("Take the Y axis column's values as the categories, turning the chart sideways: "
                   "categories down the side, numbers across. A column of text always is.")
 HUE_TIP = "A column whose values color the points, with a legend"
-COL_TIP = (f"A column of categories (text): a panel for each of its values, {COL_WRAP} to a row, "
-           "sharing their axes")
-NO_COLS_TIP = "There's no column of categories (text), other than the X axis's, to split the chart by."
+COL_TIP = (f"A column whose values each get a panel, {COL_WRAP} to a row, sharing their axes: categories "
+           "(text), or numbers such as years")
+NO_COLS_TIP = "There's no column, besides the X and Y axes', to split the chart by."
+_CURRENT = object()  # (for _set_axes: the Col chosen now)
 
 
 def graph_labels(graphs) -> list[str]:
@@ -46,8 +47,10 @@ class GraphDialog(QDialog):
     """The chart type (Line, Scatter, or Categorical scatter, which can be a
     swarm plot), the X axis column, the Y axis column, the Hue column whose
     values color the points (None by default), for a line chart the Col
-    column of categories splitting it into a panel for each (None by
-    default), and a marker (None by default). Up takes a column with numbers, except that a categorical
+    column splitting it into a panel for each of its values (None by
+    default; a column of numbers, such as years, isn't one of All's lines
+    then), and a marker (None by default). Up takes a column with numbers,
+    except that a categorical
     scatter across a column of numbers can have its categories up, turning
     it sideways: a column of text, or one of numbers (such as years) with
     "Y axis as categories" checked. Across then takes only columns with
@@ -121,6 +124,7 @@ class GraphDialog(QDialog):
 
         self._loading = False
         self._older_ys = None  # the series of a chart being changed that has several (they stay)
+        self._every = []  # what All takes up now
         self._none_replaced = False  # a scatter graph swapped None for circles, to undo on Line
         self._x_chosen = bool(self.graphs)  # a graph's own columns stay; a new one's follow the type
         self._y_chosen = bool(self.graphs)  # likewise, the y follows the x until chosen
@@ -131,6 +135,7 @@ class GraphDialog(QDialog):
         self.y_box.activated.connect(self._y_picked)
         self.x_box.currentIndexChanged.connect(lambda _index: self._x_changed())
         self.y_box.currentIndexChanged.connect(lambda _index: self._y_changed())
+        self.col_box.currentIndexChanged.connect(lambda _index: self._col_changed())
         self.marker_box.activated.connect(self._marker_chosen)
         if self.graphs:
             self.graph_box.setCurrentIndex(0 if current is None else current + 1)
@@ -227,7 +232,8 @@ class GraphDialog(QDialog):
         self._loading = False
         if known:
             x = x if x is not None else self.columns.default_x(kind)
-            self._set_axes(x, list(ys) if ys is not None else self.columns.default_ys(x))
+            self._every = []  # (what All took up for another chart)
+            self._set_axes(x, list(ys) if ys is not None else None, col)
         else:
             self._loading = True
             self.x_box.clear()
@@ -235,21 +241,28 @@ class GraphDialog(QDialog):
             self.y_box.clear()
             self.y_box.addItem(", ".join(ys or []) or "?", list(ys or []))
             self._loading = False
+            self._fill_cols(col)
         self._fill_hues(hue)
-        self._fill_cols(col)
         self._kind_changed()
 
-    def _set_axes(self, x: str, ys: list[str] | None) -> None:
+    def _set_axes(self, x: str, ys: list[str] | None, col=_CURRENT) -> None:
         """Fill the X and Y axis choices, which depend on the type and each
-        other, selecting `x` and `ys` where they still work (else the
-        defaults). A categorical scatter can have categories up, with
-        numbers across; otherwise up takes numbers."""
+        other, and the Col choices, which depend on both, selecting `x`,
+        `ys`, and `col` where they still work (else the defaults). A
+        categorical scatter can have categories up, with numbers across;
+        otherwise up takes numbers. All, for a line chart, takes every
+        column with numbers but x and the col."""
         kind = self.kind()
+        col = self.col_box.currentData() if col is _CURRENT else col
+        splitting = col if kind in FACETED else None
         options = self.columns.y_options(x, kind)
-        every = self.columns.y_options(x) if kind in ALL_SERIES else []  # All, for a line chart
+        every = [y for y in self.columns.y_options(x) if y != splitting] if kind in ALL_SERIES else []
+        if ys is not None and len(ys) > 1 and ys == self._every and len(every) > 1:
+            ys = every  # All still, though what it takes may have changed
         if (ys is None or any(y not in options for y in ys)
                 or len(ys) > 1 and ys != every and ys != self._older_ys):
-            ys = self.columns.default_ys(x, kind)
+            ys = self.columns.default_ys(x, kind, splitting)
+        self._every = every
         self._loading = True
         self._show_categories(x, ys)
         self.x_box.clear()
@@ -266,7 +279,7 @@ class GraphDialog(QDialog):
             self.y_box.addItem(", ".join(ys), ys)
             index = self.y_box.count() - 1
         self.y_box.setCurrentIndex(max(0, index))
-        self._fill_cols(self.col_box.currentData())  # not x or y
+        self._fill_cols(col)  # not x or y
         self._loading = False
         self._y_changed()
 
@@ -298,18 +311,27 @@ class GraphDialog(QDialog):
         self._y_changed()
 
     def _fill_cols(self, col: str | None) -> None:
-        """None, and the columns of categories that can split a line chart
-        into panels, selecting `col` if it's still one."""
+        """None, and the columns that can split a line chart into panels,
+        selecting `col` if it's still one."""
         known = self.columns is not None
-        options = self.columns.col_options(self.x(), self.ys()) if known else [col] if col else []
+        options = self.columns.col_options(self.x(), self._col_ys()) if known else [col] if col else []
+        loading, self._loading = self._loading, True
         self.col_box.clear()
         self.col_box.addItem(NO_COL, None)
         for label in options:
             self.col_box.addItem(label, label)
         self.col_box.setCurrentIndex(max(0, self.col_box.findData(col)) if col in options else 0)
+        self._loading = loading
         if known:
             self.col_box.setEnabled(bool(options))
             self.col_box.setToolTip(COL_TIP if options else NO_COLS_TIP)
+
+    def _col_ys(self) -> list[str]:
+        """What's up that the col can't be: nothing for All (which leaves
+        out the col), or for a type without panels (the col waits, should
+        Line be chosen again)."""
+        ys = self.ys()
+        return [] if self.kind() not in FACETED or len(ys) > 1 and ys == self._every else ys
 
     def _say(self, text: str, error: bool = False) -> None:
         self.summary.setText(text)
@@ -368,8 +390,9 @@ class GraphDialog(QDialog):
         self._fill_hues(hue if hue != self.x() else None)
 
     def _y_changed(self) -> None:
-        """Categories up limit what can go across; and several y columns (an
-        older graph's) are colored a series each, so there's no hue."""
+        """Categories up limit what can go across; the y column can't split
+        the chart too; and several y columns (All, or an older graph's) are
+        colored a series each, so there's no hue."""
         if self._loading or self.columns is None:
             return
         ys = self.ys()
@@ -377,9 +400,17 @@ class GraphDialog(QDialog):
         if [self.x_box.itemData(i) for i in range(self.x_box.count())] != across:
             self._set_axes(self.x(), ys)
             return
+        if self.col_box.currentData() not in (None, *self.columns.col_options(self.x(), self._col_ys())):
+            self._set_axes(self.x(), ys, None)  # it took the col's column: no panels, and All takes it again
+            return
         several = len(ys) > 1
         self.hue_box.setEnabled(not several)
         self.hue_box.setToolTip("Each column is its own series, in its own color." if several else HUE_TIP)
+
+    def _col_changed(self) -> None:
+        """A column of numbers splitting a line chart isn't one of All's lines."""
+        if not self._loading and self.columns is not None:
+            self._set_axes(self.x(), self.ys())
 
     def _marker_chosen(self, _index: int) -> None:
         self._none_replaced = False  # the marker is now the user's choice

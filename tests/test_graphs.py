@@ -257,6 +257,17 @@ def test_col_in_the_changing_dialog(app):
     assert dialog.col() == "Region" and not dialog.col_box.isEnabled()
 
 
+def test_col_of_years_in_the_changing_dialog(app):
+    labels = ["Year", "Month", "Sales", "Cost"]
+    columns = GraphColumns(labels, [True, False, True, True], [False, True, False, False])
+    every = GraphCell("a", "line", None, "df", "Month", ["Sales", "Cost"], FrameData(labels, []), columns, col="Year")
+    sales = GraphCell("b", "line", None, "df", "Month", ["Sales"], FrameData(labels, []), columns, col="Year")
+    dialog = GraphDialog(None, graphs=[every, sales], current=1)
+    assert (dialog.ys(), dialog.col()) == (["Sales"], "Year")
+    dialog.graph_box.setCurrentIndex(1)  # All, but the years
+    assert (dialog.y_box.currentText(), dialog.ys(), dialog.col()) == ("All", ["Sales", "Cost"], "Year")
+
+
 def test_reads_numbers_up_as_categories():
     code = "chart = sns.catplot(data=df, x='Sales', y='Year', orient='h', kind='swarm')"
     graph = read_graph(code)

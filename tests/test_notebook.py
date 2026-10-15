@@ -364,16 +364,43 @@ def test_col_with_every_column_and_a_hue(regions, pyplot):
     assert set(panels(g).values()) == {2} and [t.get_text() for t in g.legend.texts] == ["Jan", "Feb"]
 
 
-def test_col_needs_a_line_chart_and_categories(regions):
+def test_col_needs_a_line_chart(regions):
     cells = block(0, 0, 6, 3)
     for kind, x, col in [("scatter", "Month", "Region"), ("strip", "Month", "Region"),  # line charts only
-                         ("line", "Month", "Sales"), ("line", "Region", "Region"), ("line", "Month", "Nope")]:
-        with pytest.raises(ValueError):
+                         ("line", "Month", "Cost"), ("line", "Region", "Region"), ("line", "Month", "Nope")]:
+        with pytest.raises(ValueError):  # (nor x or y)
             graph_code(regions, cells, "df", kind, "o", x=x, ys=["Cost"], col=col)
     columns = graph_columns(regions, cells)
-    assert columns.col_options("Month", ["Sales"]) == ["Region"]
-    assert columns.col_options("Sales", ["Cost"]) == ["Region", "Month"]  # categories, but not x
+    assert columns.col_options("Month", ["Sales"]) == ["Region", "Cost"]  # any but x and y
+    assert columns.col_options("Sales", ["Cost"]) == ["Region", "Month"]
     assert "col=" not in graph_code(regions, cells, "df", "line", None)
+
+
+@pytest.fixture
+def years(app):
+    """Sales and Cost by month in two years: A1:D5, and a row without a year in A6:D6."""
+    model = SheetModel(rows=20, cols=6)
+    rows = [("Year", "Month", "Sales", "Cost"), ("2020", "Jan", "100", "60"), ("2020", "Feb", "120", "70"),
+            ("2021", "Jan", "90", "50"), ("2021", "Feb", "95", "55"), ("", "Mar", "130", "80")]
+    model.set_cells({(r, c): value for r, row in enumerate(rows) for c, value in enumerate(row)})
+    return model
+
+
+def test_col_of_numbers_such_as_years(years, pyplot):
+    code = graph_code(years, block(0, 0, 4, 3), "df", "line", None, x="Month", col="Year")
+    assert "melt(id_vars=['Month', 'Year'], value_vars=['Sales', 'Cost']" in code  # All, but the years
+    assert "dropna" not in code and "astype" not in code
+    g = graph(years, block(0, 0, 4, 3), "line", None, x="Month", col="Year")
+    assert panels(g) == {"Year = 2020": 2, "Year = 2021": 2}
+
+
+def test_col_of_whole_numbers_with_gaps(years, pyplot):
+    code = graph_code(years, block(0, 0, 5, 3), "df", "line", None, x="Month", ys=["Sales"], col="Year")
+    assert "data = data.dropna(subset=['Year'])  # rows without a 'Year' have no panel" in code
+    assert "data['Year'] = data['Year'].astype(int)  # whole numbers: 2020, not 2020.0" in code
+    g = graph(years, block(0, 0, 5, 3), "line", None, x="Month", ys=["Sales"], col="Year")
+    assert panels(g) == {"Year = 2020": 1, "Year = 2021": 1}
+    assert "dropna" not in graph_code(years, block(0, 0, 5, 3), "df", "line", None, x="Year", ys=["Sales"])
 
 
 def test_x_with_the_only_numbers_goes_up_instead(app):
@@ -562,28 +589,59 @@ def region_columns():
 def test_col_for_line_charts(app):
     dialog = GraphDialog(None, region_columns())
     assert dialog.form.isRowVisible(dialog.col_box) and dialog.col() is None  # None by default
-    assert dialog.x() == "Region" and items(dialog.col_box) == ["None", "Month"]  # categories, but not x
+    assert dialog.x() == "Region" and items(dialog.col_box) == ["None", "Month", "Sales", "Cost"]  # any but x
     dialog.x_box.setCurrentIndex(dialog.x_box.findData("Month"))
     dialog.x_box.activated.emit(dialog.x_box.currentIndex())
-    assert items(dialog.col_box) == ["None", "Region"]
+    assert items(dialog.col_box) == ["None", "Region", "Sales", "Cost"]
     dialog.col_box.setCurrentIndex(1)
     assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Region")
     dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Cost"]))
+    dialog.y_box.activated.emit(dialog.y_box.currentIndex())
     assert dialog.choice().col == "Region"  # whatever's up
     dialog.kind_box.setCurrentIndex(1)  # Scatter: no panels
     assert not dialog.form.isRowVisible(dialog.col_box) and dialog.col() is None
     dialog.kind_box.setCurrentIndex(0)
     assert dialog.col() == "Region"  # still chosen, for a line chart
+    assert items(dialog.col_box) == ["None", "Region", "Sales"]  # not Cost, up
     dialog.x_box.setCurrentIndex(dialog.x_box.findData("Region"))  # Region across can't split it too
-    assert dialog.col() is None and items(dialog.col_box) == ["None", "Month"]
+    assert dialog.col() is None and items(dialog.col_box) == ["None", "Month", "Sales"]
 
 
-def test_no_col_without_categories(app):
-    dialog = GraphDialog(None, sales_columns())  # Note's the only other column of text
-    assert items(dialog.col_box) == ["None", "Note"] and dialog.col_box.isEnabled()
-    dialog = GraphDialog(None, GraphColumns(["Month", "Sales", "Cost"], [False, True, True], [True, False, False]))
+def test_col_of_numbers_isnt_one_of_alls_lines(app):
+    columns = GraphColumns(["Year", "Month", "Sales", "Cost"], [True, False, True, True], [False, True, False, False])
+    dialog = GraphDialog(None, columns)
+    dialog.x_box.setCurrentIndex(dialog.x_box.findData("Month"))
+    dialog.x_box.activated.emit(dialog.x_box.currentIndex())
+    assert dialog.ys() == ["Year", "Sales", "Cost"] and items(dialog.col_box) == ["None", "Year", "Sales", "Cost"]
+    dialog.col_box.setCurrentIndex(dialog.col_box.findData("Year"))
+    assert dialog.y_box.currentText() == "All" and dialog.ys() == ["Sales", "Cost"]  # a panel for each year
+    assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Year")
+    assert items(dialog.y_box) == ["All", "Year", "Sales", "Cost"]
+    dialog.col_box.setCurrentIndex(0)
+    assert dialog.y_box.currentText() == "All" and dialog.ys() == ["Year", "Sales", "Cost"]
+    dialog.y_box.activated.emit(0)  # All, chosen: it still follows the col
+    dialog.col_box.setCurrentIndex(dialog.col_box.findData("Year"))
+    assert dialog.ys() == ["Sales", "Cost"]
+    dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Year"]))  # the years up: no panels of them
+    assert (dialog.ys(), dialog.col()) == (["Year"], None) and dialog.y_box.itemData(0) == ["Year", "Sales", "Cost"]
+
+
+def test_col_of_the_only_other_column_of_numbers(app):
+    columns = GraphColumns(["Month", "Year", "Sales"], [False, True, True], [True, False, False])
+    dialog = GraphDialog(None, columns)
+    assert dialog.y_box.currentText() == "All"
+    dialog.col_box.setCurrentIndex(dialog.col_box.findData("Year"))
+    assert (dialog.ys(), dialog.col()) == (["Sales"], "Year") and items(dialog.y_box) == ["Year", "Sales"]
+    dialog.col_box.setCurrentIndex(0)
+    assert (dialog.ys(), dialog.col()) == (["Sales"], None)  # Sales was chosen for it; it stays
+
+
+def test_no_col_without_another_column(app):
+    dialog = GraphDialog(None, sales_columns())
+    assert items(dialog.col_box) == ["None", "Sales", "Cost", "Note"] and dialog.col_box.isEnabled()
+    dialog = GraphDialog(None, GraphColumns(["Month", "Sales"], [False, True], [True, False]))
     assert items(dialog.col_box) == ["None"] and not dialog.col_box.isEnabled()
-    assert "no column of categories" in dialog.col_box.toolTip()
+    assert "no column, besides the X and Y" in dialog.col_box.toolTip()
 
 
 def test_importing_cells(app):
