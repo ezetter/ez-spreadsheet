@@ -221,18 +221,19 @@ The Chart dialog has these choices:
   color the points, with a legend: categories (text) each get a color, and
   numbers get shades along a scale. It's unavailable with All, as each line
   already has its own color.
-- **Col**, shown for a line or scatter chart: None (the default), or any
-  column besides the X and Y axes': categories (text) such as regions, or
-  numbers such as years. The chart is split into a panel for each of its
-  values, named above it ("Region = North", "Year = 2024"; numbers in order),
-  two to a row and sharing their axes (Seaborn's `col=` and `col_wrap=2`).
-  The panels are smaller than a single chart, so two fit across the notebook.
-  It works with a hue, and with All (each panel has a line for each column).
+- **Col:** None (the default), or any column besides the X and Y axes':
+  categories (text) such as regions, or numbers such as years. The chart is
+  split into a panel for each of its values, named above it ("Region =
+  North", "Year = 2024"; numbers in order), two to a row and sharing their
+  axes (Seaborn's `col=` and `col_wrap=2`). The panels are smaller than a
+  single chart, so two fit across the notebook. It works with every chart
+  type, with a hue, and with All (each panel has a line for each column).
   With a column of numbers as the Col, All leaves it out, so there's no line
   of years, and a scatter's Y axis starts at another column; choosing it for
   the Y axis clears the Col instead. Rows without a value in the Col column
-  are left out. It's unavailable if there's no other column, and Categorical
-  scatter leaves it out. Switching between Line and Scatter keeps the panels.
+  are left out. It's unavailable if there's no other column. Changing the
+  chart type keeps the panels, and a categorical scatter's X axis starts at
+  a column of text other than the Col's.
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:

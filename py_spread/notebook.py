@@ -262,7 +262,7 @@ GRAPH_KINDS = ("line", "scatter", "strip", "swarm")  # Seaborn's kinds: swarm is
 CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories; the rest with relplot
 NEEDS_MARKERS = {"scatter", "strip", "swarm"}  # their points are nothing but markers
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
-FACETED = {"line", "scatter"}  # kinds that can be split by a column's values (col=), a panel for each
+FACETED = set(GRAPH_KINDS)  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
 
 
@@ -348,10 +348,12 @@ class GraphColumns:
         of numbers such as years."""
         return [label for label in self.labels if label != x and label not in ys]
 
-    def default_x(self, kind: str) -> str:
+    def default_x(self, kind: str, col: str | None = None) -> str:
         """The first column that leaves another with numbers for y; for a
-        categorical scatter, the first such with text, as its categories."""
+        categorical scatter, the first such with text, as its categories.
+        Not the col splitting the chart into panels, if there's another."""
         usable = [label for label in self.labels if self.y_options(label)]
+        usable = [label for label in usable if label != col] or usable
         if kind in CATEGORICAL:
             usable = [label for label, text in zip(self.labels, self.text) if text and label in usable] or usable
         return usable[0]
@@ -406,8 +408,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
     is left out. Several `ys` (All, for a line chart, or as charts made
     before the y was a single column could have) make a series each,
-    colored instead of by a hue. A line or scatter chart can be split by
-    the `col` column: a panel for each of its values (categories, or numbers such as
+    colored instead of by a hue. Any chart can be split by the `col`
+    column: a panel for each of its values (categories, or numbers such as
     years, in order), side by side, COL_WRAP to a row, sharing their axes.
     `import_pandas` and `import_seaborn` false leave out those imports (an
     earlier cell has them). GraphError if it can't be graphed.

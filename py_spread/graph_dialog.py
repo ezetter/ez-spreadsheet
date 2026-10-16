@@ -1,8 +1,7 @@
 """The Chart dialog: the kind of chart, the columns across, up, coloring
-the points, and splitting a line or scatter chart into panels, and the
-marker drawn on each point, for a Seaborn chart of selected cells in the
-notebook, or for changing one of the notebook's charts. (The code calls
-charts graphs.)"""
+the points, and splitting the chart into panels, and the marker drawn on
+each point, for a Seaborn chart of selected cells in the notebook, or for
+changing one of the notebook's charts. (The code calls charts graphs.)"""
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
@@ -46,15 +45,14 @@ def graph_labels(graphs) -> list[str]:
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, or Categorical scatter, which can be a
     swarm plot), the X axis column, the Y axis column, the Hue column whose
-    values color the points (None by default), for a line or scatter chart
-    the Col column splitting it into a panel for each of its values (None
-    by default; a column of numbers, such as years, isn't one of All's
-    lines then), and a marker (None by default). Up takes a column with numbers,
-    except that a categorical
-    scatter across a column of numbers can have its categories up, turning
-    it sideways: a column of text, or one of numbers (such as years) with
-    "Y axis as categories" checked. Across then takes only columns with
-    numbers. For a new graph of `columns` (GraphColumns), the axes start at
+    values color the points (None by default), the Col column splitting
+    it into a panel for each of its values (None by default; a column of
+    numbers, such as years, isn't one of All's lines then), and a marker
+    (None by default). Up takes a column with numbers, except that a
+    categorical scatter across a column of numbers can have its categories
+    up, turning it sideways: a column of text, or one of numbers (such as
+    years) with "Y axis as categories" checked. Across then takes only
+    columns with numbers. For a new graph of `columns` (GraphColumns), the axes start at
     the type's defaults, and follow the type until an X axis is chosen (and
     the Y axis follows the X until it's chosen). Scatter graphs need markers
     to show their points, so None is unavailable for them; choosing one
@@ -167,7 +165,7 @@ class GraphDialog(QDialog):
         return None if len(self.ys()) > 1 else self.hue_box.currentData()  # several ys: a series each
 
     def col(self) -> str | None:
-        """The column splitting a line or scatter chart into panels, if any."""
+        """The column splitting the chart into panels, if any."""
         return self.col_box.currentData() if self.kind() in FACETED else None
 
     def y_categories(self) -> bool:
@@ -365,7 +363,7 @@ class GraphDialog(QDialog):
         if self.columns is None:
             return
         if not self._x_chosen:  # a new graph's x follows the type
-            x = self.columns.default_x(kind)
+            x = self.columns.default_x(kind, self.col_box.currentData())
             if x != self.x():
                 self._set_axes(x, self.ys() if self._y_chosen else None)
                 self._fill_hues(self.hue_box.currentData() if self.hue_box.currentData() != x else None)
