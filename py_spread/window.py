@@ -1001,10 +1001,10 @@ class MainWindow(QMainWindow):
         is, or else the one of its kind (Number, for one with 3 decimals)."""
         current = self.view.currentIndex()
         fmt = (self.model.number_format(current.row(), current.column()) if current.isValid() else None) or GENERAL
-        if fmt.kind == "custom":
+        names = [name for name, known in self.number_formats.items() if known == fmt]
+        if not names and fmt.kind == "custom":  # (Fraction is one, by its pattern)
             self.format_actions[CUSTOM_FORMAT].setChecked(True)
             return
-        names = [name for name, known in self.number_formats.items() if known == fmt]
         names = names or [name for name, known in self.number_formats.items() if known.kind == fmt.kind]
         self.format_actions[names[0] if names else "Automatic"].setChecked(True)
 

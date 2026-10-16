@@ -182,7 +182,7 @@ def test_format_menu(window):
     assert menu.actions()[0].menu() is window.number_menu  # Format > Number, as Google Sheets has it
     assert [a.text() for a in window.number_menu.actions() if a.text()] == [
         "Automatic", "Plain text", "Number  (1,000.12)", "Percent  (10.12%)", "Scientific  (1.01E+03)",
-        "Accounting  ($ (1,000.12))", "Financial  ((1,000.12))", "Currency  ($1,000.12)",
+        "Fraction  (1000 3/25)", "Accounting  ($ (1,000.12))", "Financial  ((1,000.12))", "Currency  ($1,000.12)",
         "Currency rounded  ($1,000)", "Date  (9/26/2008)", "Time  (3:59:00 PM)",
         "Date time  (9/26/2008 15:59:00)", "Duration  (24:01:00)", "Custom number format…"]
 
@@ -343,12 +343,12 @@ def test_google_sheets_formats(kind, decimals, value, shown):
 
 def test_menu_examples_are_what_the_formats_show():
     from py_spread.numformat import MENU_FORMATS
-    samples = {"Number": 1000.12, "Percent": 0.1012, "Scientific": 1012, "Accounting": -1000.12,
+    samples = {"Number": 1000.12, "Percent": 0.1012, "Scientific": 1012, "Fraction": 1000.12, "Accounting": -1000.12,
                "Financial": -1000.12, "Currency": 1000.12, "Currency rounded": 1000.12, "Date": 39717,
                "Time": 0.6659722222, "Date time": 39717.6659722222, "Duration": 1.000694444}
     for name, fmt, example in filter(None, MENU_FORMATS):
         if example:
-            assert format_value(samples[name], fmt) == example, name
+            assert " ".join(format_value(samples[name], fmt).split()) == example, name
 
 
 @pytest.mark.parametrize("typed, value, fmt", [
@@ -471,3 +471,19 @@ def test_separator_between_number_formats_and_styles(window):
     toolbar = window.findChild(QToolBar)
     labels = ["|" if a.isSeparator() else toolbar.widgetForAction(a).text() for a in toolbar.actions()]
     assert labels[labels.index("$") - 1:] == ["|", "$", "%", "", "", "123", "|", "B", "I", "|", "DEG"]
+
+
+def test_fraction_format(window, tmp_path):
+    model = window.model
+    model.set_cell(0, 0, "2.75")
+    window.view.select_range(0, 0, 0, 0)
+    window.format_actions["Fraction"].trigger()
+    assert model.display_text(0, 0) == "2  3/4 " and window.undo_action.text() == "Undo Fraction Format"
+    assert window.format_actions["Fraction"].isChecked()  # not Custom number format…, though it's # ??/??
+    window.save_to(str(tmp_path / "s.ezs"))
+    other = MainWindow()
+    other.open_path(str(tmp_path / "s.ezs"))
+    other.view.setCurrentIndex(other.model.index(0, 0))
+    assert other.format_actions["Fraction"].isChecked()
+    other.setWindowModified(False)
+    other.close()

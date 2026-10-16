@@ -117,6 +117,8 @@ choices as Google Sheets (the current cell's format is checked):
 - **Number** shows two decimals with thousands separators (`1,000.12`).
 - **Percent** shows the number times 100, with a percent sign (`10.12%`).
 - **Scientific** shows one digit, decimals, and a power of ten (`1.01E+03`).
+- **Fraction** shows a whole number and the closest fraction with up to two
+  digits on each side (`1000 3/25`): the custom format `# ??/??` (see below).
 - **Accounting** sets the dollar sign apart and puts negatives in
   parentheses (`$ (1,000.12)`), with a space after positives so the digits
   line up; zero shows as `$ -`.

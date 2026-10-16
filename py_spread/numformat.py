@@ -67,7 +67,8 @@ TEXT = NumberFormat("text")
 
 # The Format menu's number formats, and the toolbar's 123 menu: (name,
 # format, an example), None between groups. Currency rounded is just
-# currency with no decimals.
+# currency with no decimals, and Fraction a custom format (its example
+# without the spaces that line fractions up).
 MENU_FORMATS = (
     ("Automatic", GENERAL, ""),
     ("Plain text", TEXT, ""),
@@ -75,6 +76,7 @@ MENU_FORMATS = (
     ("Number", NumberFormat("number"), "1,000.12"),
     ("Percent", NumberFormat("percent", thousands=False), "10.12%"),
     ("Scientific", NumberFormat("scientific"), "1.01E+03"),
+    ("Fraction", NumberFormat("custom", pattern="# ??/??"), "1000 3/25"),
     None,
     ("Accounting", NumberFormat("accounting"), "$ (1,000.12)"),
     ("Financial", NumberFormat("financial"), "(1,000.12)"),
