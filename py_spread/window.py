@@ -42,7 +42,7 @@ from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .frame_name_dialog import FrameNameDialog
 from .kernel import KernelRunner
 from .graph_dialog import GraphDialog, graph_labels
-from .graphs import change_graph, find_graphs, frame_cell
+from .graphs import change_graph, find_graphs, rename_frame, used_names
 from .load_data import answer, data_request, frames, frames_request, sheet_writes
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
@@ -1246,19 +1246,24 @@ class MainWindow(QMainWindow):
         """Redraw one of the notebook's charts with the choices made. New
         columns (across, up, for the hue, or splitting it into panels) mean
         writing its cell afresh, from its DataFrame's cell; otherwise just its
-        kind and marker change in the code. Returns its cell id, or None if
-        it couldn't be changed."""
+        kind and marker change in the code. A new name for its DataFrame
+        renames it in its cell and the cells after it that use it. Returns
+        its cell id, or None if it couldn't be changed."""
         graph = graphs[index]
         pandas = importing_cell(self.notebook, "pandas", graph.cell_id)
         seaborn = importing_cell(self.notebook, "seaborn", graph.cell_id)
-        source = self.notebook.cell(graph.cell_id).source
+        frame, renamed, unread = graph.frame, {}, []
         try:
+            if chosen.frame and chosen.frame != graph.frame and graph.renamable:
+                renamed, unread = rename_frame(self.notebook, graph.frame_cell, graph.frame, chosen.frame)
+                frame = chosen.frame
+            source = renamed.get(graph.cell_id, self.notebook.cell(graph.cell_id).source)
             columns_before = (graph.x_label, graph.y_labels, graph.hue, graph.col, graph.columns is not None
                               and graph.columns.sideways(graph.y_labels, graph.kind, graph.y_categories))
             columns_after = (chosen.x, chosen.ys, chosen.hue, chosen.col, graph.columns is not None
                              and graph.columns.sideways(chosen.ys, chosen.kind, chosen.y_categories))
             if graph.data is not None and columns_after != columns_before:
-                source = frame_graph_code(graph.data, graph.frame, chosen.kind, chosen.marker, chosen.x,
+                source = frame_graph_code(graph.data, frame, chosen.kind, chosen.marker, chosen.x,
                                           chosen.ys, chosen.hue, chosen.y_categories,
                                           import_pandas=pandas is None, import_seaborn=seaborn is None,
                                           col=chosen.col)
@@ -1268,12 +1273,27 @@ class MainWindow(QMainWindow):
             self._show_error("Couldn't change the chart.", str(e))
             return None
         window = self.show_notebook()
+        for cell_id, renamed_source in renamed.items():
+            if cell_id != graph.cell_id:
+                window.replace_source(cell_id, renamed_source)
         window.replace_source(graph.cell_id, source)
         window.set_current(graph.cell_id, focus=True)
+        if renamed:
+            window.ran.discard(graph.frame_cell)  # Python has the DataFrame by its old name
         # After a restart, or in a reopened sheet, the imports and the DataFrame have to run again first.
-        window.run_needing(graph.cell_id, [pandas, seaborn, frame_cell(self.notebook, graph.cell_id, graph.frame)])
+        window.run_needing(graph.cell_id, [pandas, seaborn, graph.frame_cell])
         window.reveal(graph.cell_id)  # so the chart can be seen when it's redrawn
-        self._show_status(f"Redrawing the chart {graph_labels(graphs)[index]}.")
+        label = graph_labels([*graphs[:index], dataclasses.replace(graph, frame=frame), *graphs[index + 1:]])[index]
+        status = f"Redrawing the chart {label}."
+        if renamed:
+            cells = f"{len(renamed)} cell{'s' if len(renamed) > 1 else ''}"
+            status = f"Renamed {graph.frame} to {frame} in {cells}. {status}"
+        if unread:
+            several = len(unread) > 1
+            cells, still = (f"{len(unread)} cells", "they still say") if several else ("1 cell", "it still says")
+            status += (f" {cells} using {graph.frame} couldn't be read as Python (such as one with a %magic), "
+                       f"so {still} {graph.frame}.")
+        self._show_status(status)
         return graph.cell_id
 
     def _ask_chart(self, graphs, current: int | None, columns, source: str, problem: str | None,
@@ -1284,7 +1304,7 @@ class MainWindow(QMainWindow):
         be made; `frame` is what its DataFrame's name starts at."""
         dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, graphs=graphs, current=current,
                              new_source=source, new_problem=problem, frame=frame,
-                             taken=assigned_names(self.notebook))
+                             taken=assigned_names(self.notebook), used=used_names(self.notebook))
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog.chosen_graph(), dialog.choice()

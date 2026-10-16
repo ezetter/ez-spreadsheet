@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QFormLayout
 
 from py_spread.frame_name_dialog import FrameNameDialog, FrameNameField
 from py_spread.graph_dialog import GraphDialog
-from py_spread.graphs import GraphCell, find_graphs
+from py_spread.graphs import GraphCell, find_graphs, rename_frame, used_names
 from py_spread.notebook import FrameData, GraphColumns, Notebook, assigned_names, frame_name_problem
 from py_spread.window import MainWindow
 from tests.test_notebook import FakeKernel
@@ -33,6 +33,71 @@ def test_assigned_names(app):
     assert assigned_names(notebook) == {"sales", "total"}
 
 
+# --- Renaming one ---
+
+FRAME_CELL = "# Cells A1:B3 of the sheet.\ndf = pd.DataFrame({\n    'a': [1, 2],\n    'b': [3, 4],\n})\ndf"
+CHART_CELL = "# df as a chart: 'b' against 'a'.\nchart = sns.relplot(\n    data=df, x='a', y='b',\n)"
+
+
+def notebook_of(*sources):
+    notebook = Notebook()
+    return notebook, [notebook.add_cell(source).id for source in sources]
+
+
+def test_renames_the_dataframe_where_its_used(app):
+    notebook, ids = notebook_of(
+        "df = 0  # an older df", "print(df)", FRAME_CELL, CHART_CELL,
+        "x = df.describe()\nprint(f'{df.shape} {x.df}')\nf(df=1)\ndf['c'] = df.a\ndf = df.dropna()",
+        "def g(df):\n    return df\ndef h(n=df):\n    return df.head(n)\nsquare = lambda df: df ** 2",
+        "print(df)")
+    renamed, unread = rename_frame(notebook, ids[2], "df", "sales")
+    assert set(renamed) == set(ids[2:]) and unread == []  # not the older df, before it
+    assert renamed[ids[2]] == FRAME_CELL.replace("df =", "sales =").replace("\ndf", "\nsales")
+    assert renamed[ids[3]] == CHART_CELL.replace("df", "sales")  # its comment too, which names it
+    assert renamed[ids[4]] == ("x = sales.describe()\nprint(f'{sales.shape} {x.df}')\nf(df=1)\n"
+                               "sales['c'] = sales.a\nsales = sales.dropna()")  # not x.df, or df=1
+    assert renamed[ids[5]] == ("def g(df):\n    return df\ndef h(n=sales):\n    return sales.head(n)\n"
+                               "square = lambda df: df ** 2")  # g's and the lambda's df are their own
+    assert renamed[ids[6]] == "print(sales)"
+
+
+def test_renaming_stops_at_another_dataframe_of_that_name(app):
+    notebook, ids = notebook_of(FRAME_CELL, CHART_CELL, "print(df)\ndf = pd.read_csv('other.csv')\ndf",
+                                "print(df)", FRAME_CELL)
+    renamed, _unread = rename_frame(notebook, ids[0], "df", "sales")
+    assert set(renamed) == set(ids[:3])
+    assert renamed[ids[2]] == "print(sales)\ndf = pd.read_csv('other.csv')\ndf"
+    for fresh in ("import numpy as df", "def df():\n    pass", "for df in frames:\n    pass",
+                  "with open('x') as df:\n    pass", "a, df = 1, 2"):
+        notebook, ids = notebook_of(FRAME_CELL, fresh, "print(df)")
+        assert set(rename_frame(notebook, ids[0], "df", "sales")[0]) == {ids[0]}, fresh
+
+
+def test_cells_that_arent_plain_python(app):
+    notebook, ids = notebook_of(FRAME_CELL, "%timeit df.sum()", "%matplotlib inline", "print(df)")
+    renamed, unread = rename_frame(notebook, ids[0], "df", "sales")
+    assert set(renamed) == {ids[0], ids[3]} and unread == [ids[1]]  # it mentions df; the other doesn't
+
+
+def test_renaming_from_where_the_cell_makes_it(app):
+    notebook, ids = notebook_of("print(df)\n" + FRAME_CELL)
+    [source] = rename_frame(notebook, ids[0], "df", "sales")[0].values()
+    assert source.startswith("print(df)\n") and "sales = pd.DataFrame" in source
+    notebook, ids = notebook_of("x = 1")
+    with pytest.raises(ValueError):
+        rename_frame(notebook, ids[0], "df", "sales")
+
+
+def test_used_names(app):
+    notebook, _ids = notebook_of("import numpy as np\nimport os.path\nfrom math import tau\n"
+                                 "def f(a, *rest, key=None):\n    return a\nclass C: pass\n"
+                                 "try:\n    x = 1\nexcept ValueError as problem:\n    pass",
+                                 "%timeit total(df)")
+    assert {"np", "os", "tau", "f", "a", "rest", "key", "C", "x", "ValueError", "problem",
+            "timeit", "total", "df"} <= used_names(notebook)
+    assert "math" not in used_names(notebook)
+
+
 # --- The DataFrame dialog ---
 
 def test_dataframe_dialog(app):
@@ -47,6 +112,20 @@ def test_dataframe_dialog(app):
     assert not dialog.field.note.isHidden()
     dialog.field.edit.setText("sales")  # the notebook has one: fine, it's replaced
     assert dialog.ok_button.isEnabled() and "already sets sales" in dialog.field.note.text()
+
+
+def test_field_renaming(app):
+    field = FrameNameField("df", {"df"}, used={"df", "np", "total"})
+    field.set_renaming("df")
+    assert field.edit.isEnabled() and field.note.isHidden() and field.problem() is None
+    field.edit.setText("sales")
+    assert field.problem() is None and field.note.text() == "Renames df to sales in the cells that use it."
+    field.edit.setText("np")  # the notebook uses it: renaming df to it would clash
+    assert "already uses np" in field.problem() and "already uses np" in field.note.text()
+    field.edit.setText("df")
+    assert field.problem() is None and field.note.isHidden()
+    field.set_renaming("df", typed="costs")
+    assert field.name() == "costs" and "Renames df to costs" in field.note.text()
 
 
 def test_field_showing_a_fixed_name(app):
@@ -77,9 +156,30 @@ def test_chart_dialog_name_at_the_top(app):
     assert not dialog.ok_button.isEnabled() and "EzSheet's code uses it" in dialog.name_field.note.text()
 
 
-def test_chart_dialog_name_for_a_chart_being_changed(app):
-    graph = GraphCell("a", "line", None, "sales", "Month", ["Sales"], FrameData(["Month", "Sales", "Cost"], []),
-                      columns())
+def renamable_graph(frame="sales"):
+    return GraphCell("a", "line", None, frame, "Month", ["Sales"], FrameData(["Month", "Sales", "Cost"], []),
+                     columns(), frame_cell="frame-cell")
+
+
+def test_chart_dialog_renaming_a_charts_dataframe(app):
+    dialog = GraphDialog(None, columns(), graphs=[renamable_graph()], current=0, frame="df",
+                         taken={"sales"}, used={"sales", "np"})
+    field = dialog.name_field
+    assert field.edit.isEnabled() and field.name() == "sales" and dialog.choice().frame == "sales"
+    field.edit.setText("revenue")
+    assert dialog.choice().frame == "revenue" and dialog.ok_button.isEnabled()
+    assert "Renames sales to revenue" in field.note.text()
+    dialog.graph_box.setCurrentIndex(0)  # New chart, and back: what was typed for each stays
+    assert field.name() == "df" and field.renaming is None
+    dialog.graph_box.setCurrentIndex(1)
+    assert field.name() == "revenue" and field.renaming == "sales"
+    field.edit.setText("np")
+    assert not dialog.ok_button.isEnabled()
+
+
+def test_chart_dialog_name_for_a_chart_that_cant_be_renamed(app):
+    graph = renamable_graph()
+    graph.data = None  # its DataFrame's cell isn't written as EzSheet writes it
     dialog = GraphDialog(None, columns(), graphs=[graph], current=None, frame="df", taken={"sales"})
     dialog.name_field.edit.setText("costs")
     dialog.graph_box.setCurrentIndex(1)  # the chart: its own DataFrame, shown
@@ -166,3 +266,62 @@ def test_next_name_offered(window, dialogs):
     window.send_to_notebook()  # df
     window.send_graph_to_notebook()
     assert [name for name, _source in dialogs.frame_name_prompts] == ["df", "df2"]
+
+
+def chart_with_a_cell_using_it(window, dialogs) -> tuple[str, str, str]:
+    """A chart of A1:C3 (df), and a cell after it using df: (the DataFrame's cell, the chart's, the other's)."""
+    window.view.select_range(0, 0, 2, 2)
+    graph_id = window.send_graph_to_notebook()
+    frame_id = window.notebook.cells[-2].id
+    other = window.notebook_window.add_cell_below("print(df.shape)")
+    return frame_id, graph_id, other
+
+
+def test_renaming_a_charts_dataframe(window, dialogs):
+    frame_id, graph_id, other = chart_with_a_cell_using_it(window, dialogs)
+    dialogs.rename_answer = "sales"
+    dialogs.graph_change_answer = (0, "scatter", "o")  # the type too: just the kind changes in the code
+    window.send_graph_to_notebook()
+    notebook = window.notebook
+    assert "sales = pd.DataFrame({" in notebook.cell(frame_id).source
+    chart = notebook.cell(graph_id).source
+    assert chart.startswith("# sales as a chart:") and "long = sales.melt(" in chart and "kind='scatter'" in chart
+    assert notebook.cell(other).source == "print(sales.shape)"
+    assert [run[0] for run in window.kernel.runs[-2:]] == [frame_id, graph_id]  # Python gets the new name first
+    assert window.statusBar().currentMessage() == (
+        "Renamed df to sales in 3 cells. Redrawing the chart sales: Sales and Cost against Month.")
+    [graph] = find_graphs(notebook)
+    assert (graph.frame, graph.frame_cell) == ("sales", frame_id) and graph.renamable
+    window.notebook_window.widgets[other].editor.undo()  # each cell's change is an edit in it
+    assert notebook.cell(other).source == "print(df.shape)"
+
+
+def test_renaming_and_new_columns_at_once(window, dialogs):
+    frame_id, graph_id, _other = chart_with_a_cell_using_it(window, dialogs)
+    dialogs.rename_answer = "sales"
+    dialogs.graph_change_answer = (0, "line", None, "Month", ["Cost"])  # written afresh, for sales
+    window.send_graph_to_notebook()
+    chart = window.notebook.cell(graph_id).source
+    assert chart.startswith("# sales as a chart: 'Cost' against 'Month'.") and "data=sales, x='Month'" in chart
+
+
+def test_keeping_the_name_renames_nothing(window, dialogs):
+    frame_id, graph_id, other = chart_with_a_cell_using_it(window, dialogs)
+    runs = len(window.kernel.runs)
+    dialogs.rename_answer = "df"  # as the dialog gives it, unchanged
+    dialogs.graph_change_answer = (0, "scatter", "o")
+    window.send_graph_to_notebook()
+    assert window.notebook.cell(other).source == "print(df.shape)"
+    assert [run[0] for run in window.kernel.runs[runs:]] == [graph_id]  # the DataFrame's ran already
+    assert window.statusBar().currentMessage().startswith("Redrawing the chart df:")
+
+
+def test_renaming_with_a_cell_that_isnt_plain_python(window, dialogs):
+    frame_id, graph_id, other = chart_with_a_cell_using_it(window, dialogs)
+    magic = window.notebook_window.add_cell_below("%timeit df.sum()")
+    dialogs.rename_answer = "sales"
+    dialogs.graph_change_answer = (0, "line", None)
+    window.send_graph_to_notebook()
+    assert window.notebook.cell(magic).source == "%timeit df.sum()"
+    assert window.statusBar().currentMessage().endswith(
+        "1 cell using df couldn't be read as Python (such as one with a %magic), so it still says df.")

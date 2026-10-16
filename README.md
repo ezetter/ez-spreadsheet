@@ -205,7 +205,7 @@ The Chart dialog has these choices:
 - **DataFrame name**, at the top: what to call the new chart's DataFrame,
   starting at `df` (or `df2`, ...) and following the same rules as the
   DataFrame dialog's name. For a chart being changed (see below), it shows
-  that chart's DataFrame, greyed out.
+  that chart's DataFrame, and a new name renames it.
 - **Chart type:** Line, Scatter, or Categorical scatter. Line and Scatter are
   drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
   a column of categories (text such as species or months) across and spreads
@@ -310,10 +310,22 @@ OK:
   each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
   each series has its own color; choosing one column instead redraws it with
   just that one.
-- Either way, it's an edit in the cell, so Cmd+Z there brings back the old
-  code. The cell runs again to redraw the chart. If Python has restarted since
-  its DataFrame was made (or the sheet was opened since), the imports cell and
-  the DataFrame's cell run first.
+- A new **DataFrame name** renames the chart's DataFrame (`df` to `sales`,
+  say): in the cell making it, in the chart's cell, and in the cells after
+  them that use it, your own included (`print(df.shape)` becomes
+  `print(sales.shape)`), until a cell sets `df` afresh to something else. Only
+  the DataFrame is renamed, not attributes or keywords that happen to share
+  its name (`x.df`, `f(df=1)`), nor a function's own `df` parameter. The new
+  name follows the DataFrame dialog's rules, and it can't be a name the
+  notebook already uses for something else. The DataFrame's cell runs again,
+  so Python has it by its new name, then the chart's. Cells Python can't read,
+  such as ones with a `%magic`, aren't changed; the status bar says how many
+  still use the old name. The name can be changed only if the DataFrame's
+  cell is found, written as EzSheet writes it; otherwise it's greyed out.
+- Either way, it's an edit in the cell (in each cell, for a rename), so
+  Cmd+Z there brings back the old code. The cell runs again to redraw the
+  chart. If Python has restarted since its DataFrame was made (or the sheet
+  was opened since), the imports cell and the DataFrame's cell run first.
 - Any cell drawing one `sns.relplot(...)`, `sns.catplot(...)`, or
   `sns.lmplot(...)` chart of a kind the dialog has counts, including ones you
   write, as long as its `kind=` and `marker=` (`markers=`), if it has them,

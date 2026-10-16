@@ -9,19 +9,25 @@ from .appearance import error_color
 from .notebook import frame_name_problem
 
 NAME_TIP = "What the DataFrame is called in the notebook's Python, such as sales"
-FIXED_TIP = "The DataFrame this chart draws. To rename it, change its name in the cells' code."
+RENAME_TIP = ("The DataFrame this chart draws. A new name renames it in the cell making it, and in the "
+              "cells after it that use it.")
+FIXED_TIP = ("The DataFrame this chart draws. It can't be renamed here: the cell making it wasn't found, or "
+             "isn't written as EzSheet writes it.")
 
 
 class FrameNameField(QWidget):
     """A DataFrame's name, with a note under it saying why what's typed
-    can't be one (`problem`), or that the notebook already sets it (one of
-    `taken`), which is fine: the new one replaces it from there on."""
+    can't be one (`problem`), or what it does. For a new DataFrame, a name
+    the notebook already sets (one of `taken`) is fine: the new one replaces
+    it from there on. Renaming one, a name the notebook uses (one of `used`)
+    isn't. Or the name can just be shown, fixed."""
 
     changed = Signal()
 
-    def __init__(self, name: str, taken=(), parent=None):
+    def __init__(self, name: str, taken=(), used=(), parent=None):
         super().__init__(parent)
-        self.taken = set(taken)
+        self.taken, self.used = set(taken), set(used)
+        self.renaming = None  # the name being changed, when renaming a DataFrame
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(name)
@@ -31,7 +37,7 @@ class FrameNameField(QWidget):
         self.note = QLabel()
         self.note.setWordWrap(True)
         layout.addWidget(self.note)
-        self._fixed = False
+        self.fixed = False
         self.edit.textChanged.connect(lambda _text: self._changed())
         self._changed()
 
@@ -40,28 +46,43 @@ class FrameNameField(QWidget):
 
     def problem(self) -> str | None:
         """Why the name typed can't be used, if it can't (a fixed one isn't asked)."""
-        return None if self._fixed else frame_name_problem(self.name())
+        if self.fixed:
+            return None
+        name = self.name()
+        problem = frame_name_problem(name)
+        if problem is None and self.renaming is not None and name != self.renaming and name in self.used:
+            problem = f"The notebook already uses {name}. Choose a name it doesn't."
+        return problem
 
     def set_name(self, name: str) -> None:
-        """A name to change: a new DataFrame's."""
-        self._fixed = False
-        self.edit.setEnabled(True)
-        self.edit.setToolTip(NAME_TIP)
-        self.edit.setText(name)
-        self._changed()
+        """A name to choose: a new DataFrame's."""
+        self._set(name, fixed=False, renaming=None, tip=NAME_TIP)
+
+    def set_renaming(self, name: str, typed: str | None = None) -> None:
+        """An existing DataFrame's name, to rename it (to `typed`, to start with, if given)."""
+        self._set(typed if typed is not None else name, fixed=False, renaming=name, tip=RENAME_TIP)
 
     def set_fixed(self, name: str | None) -> None:
-        """A name shown, not changed: an existing chart's DataFrame's."""
-        self._fixed = True
-        self.edit.setText(name or "?")
-        self.edit.setEnabled(False)
-        self.edit.setToolTip(FIXED_TIP)
+        """A name shown, not changed: an existing chart's DataFrame's, when it can't be renamed."""
+        self._set(name or "?", fixed=True, renaming=None, tip=FIXED_TIP)
+
+    def _set(self, text: str, fixed: bool, renaming: str | None, tip: str) -> None:
+        self.fixed, self.renaming = fixed, renaming
+        self.edit.setEnabled(not fixed)
+        self.edit.setToolTip(tip)
+        self.edit.setText(text)
         self._changed()
 
     def _changed(self) -> None:
-        problem = self.problem()
-        taken = not self._fixed and self.name() in self.taken
-        note = problem or (f"The notebook already sets {self.name()}; this one replaces it." if taken else "")
+        problem, name = self.problem(), self.name()
+        if problem:
+            note = problem
+        elif self.renaming is not None and name != self.renaming:
+            note = f"Renames {self.renaming} to {name} in the cells that use it."
+        elif self.renaming is None and not self.fixed and name in self.taken:
+            note = f"The notebook already sets {name}; this one replaces it."
+        else:
+            note = ""
         self.note.setText(note)
         self.note.setVisible(bool(note))
         self.note.setStyleSheet(f"color: {error_color(self.palette())};" if problem else "")

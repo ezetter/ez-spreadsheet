@@ -38,6 +38,7 @@ class Dialogs:
         # The name typed for a new DataFrame, in the DataFrame dialog or for a new chart; None keeps the default.
         self.frame_name_answer = None
         self.frame_name_cancel = False  # the DataFrame dialog's Cancel
+        self.rename_answer = None  # a new name typed for a chart's DataFrame, when changing it; None keeps it
         self.frame_name_prompts = []  # (the name it started at, what it's of) each time either asks
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
 
@@ -113,7 +114,8 @@ def dialogs(monkeypatch):
                                   axes[1] if len(axes) > 1 else graph.y_labels,
                                   axes[2] if len(axes) > 2 else graph.hue,
                                   axes[3] if len(axes) > 3 else graph.y_categories,
-                                  axes[4] if len(axes) > 4 else graph.col if kind in FACETED else None)
+                                  axes[4] if len(axes) > 4 else graph.col if kind in FACETED else None,
+                                  dialogs.rename_answer)
 
     monkeypatch.setattr(MainWindow, "_ask_chart", ask_chart)
 

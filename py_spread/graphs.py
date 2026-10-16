@@ -5,7 +5,8 @@ reading what they draw, and changing it, for the Chart dialog.
 Changing a graph's type or marker touches only kind=, marker= (lmplot's
 markers=), and which of relplot, catplot, and lmplot draws it, so anything
 else changed by hand in its cell stays. Changing its columns writes the cell afresh, from the data in the
-DataFrame's own cell.
+DataFrame's own cell. Renaming its DataFrame renames it in that cell, and
+in the cells after it that use it.
 """
 
 import ast
@@ -43,6 +44,12 @@ class GraphCell:
     hue: str | None = None  # the column coloring its points, if any
     y_categories: bool = False  # orient='h': sideways, with the y column as categories
     col: str | None = None  # the column splitting it into panels, one for each of its values, if any
+    frame_cell: str | None = None  # the id of the cell making its DataFrame, if found
+
+    @property
+    def renamable(self) -> bool:
+        """Whether its DataFrame can be renamed: its cell is found, written as EzSheet writes it."""
+        return self.frame_cell is not None and self.data is not None
 
     @property
     def title(self) -> str:
@@ -68,6 +75,7 @@ def find_graphs(notebook) -> list[GraphCell]:
         if graph is not None:
             graph.cell_id = cell.id
             made = frame_cell(notebook, cell.id, graph.frame)
+            graph.frame_cell = made
             graph.data = frame_data(notebook.cell(made).source, graph.frame) if made else None
             if graph.data is not None:
                 try:
@@ -229,6 +237,162 @@ def frame_data(source: str, frame: str) -> FrameData | None:
             or len({len(v) for v in table.values()}) != 1):
         return None
     return FrameData(list(table), [list(column) for column in table.values()])
+
+
+# --- Renaming a graph's DataFrame ---
+
+def used_names(notebook) -> set[str]:
+    """Every name the notebook's code sets or uses: variables, functions,
+    classes, imports, and parameters (and in cells that aren't plain Python,
+    such as ones with a %magic, every word that could be one)."""
+    names = set()
+    for cell in notebook.cells:
+        try:
+            tree = ast.parse(cell.source)
+        except (SyntaxError, ValueError):
+            names.update(re.findall(r"[^\W\d]\w*", cell.source))
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.arg):
+                names.add(node.arg)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.alias):
+                names.add(node.asname or node.name.split(".")[0])
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                names.update(node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                names.add(node.name)
+    return names
+
+
+def rename_frame(notebook, frame_cell_id: str, old: str, new: str) -> tuple[dict[str, str], list[str]]:
+    """The notebook's code with the DataFrame `old`, made in the cell
+    `frame_cell_id` (as dataframe_code writes it), called `new` wherever it's
+    used from there on: in that cell, and in the cells after it, until one
+    sets `old` afresh to something else (another DataFrame of that name).
+    A graph's "# df as a chart" comment, which names its DataFrame, changes
+    too. Attributes and keywords of that name (x.df, f(df=1)) aren't it, nor
+    is a function's parameter of that name. ({cell id: its code renamed} for
+    the cells changed, [ids of cells mentioning `old` that couldn't be read as
+    Python, so are left as they are])."""
+    changed, unread = {}, []
+    for cell in notebook.cells[notebook.index_of(frame_cell_id):]:
+        try:
+            tree = ast.parse(cell.source)
+        except (SyntaxError, ValueError):
+            if re.search(rf"(?<!\w){re.escape(old)}(?!\w)", cell.source):
+                unread.append(cell.id)
+            continue
+        statements = tree.body
+        if cell.id == frame_cell_id:  # from where it's made (the last, as frame_data reads it)
+            made = [i for i, statement in enumerate(statements) if _makes_frame(statement, old)]
+            if not made:
+                raise ValueError(f"the cell doesn't make the DataFrame {old}")
+            statements = statements[made[-1]:]
+        uses, ended = [], False
+        for index, statement in enumerate(statements):
+            making = cell.id == frame_cell_id and index == 0  # (the statement making it sets it, of course)
+            if not making and _rebinds(statement, old):
+                ended = True
+                break
+            uses += _uses(statement, old)
+        if uses:
+            changed[cell.id] = _renamed(cell.source, uses, old, new)
+        if ended:
+            break
+    return changed, unread
+
+
+def _makes_frame(statement, name: str) -> bool:
+    """Whether a statement is `name = pd.DataFrame(...)`."""
+    return (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name) and statement.targets[0].id == name
+            and isinstance(statement.value, ast.Call) and isinstance(statement.value.func, ast.Attribute)
+            and statement.value.func.attr == "DataFrame")
+
+
+def _rebinds(statement, name: str) -> bool:
+    """Whether a statement sets `name` afresh, to something not made from
+    it (df = df.dropna() is still the same DataFrame)."""
+    if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        return (statement.value is not None and any(_binds(target, name) for target in targets)
+                and not _uses(statement.value, name))
+    if isinstance(statement, (ast.Import, ast.ImportFrom)):
+        return any((alias.asname or alias.name.split(".")[0]) == name for alias in statement.names)
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return statement.name == name
+    if isinstance(statement, (ast.For, ast.AsyncFor)):
+        return _binds(statement.target, name)
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return any(item.optional_vars is not None and _binds(item.optional_vars, name) for item in statement.items)
+    return False
+
+
+def _binds(target, name: str) -> bool:
+    """Whether an assignment's target sets `name` (df, or a, df = ...; not df['x'] = ...)."""
+    if isinstance(target, ast.Name):
+        return target.id == name
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_binds(element, name) for element in target.elts)
+    if isinstance(target, ast.Starred):
+        return _binds(target.value, name)
+    return False
+
+
+def _uses(node, name: str) -> list:
+    finder = _Uses(name)
+    finder.visit(node)
+    return finder.found
+
+
+class _Uses(ast.NodeVisitor):
+    """The Name nodes for a name, but not inside a function taking a
+    parameter of that name (that's its own)."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.found = []
+
+    def visit_Name(self, node):
+        if node.id == self.name:
+            self.found.append(node)
+
+    def _function(self, node):
+        args = node.args
+        params = [arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg) if arg]
+        outside = [*args.defaults, *(default for default in args.kw_defaults if default is not None)]
+        if not isinstance(node, ast.Lambda):  # (all of these are worked out where it's defined)
+            outside += [*node.decorator_list, *([node.returns] if node.returns else []),
+                        *(arg.annotation for arg in params if arg.annotation)]
+        for part in outside:
+            self.visit(part)
+        if self.name not in {arg.arg for arg in params}:
+            for part in node.body if isinstance(node.body, list) else [node.body]:
+                self.visit(part)
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = _function
+
+
+def _renamed(source: str, uses, old: str, new: str) -> str:
+    """The code with each of the Name nodes `uses` (of `old`) called `new`,
+    and its "# old as a chart" comment, if it has one."""
+    at = _Positions(source)
+    edits = []
+    for node in uses:
+        start, end = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)
+        if source[start:end] != old:
+            raise ValueError(f"couldn't find {old} in the code to rename it")
+        edits.append((start, end))
+    comment = _FRAME_COMMENT.search(source)
+    if comment and comment.group(1) == old:
+        edits.append(comment.span(1))
+    for start, end in sorted(set(edits), reverse=True):
+        source = source[:start] + new + source[end:]
+    return source
 
 
 # --- Reading the code ---

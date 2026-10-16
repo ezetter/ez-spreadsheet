@@ -83,11 +83,13 @@ class GraphDialog(QDialog):
 
     At the top, the DataFrame's name: for a new chart, starting at `frame`,
     and changeable (a Python name; one of `taken`, which the notebook
-    already sets, is replaced); for one of the graphs, its own, shown."""
+    already sets, is replaced); for one of the graphs, its own, which can
+    be changed to rename it if its cell is written as EzSheet writes it (but
+    not to one of `used`, names the notebook already uses)."""
 
     def __init__(self, parent=None, columns=None, kind: str = "line", marker: str | None = None,
                  graphs=None, current: int | None = None, new_source: str = "", new_problem: str | None = None,
-                 frame: str = "df", taken=()):
+                 frame: str = "df", taken=(), used=()):
         super().__init__(parent)
         self.setWindowTitle("Chart")
         self.setMinimumWidth(self.fontMetrics().averageCharWidth() * 48)
@@ -101,8 +103,8 @@ class GraphDialog(QDialog):
         layout.addWidget(self.summary)
 
         self.form = form = QFormLayout()
-        self._new_name = frame  # what a new chart's DataFrame is called, as typed
-        self.name_field = FrameNameField(frame, taken)
+        self._typed = {None: frame}  # the DataFrame names typed: a new chart's, and graphs' (by index)
+        self.name_field = FrameNameField(frame, taken, used)
         form.addRow("DataFrame name:", self.name_field)
         self.graph_box = None
         if self.graphs:
@@ -207,8 +209,9 @@ class GraphDialog(QDialog):
         return self.kind() in CATEGORICAL and self.categories_box.isChecked()
 
     def frame(self) -> str | None:
-        """A new chart's DataFrame name (None when changing a chart)."""
-        return self.name_field.name() if self.chosen_graph() is None else None
+        """The DataFrame's name: a new chart's, or a chart's own, perhaps
+        renamed (None if it can't be renamed)."""
+        return None if self.name_field.fixed else self.name_field.name()
 
     def choice(self) -> GraphChoice:
         return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue(), self.y_categories(),
@@ -235,7 +238,7 @@ class GraphDialog(QDialog):
             self._say(f"A new chart of {self.new_source} can't be made. {problem}", error=True)
         else:
             self._say(f"A new chart of {self.new_source}." if self.new_source else "")
-        self.name_field.set_name(self._new_name)
+        self.name_field.set_name(self._typed[None])
         self._allow(problem is None)
         self._show(kind, marker, None, None, None, False, None)
 
@@ -244,7 +247,10 @@ class GraphDialog(QDialog):
         self._x_chosen = self._y_chosen = True  # a chart's own columns stay, whatever the type
         self._older_ys = graph.y_labels if len(graph.y_labels) > 1 else None  # its series, kept as they are
         self._say("Change this chart. It's redrawn when you click OK.")
-        self.name_field.set_fixed(graph.frame)
+        if graph.renamable and graph.frame:
+            self.name_field.set_renaming(graph.frame, self._typed.get(index))
+        else:
+            self.name_field.set_fixed(graph.frame)
         self._allow(True)
         self.columns = graph.columns
         if graph.columns is not None and graph.x_label not in graph.columns.labels:
@@ -391,8 +397,8 @@ class GraphDialog(QDialog):
         self.ok_button.setEnabled(self._allowed and self.name_field.problem() is None)
 
     def _name_changed(self) -> None:
-        if self.chosen_graph() is None:
-            self._new_name = self.name_field.edit.text()  # kept while a chart to change is looked at
+        if not self.name_field.fixed:
+            self._typed[self.chosen_graph()] = self.name_field.edit.text()  # kept while others are looked at
         self._update_ok()
 
     # --- Following changes ---
