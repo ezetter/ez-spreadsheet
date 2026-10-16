@@ -9,6 +9,7 @@ from py_spread.graphs import (
     find_frames,
     find_graphs,
     frame_labels,
+    frame_users,
     rename_frame,
     update_frame_code,
     used_names,
@@ -81,6 +82,12 @@ def test_renaming_stops_at_another_dataframe_of_that_name(app):
                   "with open('x') as df:\n    pass", "a, df = 1, 2"):
         notebook, ids = notebook_of(FRAME_CELL, fresh, "print(df)")
         assert set(rename_frame(notebook, ids[0], "df", "sales")[0]) == {ids[0]}, fresh
+
+
+def test_cells_using_the_dataframe(app):
+    notebook, ids = notebook_of("print(df)", FRAME_CELL, CHART_CELL, "x = 1", "print(df.a)", "%timeit df.sum()",
+                                "df = pd.read_csv('other.csv')", "print(df)")
+    assert frame_users(notebook, ids[1], "df") == [ids[2], ids[4]]  # not before it, or past another df
 
 
 def test_cells_that_arent_plain_python(app):
@@ -440,7 +447,7 @@ def test_dataframe_dialog_offers_the_notebooks_dataframes(window, dialogs):
 
 def test_renaming_from_the_dataframe_dialog(window, dialogs):
     frame_id, other, _chart = dataframe_and_chart(window)
-    dialogs.dataframe_answer = (0, "sales", False)
+    dialogs.dataframe_answer = (0, "sales", False)  # just a rename: just its cell runs again
     runs = len(window.kernel.runs)
     assert window.send_to_notebook() == frame_id
     assert "sales = pd.DataFrame({" in window.notebook.cell(frame_id).source
@@ -462,19 +469,37 @@ def test_updating_a_dataframes_data(window, dialogs):
     assert source.startswith("# Cells A1:B4 of the sheet") and "'Sales': [999, 120, 130]," in source
     assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, chart]  # and its chart is redrawn
     assert window.statusBar().currentMessage() == (
-        "Updated df with the selected cells, A1:B4. Redrawing its 1 chart.")
+        "Updated df with the selected cells, A1:B4. Running the 1 cell using it again.")
 
 
 def test_renaming_and_updating_at_once(window, dialogs):
     frame_id, other, _chart = dataframe_and_chart(window)
     window.view.setCurrentIndex(window.model.index(9, 9))  # no selection: the whole sheet
     dialogs.dataframe_answer = (0, "sales", True)
+    runs = len(window.kernel.runs)
     window.send_to_notebook()
     source = window.notebook.cell(frame_id).source
     assert source.startswith("# Cells A1:C3 of the sheet") and "sales = pd.DataFrame({" in source
     assert window.notebook.cell(other).source == "print(sales.shape)"
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, other]  # not the chart: it's of df2
     assert window.statusBar().currentMessage() == (
-        "Renamed df to sales in 2 cells. Updated sales with the whole sheet, A1:C3.")
+        "Renamed df to sales in 2 cells. Updated sales with the whole sheet, A1:C3. "
+        "Running the 1 cell using it again.")
+
+
+def test_updating_runs_the_cells_using_it_again(window, dialogs):
+    window.view.select_range(0, 0, 2, 2)
+    frame_id = window.send_to_notebook()
+    nb = window.notebook_window
+    first = nb.add_cell_below("total = df.Sales.sum()")
+    nb.add_cell_below("x = 1")
+    second = nb.add_cell_below("print(total, df.shape)")
+    nb.add_cell_below("df = pd.read_csv('other.csv')\ndf")
+    nb.add_cell_below("print(df)")  # the other df
+    dialogs.dataframe_answer = (0, None, True)
+    runs = len(window.kernel.runs)
+    window.send_to_notebook()
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, first, second]
 
 
 def test_nothing_to_change(window, dialogs):

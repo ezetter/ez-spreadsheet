@@ -340,32 +340,49 @@ def rename_frame(notebook, frame_cell_id: str, old: str, new: str) -> tuple[dict
     is a function's parameter of that name. ({cell id: its code renamed} for
     the cells changed, [ids of cells mentioning `old` that couldn't be read as
     Python, so are left as they are])."""
-    changed, unread = {}, []
+    found, unread = _frame_uses(notebook, frame_cell_id, old)
+    return {cell.id: _renamed(cell.source, uses, old, new) for cell, uses in found}, unread
+
+
+def frame_users(notebook, frame_cell_id: str, name: str) -> list[str]:
+    """The ids of the cells after the one making the DataFrame `name` (as
+    dataframe_code writes it) that use it, top to bottom, as rename_frame
+    finds them: until one sets `name` afresh. (Not cells that can't be read
+    as Python.)"""
+    found, _unread = _frame_uses(notebook, frame_cell_id, name)
+    return [cell.id for cell, _uses in found if cell.id != frame_cell_id]
+
+
+def _frame_uses(notebook, frame_cell_id: str, name: str) -> tuple[list, list[str]]:
+    """([(cell, the Name nodes using the DataFrame `name` in it)] for the cell
+    making it and the cells after it that use it, [ids of cells after it
+    mentioning `name` that can't be read as Python]); see rename_frame."""
+    found, unread = [], []
     for cell in notebook.cells[notebook.index_of(frame_cell_id):]:
         try:
             tree = ast.parse(cell.source)
         except (SyntaxError, ValueError):
-            if re.search(rf"(?<!\w){re.escape(old)}(?!\w)", cell.source):
+            if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", cell.source):
                 unread.append(cell.id)
             continue
         statements = tree.body
         if cell.id == frame_cell_id:  # from where it's made (the last, as frame_data reads it)
-            made = [i for i, statement in enumerate(statements) if _makes_frame(statement, old)]
+            made = [i for i, statement in enumerate(statements) if _makes_frame(statement, name)]
             if not made:
-                raise ValueError(f"the cell doesn't make the DataFrame {old}")
+                raise ValueError(f"the cell doesn't make the DataFrame {name}")
             statements = statements[made[-1]:]
         uses, ended = [], False
         for index, statement in enumerate(statements):
             making = cell.id == frame_cell_id and index == 0  # (the statement making it sets it, of course)
-            if not making and _rebinds(statement, old):
+            if not making and _rebinds(statement, name):
                 ended = True
                 break
-            uses += _uses(statement, old)
+            uses += _uses(statement, name)
         if uses:
-            changed[cell.id] = _renamed(cell.source, uses, old, new)
+            found.append((cell, uses))
         if ended:
             break
-    return changed, unread
+    return found, unread
 
 
 def _makes_frame(statement, name: str) -> bool:

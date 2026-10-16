@@ -42,7 +42,15 @@ from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .frame_name_dialog import FrameNameDialog
 from .kernel import KernelRunner
 from .graph_dialog import GraphDialog, graph_labels
-from .graphs import change_graph, find_frames, find_graphs, rename_frame, update_frame_code, used_names
+from .graphs import (
+    change_graph,
+    find_frames,
+    find_graphs,
+    frame_users,
+    rename_frame,
+    update_frame_code,
+    used_names,
+)
 from .load_data import answer, data_request, frames, frames_request, sheet_writes
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
@@ -1187,8 +1195,9 @@ class MainWindow(QMainWindow):
         """Rename one of the notebook's DataFrames (in its cell, and the cells
         after it that use it), or write its data afresh from the sheet's
         cells (in its cell, keeping anything else there), or both. Its cell
-        runs again; with new data, so do its charts. Returns its cell's id,
-        or None if there was nothing to change or it couldn't be changed."""
+        runs again; with new data, so do the cells after it that use it (its
+        charts among them). Returns its cell's id, or None if there was
+        nothing to change or it couldn't be changed."""
         renamed, unread = {}, []
         try:
             if name != frame.name:
@@ -1205,20 +1214,20 @@ class MainWindow(QMainWindow):
         window = self.show_notebook()
         for cell_id, code in renamed.items():
             window.replace_source(cell_id, code)
-        charts = [graph.cell_id for graph in find_graphs(self.notebook) if graph.frame_cell == frame.cell_id]
+        users = frame_users(self.notebook, frame.cell_id, name) if update else []
         window.ran.discard(frame.cell_id)  # Python has its old name, or data
         window.run_needed([importing_cell(self.notebook, "pandas", frame.cell_id), frame.cell_id])
-        if update:
-            for chart in charts:
-                window.run_needing(chart, [importing_cell(self.notebook, "seaborn", chart)])
+        for cell_id in users:  # with the new data, charts redrawn with it
+            window.run_needing(cell_id, [importing_cell(self.notebook, module, cell_id)
+                                         for module in ("pandas", "seaborn")])
         window.set_current(frame.cell_id, focus=True)
         window.reveal(frame.cell_id)
         done = []
         if name != frame.name:
             done.append(f"Renamed {frame.name} to {name} in {_cells(len(renamed))}.")
         if update:
-            redrawn = f" Redrawing its {_cells(len(charts), 'chart')}." if charts else ""
-            done.append(f"Updated {name} with {source}.{redrawn}")
+            rerun = f" Running the {_cells(len(users))} using it again." if users else ""
+            done.append(f"Updated {name} with {source}.{rerun}")
         self._show_status(" ".join(done) + _unread_note(unread, frame.name))
         return frame.cell_id
 
