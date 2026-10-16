@@ -62,9 +62,16 @@ creates the file.
 
 ## Toolbar
 
-View > **Toolbar** shows or hides the toolbar; it's checked while the toolbar
-is shown. It's the same as the toolbar's own right-click menu, so a toolbar
-hidden from there comes back from the View menu.
+Right-click the toolbar to choose its tools: each is listed, checked if it's
+shown (Σ AutoSum, Fill, Notebook, Currency, Percent, the decimal places, More
+Formats, Font, Font Size, Bold, Italic, Text Color, Fill Color, and the angle
+unit); choose one to show or hide it. **Show All Tools** brings them all back.
+A separator shows only between tools that are shown. The tools you hide stay
+hidden the next time EzSheet opens (a preference, not part of the sheet), and
+hiding Bold or Italic from the toolbar leaves them in the Format menu.
+
+**Hide Toolbar**, in that menu, hides the whole toolbar; View > **Toolbar**
+shows or hides it, and is checked while it's shown.
 
 ## Zoom
 

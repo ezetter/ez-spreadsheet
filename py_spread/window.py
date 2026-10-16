@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import appearance
 from .appearance import (
     APPEARANCES,
     ZOOM_LEVELS,
@@ -103,6 +104,14 @@ from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_shee
 FILE_FILTER = f"EzSheet Sheets (*{EXTENSION})"
 CUSTOM_FORMAT = "Custom number format…"  # the Number menu's last item
 DEFAULT_FONT = "Default"  # the font box's first item: the sheet's own font
+TOOLS = (  # what the toolbar's right-click menu shows and hides, in the toolbar's order
+    ("autosum", "Σ AutoSum"), ("fill", "Fill"), ("notebook", "Notebook"), ("currency", "Currency ($)"),
+    ("percent", "Percent (%)"), ("fewer", "Decrease Decimal Places (.0)"),
+    ("more", "Increase Decimal Places (.00)"), ("formats", "More Formats (123)"), ("font", "Font"),
+    ("size", "Font Size"), ("bold", "Bold"), ("italic", "Italic"), ("text color", "Text Color"),
+    ("fill color", "Fill Color"), ("angle", "Angle Unit (DEG or RAD)"),
+)
+HIDDEN_TOOLS_KEY = "toolbar/hidden"  # the tools hidden, a preference
 COLUMN_WIDTH = 100  # default sizes at 100% zoom
 ROW_HEIGHT = 24
 CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
@@ -1219,7 +1228,81 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.notebook_button)
         self._add_currency_button(toolbar)
         self._add_angle_button(toolbar)
+        self._collect_tools()
         self.statusBar()  # create it now so the window doesn't resize on the first message
+
+    def _collect_tools(self) -> None:
+        """Each tool's toolbar items, by its key, for showing and hiding
+        them; then those hidden before, hidden again."""
+        widgets = {
+            "autosum": [self.autosum_button], "fill": [self.fill_button], "notebook": [self.notebook_button],
+            **{key: [button] for key, button in self.number_buttons.items()},
+            "font": [self.font_box],
+            "size": [self.font_size_buttons["smaller"], self.font_size_box, self.font_size_buttons["bigger"]],
+            "bold": [self.style_buttons["Bold"]], "italic": [self.style_buttons["Italic"]],
+            "text color": [self.color_buttons["color"]], "fill color": [self.color_buttons["fill"]],
+        }
+        owner = {id(widget): key for key, group in widgets.items() for widget in group}
+        self.tool_actions = {key: [] for key, _label in TOOLS}
+        for action in self.toolbar.actions():
+            if action is self.angle_button_action:
+                self.tool_actions["angle"].append(action)
+            elif not action.isSeparator():
+                key = owner.get(id(self.toolbar.widgetForAction(action)))
+                if key is not None:
+                    self.tool_actions[key].append(action)
+        saved = appearance.settings().value(HIDDEN_TOOLS_KEY, "")
+        saved = saved.split(",") if isinstance(saved, str) else saved or []  # (QSettings may give a list)
+        hidden = [key for key in saved if key in self.tool_actions]
+        self._show_tools({key: key not in hidden for key in self.tool_actions}, save=False)
+
+    def _show_tools(self, shown: dict[str, bool], save: bool = True) -> None:
+        """Show or hide tools (key -> shown); separators show only between
+        tools that are shown. `save` remembers which are hidden, for next time."""
+        for key, visible in shown.items():
+            for action in self.tool_actions[key]:
+                action.setVisible(visible)
+        # A separator shows if there are tools shown on both sides of it: some since the one before it.
+        actions = self.toolbar.actions()
+        for index, action in enumerate(actions):
+            if action.isSeparator():
+                right = any(a.isVisible() for a in actions[index + 1:] if not a.isSeparator())
+                action.setVisible(self._shown_before(actions, index) and right)
+        if save:
+            hidden = [key for key in self.tool_actions if not self.tool_shown(key)]
+            appearance.settings().setValue(HIDDEN_TOOLS_KEY, ",".join(hidden))
+
+    @staticmethod
+    def _shown_before(actions, index: int) -> bool:
+        """Whether a tool's shown before the separator at `index`, since the
+        last separator shown (one hidden isn't a gap between tools)."""
+        for action in reversed(actions[:index]):
+            if action.isSeparator():
+                if action.isVisible():
+                    return False
+            elif action.isVisible():
+                return True
+        return False
+
+    def tool_shown(self, key: str) -> bool:
+        return any(action.isVisible() for action in self.tool_actions[key])
+
+    def createPopupMenu(self):
+        """The toolbar's right-click menu: each tool, checked if it's shown
+        (choose it to show or hide it), Show All Tools, and Hide Toolbar."""
+        menu = QMenu(self)
+        for key, label in TOOLS:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.tool_shown(key))
+            action.toggled.connect(lambda checked, k=key: self._show_tools({k: checked}))
+        menu.addSeparator()
+        menu.addAction("Show All Tools").triggered.connect(
+            lambda _checked=False: self._show_tools({key: True for key in self.tool_actions}))
+        menu.addSeparator()
+        hide = menu.addAction("Hide Toolbar")
+        hide.triggered.connect(lambda _checked=False: self.toolbar.hide())  # (View > Toolbar shows it again)
+        return menu
 
     def _add_currency_button(self, toolbar):
         """Number format buttons, as Google Sheets has them: $ (Currency), %
@@ -1308,12 +1391,15 @@ class MainWindow(QMainWindow):
         in bold and italic; they're pressed when the current cell has the style.
         A separator sets them apart from the number format buttons."""
         toolbar.addSeparator()
+        self.style_buttons = {}
         for name, label, tip in (("Bold", "B", "Bold (⌘B)"), ("Italic", "I", "Italic (⌘I)")):
             action = self.format_actions[name]
             action.setIconText(label)
             action.setToolTip(tip)
-            toolbar.addAction(action)
-            button = toolbar.widgetForAction(action)
+            button = QToolButton()  # (its own, so hiding it on the toolbar leaves the Format menu's)
+            button.setDefaultAction(action)
+            toolbar.addWidget(button)
+            self.style_buttons[name] = button
             font = button.font()
             font.setPointSize(15)
             font.setBold(name == "Bold")
