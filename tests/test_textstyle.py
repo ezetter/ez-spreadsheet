@@ -87,7 +87,7 @@ def window(app):
 def toolbar_button(window, text):
     toolbar = window.findChild(QToolBar)
     return next(toolbar.widgetForAction(a) for a in toolbar.actions()
-                if not a.isSeparator() and toolbar.widgetForAction(a).text() == text)
+                if not a.isSeparator() and getattr(toolbar.widgetForAction(a), "text", lambda: None)() == text)
 
 
 def test_bold_button_toggles_selection(window):

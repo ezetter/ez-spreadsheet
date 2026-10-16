@@ -9,6 +9,7 @@ from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QFont,
+    QFontDatabase,
     QGuiApplication,
     QIcon,
     QKeySequence,
@@ -21,6 +22,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QStyleOptionViewItem,
     QStyledItemDelegate,
     QTableView,
     QToolButton,
@@ -87,12 +90,13 @@ from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, as
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .custom_format_dialog import CustomFormatDialog
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
-from .textstyle import PLAIN
+from .textstyle import MAX_SIZE, MIN_SIZE, PLAIN, SIZES
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
 FILE_FILTER = f"EzSheet Sheets (*{EXTENSION})"
 CUSTOM_FORMAT = "Custom number format…"  # the Number menu's last item
+DEFAULT_FONT = "Default"  # the font box's first item: the sheet's own font
 COLUMN_WIDTH = 100  # default sizes at 100% zoom
 ROW_HEIGHT = 24
 CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
@@ -149,8 +153,20 @@ class CellDelegate(QStyledItemDelegate):
 
     def createEditor(self, parent, option, index):
         editor = super().createEditor(parent, option, index)
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        editor.setFont(styled.font)  # the cell's own font and size, as it's shown
         self.editor_created.emit(editor)
         return editor
+
+    def initStyleOption(self, option, index):
+        """The cell's font size, if it has its own, zoomed as the grid is."""
+        super().initStyleOption(option, index)
+        size = index.model().cell_style(index.row(), index.column()).size
+        if size is not None:
+            font = QFont(option.font)
+            font.setPointSizeF(size * self.parent().zoom / 100)
+            option.font = font
 
     def eventFilter(self, editor, event):
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -194,6 +210,7 @@ class SheetView(QTableView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.zoom = 100  # percent: cells' own font sizes are zoomed with it
         self._grid_style = GridStyle()  # kept: setStyle doesn't take ownership
         self.setStyle(self._grid_style)
         self.setEditTriggers(
@@ -474,6 +491,10 @@ class MainWindow(QMainWindow):
         self.model = SheetModel(parent=self)
         self.view = SheetView()
         self.view.setModel(self.model)
+        # The sheet's own font: what a cell without one of its own shows (at 100% zoom).
+        self.default_font_family = self.view.font().family()
+        self.default_font_size = self.view.font().pointSizeF()
+        self._grown_rows = {}  # rows grown to fit their fonts: row -> how many times the default height
 
         self.cell_label = QLabel()
         self.cell_label.setMinimumWidth(60)
@@ -516,6 +537,10 @@ class MainWindow(QMainWindow):
         self.view.selectionModel().currentChanged.connect(self._show_current_style)
         self.model.dataChanged.connect(self._show_current_style)
         self.model.modelReset.connect(self._show_current_style)
+        self.model.dataChanged.connect(self._fit_rows_to_fonts)
+        self.model.modelReset.connect(self._rows_moved)
+        self.model.rowsInserted.connect(self._rows_moved)
+        self.model.rowsRemoved.connect(self._rows_moved)
         self.view.cell_delegate.editor_created.connect(self._on_editor_created)
         self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
@@ -712,10 +737,12 @@ class MainWindow(QMainWindow):
         if self._zoom_base_fonts is None:
             self._zoom_base_fonts = {widget: QFont(widget.font()) for widget in self._zoomable_widgets()}
         old, self.zoom = self.zoom, percent
+        self.view.zoom = percent
         for widget, base in self._zoom_base_fonts.items():
             widget.setFont(scaled_font(base, percent))
         _rescale_header(self.view.horizontalHeader(), COLUMN_WIDTH, old, percent)
         _rescale_header(self.view.verticalHeader(), ROW_HEIGHT, old, percent)
+        self._fit_rows_to_fonts()
         self._update_zoom_actions()
         self.statusBar().showMessage(f"Zoom {percent}%", 2000)
 
@@ -820,6 +847,19 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, n=name, a=attribute: self._toggle_style(n, a))
             menu.addAction(action)
             self.format_actions[name] = action
+        menu.addSeparator()
+        for name, shortcut, step in (("Increase Font Size", "Ctrl+Shift+.", 1),
+                                     ("Decrease Font Size", "Ctrl+Shift+,", -1)):
+            action = QAction(name, self)
+            action.setShortcut(QKeySequence(shortcut))  # ⇧⌘. and ⇧⌘, as in Google Sheets
+            action.triggered.connect(lambda _checked=False, s=step: self._step_font_size(s))
+            menu.addAction(action)
+            self.format_actions[name] = action
+        action = QAction("Default Font", self)
+        action.triggered.connect(lambda _checked=False: self._set_font(None, None, "Default Font"))
+        menu.addAction(action)
+        self.format_actions["Default Font"] = action
+
     def _build_formulas_menu(self):
         menu = self.menuBar().addMenu("Formulas")
         group = QActionGroup(self)  # one of them is checked: the sheet's angle unit
@@ -960,12 +1000,96 @@ class MainWindow(QMainWindow):
         self.model.set_styles(styles, name)
         self._show_current_style()
 
+    _KEEP = object()  # (for _set_font: leave the family, or the size, as each cell has it)
+
+    def _set_font(self, family, size, name: str) -> None:
+        """Give the selected cells a font family and size (None: the sheet's
+        own; _KEEP: each cell's as it is), as one undoable step."""
+        self._commit_pending_edit()
+        styles = {}
+        for key in self._selected_cells():
+            style = self.model.cell_style(*key)
+            changes = {}
+            if family is not self._KEEP:
+                changes["font"] = None if family == self.default_font_family else family
+            if size is not self._KEEP:
+                changes["size"] = None if size is None or size == self.default_font_size else float(size)
+            styles[key] = dataclasses.replace(style, **changes)
+        self.model.set_styles(styles, name)
+        self._show_current_style()
+
+    def _step_font_size(self, step: int) -> None:
+        """One point bigger or smaller (Format > Increase or Decrease Font
+        Size, and the toolbar's + and −), from the current cell's size."""
+        current = self.view.currentIndex()
+        style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
+        size = min(max(round((style.size or self.default_font_size) + step), MIN_SIZE), MAX_SIZE)
+        self._set_font(self._KEEP, size, "Font Size")
+
+    def _size_typed(self) -> None:
+        """A size typed (or chosen) in the toolbar's size box."""
+        text = self.font_size_box.currentText().strip()
+        try:
+            size = float(text)
+        except ValueError:
+            size = None
+        if size is None or not MIN_SIZE <= size <= MAX_SIZE:
+            self._show_status(f"A font size is a number from {MIN_SIZE} to {MAX_SIZE}.")
+            self._show_current_style()
+            return
+        self._set_font(self._KEEP, int(size) if size.is_integer() else size, "Font Size")
+
+    def _add_font_item(self, family: str) -> int:
+        """A family in the font box, shown in itself; its index."""
+        self.font_box.addItem(family, family)
+        index = self.font_box.count() - 1
+        self.font_box.setItemData(index, QFont(family), Qt.FontRole)
+        return index
+
     def _show_current_style(self, *_args):
         current = self.view.currentIndex()
         style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
         self.format_actions["Bold"].setChecked(style.bold)
         self.format_actions["Italic"].setChecked(style.italic)
+        if getattr(self, "font_box", None) is not None:
+            self.font_box.blockSignals(True)
+            index = self.font_box.findData(style.font) if style.font is not None else 0
+            if index < 0:  # a font this Mac doesn't have (the sheet came from another): listed, still
+                index = self._add_font_item(style.font)
+            self.font_box.setCurrentIndex(index)
+            self.font_box.blockSignals(False)
+            size = style.size or self.default_font_size
+            self.font_size_box.blockSignals(True)
+            self.font_size_box.setCurrentText(f"{int(size)}" if float(size).is_integer() else f"{size:g}")
+            self.font_size_box.blockSignals(False)
         self._show_current_format()
+
+    def _fit_rows_to_fonts(self, *_args) -> None:
+        """Rows grow to fit a cell's bigger font, and shrink back when it's
+        smaller again; a row resized by hand is left as it is."""
+        if not hasattr(self, "_grown_rows"):
+            return
+        header = self.view.verticalHeader()
+        default = header.defaultSectionSize()
+        sizes = self.model.row_font_sizes()
+        for row in {*sizes, *self._grown_rows}:
+            if row >= header.count():
+                self._grown_rows.pop(row, None)
+                continue
+            scale = max(sizes.get(row, 0) / self.default_font_size, 1.0)
+            target = round(default * scale)
+            expected = round(default * self._grown_rows.get(row, 1.0))
+            if abs(header.sectionSize(row) - expected) <= 1 and header.sectionSize(row) != target:
+                header.resizeSection(row, target)  # (not resized by hand since it was fitted)
+            if scale > 1:
+                self._grown_rows[row] = scale
+            else:
+                self._grown_rows.pop(row, None)
+
+    def _rows_moved(self, *_args) -> None:
+        """Rows inserted or deleted: what was fitted where is fitted afresh."""
+        self._grown_rows = {}
+        self._fit_rows_to_fonts()
 
     def _selected_cells(self) -> list[tuple[int, int]]:
         indexes = self.view.selectedIndexes() or [self.view.currentIndex()]
@@ -1104,7 +1228,47 @@ class MainWindow(QMainWindow):
             toolbar.addWidget(button)
             self.number_buttons[key] = button
         self._paint_decimal_icons()
+        self._add_font_boxes(toolbar)
         self._add_style_buttons(toolbar)
+
+    def _add_font_boxes(self, toolbar):
+        """The font's family, and its size with − and + beside it, as Google Sheets has them."""
+        toolbar.addSeparator()
+        self.font_box = QComboBox()  # Default (the sheet's own), then the Mac's fonts, each shown in itself
+        self.font_box.setToolTip("Font")
+        self.font_box.setMaximumWidth(170)
+        self.font_box.addItem(DEFAULT_FONT, None)
+        self.font_box.insertSeparator(1)
+        for family in QFontDatabase.families():
+            if not family.startswith("."):  # (the system's own, hidden ones)
+                self._add_font_item(family)
+        self.font_box.activated.connect(
+            lambda index: self._set_font(self.font_box.itemData(index), self._KEEP, "Font"))
+        toolbar.addWidget(self.font_box)
+        toolbar.addSeparator()
+        self.font_size_buttons = {}
+        for key, label, tip, step in (("smaller", "−", "Decrease font size (⇧⌘,)", -1),
+                                      ("bigger", "+", "Increase font size (⇧⌘.)", 1)):
+            button = QToolButton()
+            button.setText(label)
+            button.setToolTip(tip)
+            font = button.font()
+            font.setPointSize(15)
+            button.setFont(font)
+            button.clicked.connect(lambda _checked=False, s=step: self._step_font_size(s))
+            self.font_size_buttons[key] = button
+        toolbar.addWidget(self.font_size_buttons["smaller"])
+        self.font_size_box = QComboBox()
+        self.font_size_box.setEditable(True)
+        self.font_size_box.setInsertPolicy(QComboBox.NoInsert)
+        self.font_size_box.setToolTip("Font size")
+        for size in SIZES:
+            self.font_size_box.addItem(str(size))
+        self.font_size_box.setMinimumContentsLength(3)
+        self.font_size_box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.font_size_box.textActivated.connect(lambda _text: self._size_typed())
+        toolbar.addWidget(self.font_size_box)
+        toolbar.addWidget(self.font_size_buttons["bigger"])
 
     def _paint_decimal_icons(self) -> None:
         """The fewer and more decimals buttons' icons, in the toolbar's text color."""

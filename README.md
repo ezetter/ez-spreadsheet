@@ -207,6 +207,28 @@ and menu items show whether the current cell is bold or italic. Styles are
 kept when you retype or clear a cell, are saved with the sheet, travel with
 copy and paste, can be undone, and are given by Fill to the cells it fills.
 
+## Fonts
+
+The toolbar's font box and size box, as Google Sheets has them, set the
+selected cells' font and its size; they show the current cell's.
+
+- The **font box** lists **Default** (the sheet's own font) and then the
+  Mac's fonts, each shown in itself. A sheet from another Mac with a font this
+  one doesn't have still lists it for those cells (and the Mac shows a
+  stand-in).
+- The **size box** lists common sizes (6 to 72 points), or type one from 1 to
+  400 and press Return. **−** and **+** beside it, and Format > Decrease Font
+  Size (⇧⌘,) and Increase Font Size (⇧⌘.), make the current cell's size one
+  point smaller or bigger, for all the selected cells.
+- Format > **Default Font** takes the selected cells back to the sheet's own
+  font and size (keeping bold and italic).
+- Rows grow to fit a bigger font, and shrink back when it's smaller again
+  (never below their usual height); a row you've resized by hand is left as
+  it is. Sizes are zoomed with the grid, and editing a cell shows its font.
+- Like bold and italic, fonts are kept when you retype or clear a cell, are
+  saved with the sheet, travel with copy and paste, can be undone, and are
+  given by Fill.
+
 ## Notebook
 
 Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by

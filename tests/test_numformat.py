@@ -178,7 +178,8 @@ def window(app):
 def test_format_menu(window):
     menu = [m for m in window.menuBar().actions() if m.text() == "Format"][0].menu()
     names = [a.text() for a in menu.actions() if a.text()]
-    assert names == ["Number", "Increase Decimals", "Decrease Decimals", "Bold", "Italic"]
+    assert names == ["Number", "Increase Decimals", "Decrease Decimals", "Bold", "Italic", "Increase Font Size",
+                     "Decrease Font Size", "Default Font"]
     assert menu.actions()[0].menu() is window.number_menu  # Format > Number, as Google Sheets has it
     assert [a.text() for a in window.number_menu.actions() if a.text()] == [
         "Automatic", "Plain text", "Number  (1,000.12)", "Percent  (10.12%)", "Scientific  (1.01E+03)",
@@ -305,6 +306,14 @@ def test_save_and_open_keeps_formats(window, tmp_path):
     assert other.model.display_text(0, 0) == "$5.00"
 
 
+def label(widget) -> str:
+    """A toolbar button's text, or what the font boxes are."""
+    from PySide6.QtWidgets import QToolButton
+    if isinstance(widget, QToolButton):
+        return widget.text()
+    return "font" if widget.itemText(0) == "Default" else "size"
+
+
 def toolbar_buttons(window):
     from PySide6.QtWidgets import QToolBar
     toolbar = window.findChild(QToolBar)
@@ -315,7 +324,8 @@ def test_currency_toolbar_button(window):
     from PySide6.QtTest import QTest
     buttons = toolbar_buttons(window)
     assert buttons[:2] == [window.autosum_button, window.fill_button]
-    assert [b.text() for b in buttons[2:]] == ["Notebook", "$", "%", "", "", "123", "B", "I", "DEG"]
+    assert [label(b) for b in buttons[2:]] == ["Notebook", "$", "%", "", "", "123", "font", "−", "size", "+",
+                                               "B", "I", "DEG"]
     currency = buttons[3]
     assert currency is window.number_buttons["currency"]
     window.model.set_cell(0, 0, "1234.5")
@@ -472,8 +482,9 @@ def test_typed_dates_in_the_sheet(window):
 def test_separator_between_number_formats_and_styles(window):
     from PySide6.QtWidgets import QToolBar
     toolbar = window.findChild(QToolBar)
-    labels = ["|" if a.isSeparator() else toolbar.widgetForAction(a).text() for a in toolbar.actions()]
-    assert labels[labels.index("$") - 1:] == ["|", "$", "%", "", "", "123", "|", "B", "I", "|", "DEG"]
+    labels = ["|" if a.isSeparator() else label(toolbar.widgetForAction(a)) for a in toolbar.actions()]
+    assert labels[labels.index("$") - 1:] == ["|", "$", "%", "", "", "123", "|", "font", "|", "−", "size", "+",
+                                              "|", "B", "I", "|", "DEG"]
 
 
 def test_fraction_format(window, tmp_path):

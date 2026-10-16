@@ -142,7 +142,9 @@ class SheetModel(QAbstractTableModel):
             style = self._styles.get((row, col))
             if style is None:
                 return None
-            font = QFont()
+            font = QFont()  # (its size is the view's, zoomed: the delegate sets a cell's own)
+            if style.font is not None:
+                font.setFamily(style.font)
             font.setBold(style.bold)
             font.setItalic(style.italic)
             return font
@@ -247,6 +249,14 @@ class SheetModel(QAbstractTableModel):
 
     def cell_style(self, row: int, col: int) -> CellStyle:
         return self._styles.get((row, col), PLAIN)
+
+    def row_font_sizes(self) -> dict[int, float]:
+        """The largest font size (in points) set in each row that has one."""
+        sizes = {}
+        for (row, _col), style in self._styles.items():
+            if style.size is not None:
+                sizes[row] = max(sizes.get(row, 0), style.size)
+        return sizes
 
     def cell_format(self, row: int, col: int) -> NumberFormat | None:
         """The cell's explicit format, if it has one."""
