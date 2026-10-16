@@ -26,6 +26,9 @@ PRESETS = (  # (pattern, what it's for)
     ('#,##0.0,,"M"', "Millions: 1.2M"),
     ("0.00E+00", "Scientific"),
     ("000-00-0000", "Digits with dashes: 123-45-6789"),
+    ("# ?/?", "Fraction: 1 1/4"),
+    ("# ??/??", "Fraction, up to 99ths: 3 14/99"),
+    ("# ?/8", "Eighths: 2 3/8"),
     ('[>=1000]#,##0,"K";0', "Thousands when 1,000 or more"),
     ('0;-0;"–"', "A dash for zero"),
     ("mm/dd/yyyy", "Date: 09/26/2008"),
@@ -36,8 +39,8 @@ PRESETS = (  # (pattern, what it's for)
     ("[h]:mm:ss", "Elapsed hours: 36:00:00"),
     ('@" units"', "Text with a word after it"),
 )
-HELP = ("0 a digit · # a digit if needed · , thousands · . decimals · % percent · \"text\" · [Red] a color · "
-        "; between positive; negative; zero; text · d m y h s for dates and times")
+HELP = ("0 a digit · # a digit if needed · , thousands · . decimals · % percent · # ?/? a fraction · "
+        "\"text\" · [Red] a color · ; between positive; negative; zero; text · d m y h s for dates and times")
 
 
 class CustomFormatDialog(QDialog):

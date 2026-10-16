@@ -13,6 +13,8 @@ In a number section:
   one after the last digit divides by a thousand (#,##0,"K")
 - % multiplies by 100 and shows the sign; E+00 (or E-00) shows the number in
   scientific notation
+- a fraction: # ?/? (1.25 is 1 1/4), # ??/?? (denominators up to 99), # ?/8
+  (eighths), ?/? (no whole part: 1.5 is 3/2), 0/100 (hundredths)
 - "text" and \\x show text as is; _x shows a space as wide as x; *x is
   ignored; [$€] shows a currency sign; most other characters ($ - + ( ) / :
   and spaces) show as they are; General shows the number plainly
@@ -29,9 +31,11 @@ In the text section, @ is the text.
 """
 
 import datetime
+import math
 import re
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
+from fractions import Fraction
 
 COLORS = {"black": "#000000", "white": "#ffffff", "red": "#ff0000", "green": "#008000", "blue": "#0000ff",
           "yellow": "#ffff00", "magenta": "#ff00ff", "cyan": "#00ffff"}
@@ -296,6 +300,9 @@ def _render_number(section: _Section, value: float) -> str:
     if "general" in section.kinds:
         return "".join(_general(value) if kind == "general" else part for kind, part in tokens
                        if kind in ("general", "literal"))
+    fraction = _fraction_parts(tokens)
+    if fraction is not None:
+        return _render_fraction(tokens, fraction, value)
     digits = [i for i, (kind, _) in enumerate(tokens) if kind == "digit"]
     first, last = digits[0], digits[-1]
     exponent_at = next((i for i, (kind, _) in enumerate(tokens) if kind == "exponent"), None)
@@ -369,6 +376,80 @@ def _render_number(section: _Section, value: float) -> str:
         elif kind == "digit":  # an exponent's digits: shown with it
             continue
         elif kind in ("literal", "percent"):
+            out.append(part)
+    return "".join(out)
+
+
+def _fraction_parts(tokens: list):
+    """For a fraction (# ?/?): (the whole number's digit indexes, the
+    numerator's, the slash's, the denominator's, and its fixed value, if
+    it's written as digits: ?/8, 0/100), or None if it isn't one."""
+    for slash, token in enumerate(tokens):
+        if token != ("literal", "/") or slash == 0 or tokens[slash - 1][0] != "digit":
+            continue
+        after = slash + 1
+        while after < len(tokens) and (tokens[after][0] == "digit" or
+                                       tokens[after][0] == "literal" and tokens[after][1].isdigit()):
+            after += 1
+        denominator = list(range(slash + 1, after))
+        if not denominator:
+            continue
+        start = slash - 1
+        while start > 0 and tokens[start - 1][0] == "digit":
+            start -= 1
+        numerator = list(range(start, slash))
+        whole = [i for i in range(start) if tokens[i][0] == "digit"]
+        written = "".join(tokens[i][1] for i in denominator)
+        fixed = int(written.replace("?", "0").replace("#", "0")) if any(
+            tokens[i][0] == "literal" for i in denominator) else None
+        return whole, numerator, slash, denominator, fixed
+    return None
+
+
+def _render_fraction(tokens: list, parts, value: float) -> str:
+    whole_at, numerator_at, slash, denominator_at, fixed = parts
+    whole = math.floor(value) if whole_at else 0
+    rest = value - whole
+    if fixed:
+        numerator, denominator = round(rest * fixed), fixed
+    else:
+        best = Fraction(rest).limit_denominator(10 ** len(denominator_at) - 1)
+        numerator, denominator = best.numerator, best.denominator
+    if whole_at and numerator == denominator:  # 2.999 in ?/? is 3
+        whole, numerator = whole + 1, 0
+    places = {kind: [tokens[i][1] for i in at]
+              for kind, at in (("whole", whole_at), ("numerator", numerator_at), ("denominator", denominator_at))}
+    blank = whole_at and numerator == 0  # a whole number: no fraction, just spaces where it goes (for ?)
+    whole_text = _fill_integer(str(whole) if whole else ("0" if blank or value == 0 else ""), places["whole"])
+    width = len(numerator_at) + 1 + len(denominator_at)
+    blank_text = " " * width if "?" in places["numerator"] + places["denominator"] else ""
+    numerator_text = _fill_integer(str(numerator), places["numerator"])
+    if fixed:
+        denominator_text = str(fixed)
+    else:
+        written = str(denominator)
+        pad = places["denominator"][len(written):] if len(written) < len(places["denominator"]) else []
+        denominator_text = written + "".join(" " if place == "?" else "0" if place == "0" else "" for place in pad)
+    out = []
+    first_part = (whole_at or numerator_at)[0]
+    for index, (kind, part) in enumerate(tokens):
+        if index in whole_at:
+            if index == whole_at[0]:
+                out.append(whole_text)
+        elif whole_at and whole_at[-1] < index < numerator_at[0]:
+            if whole_text.strip() and (blank_text or not blank):  # the space between: with both of them
+                out.append(part)
+        elif index in numerator_at or index == slash or index in denominator_at:
+            if blank:
+                if index == numerator_at[0]:
+                    out.append(blank_text)
+            elif index == numerator_at[0]:
+                out.append(numerator_text)
+            elif index == slash:
+                out.append("/")
+            elif index == denominator_at[0]:
+                out.append(denominator_text)
+        elif kind in ("literal", "percent") and (index < first_part or index > denominator_at[-1]):
             out.append(part)
     return "".join(out)
 

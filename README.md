@@ -141,6 +141,13 @@ choices as Google Sheets (the current cell's format is checked):
     `1,234.6K`). `%` multiplies by 100, and `E+00` shows scientific
     notation (`##0.0E+0` in powers of three). Characters among the digits
     stay in place: `000-00-0000`, `(###) ###-####`.
+  - Fractions: `# ?/?` shows 1.25 as `1 1/4`, with the closest fraction
+    whose denominator has as many digits as there are places for it
+    (`# ??/??` up to 99ths: pi is `3 14/99`); a denominator written as
+    digits is fixed (`# ?/8` in eighths, `0/100` in hundredths); with no
+    whole number part, it's improper (`?/?` shows 1.5 as `3/2`). `?` places
+    pad with spaces, so fractions line up, and a whole number shows without
+    one.
   - `"text"` and `\x` show text; `_x` a space; `[$€]` a currency sign; `$ -
     + ( ) / :` and spaces show as they are; `*x` is ignored; `General` shows
     the number plainly.
@@ -154,8 +161,8 @@ choices as Google Sheets (the current cell's format is checked):
     elapsed time beyond 24 hours (`[h]:mm`).
   - `@` is a text value, in the text section: `"Item: "@`.
 
-  Fractions (`# ?/?`) aren't supported. A pattern that can't be read says why
-  in the dialog, and OK is unavailable until it can be.
+  A pattern that can't be read says why in the dialog, and OK is unavailable
+  until it can be.
 - **Increase Decimals** and **Decrease Decimals**, in the Format menu, show
   one more or one fewer decimal place, starting from how each number is
   shown now. Dates, times, and durations have none to change, and a custom

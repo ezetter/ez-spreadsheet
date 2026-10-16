@@ -57,6 +57,18 @@ def test_patterns_that_cant_be_used(pattern, problem):
     assert problem in pattern_problem(pattern)
 
 
+@pytest.mark.parametrize("pattern, value, shown", [
+    ("# ?/?", 1.25, "1 1/4"), ("# ?/?", 0.5, "1/2"), ("# ?/?", -1.25, "-1 1/4"), ("0 ?/?", 0.5, "0 1/2"),
+    ("# ?/?", 3, "3    "), ("# #/#", 4, "4"), ("# ?/?", 0, "0    "), ("# ?/?", 2.999, "3    "),  # whole numbers
+    ("# ??/??", 3.14159, "3 14/99"), ("# ??/??", 0.333, " 1/3 "),  # ? places line fractions up with spaces
+    ("?/?", 1.5, "3/2"), ("??/??", 0.75, " 3/4 "),  # no whole part: improper
+    ("# ?/8", 2.3, "2 2/8"), ("# ?/16", 0.0625, "1/16"), ("0/100", 0.25, "25/100"),  # fixed denominators
+    ('# ?/?" in"', 1.5, "1 1/2 in"), ("m/d/yyyy", 39717, "9/26/2008"),  # (a date isn't a fraction)
+])
+def test_fractions(pattern, value, shown):
+    assert format_custom(value, pattern)[0] == shown
+
+
 def test_semicolons_in_quotes_and_brackets_arent_sections():
     assert len(parse_pattern('"a;b"0;[<0]0').sections) == 2
     assert format_custom(5, '"a;b"0')[0] == "a;b5"
