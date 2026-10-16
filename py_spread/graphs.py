@@ -14,12 +14,14 @@ import re
 from dataclasses import dataclass, field
 
 from .notebook import (
+    FRAME_COMMENT,
     GRAPH_KINDS,
     OTHER_KINDS,
     REGRESSION,
     FrameData,
     GraphColumns,
     GraphError,
+    dataframe_parts,
     marker_keyword,
     plot_function,
 )
@@ -237,6 +239,66 @@ def frame_data(source: str, frame: str) -> FrameData | None:
             or len({len(v) for v in table.values()}) != 1):
         return None
     return FrameData(list(table), [list(column) for column in table.values()])
+
+
+# --- The notebook's DataFrames ---
+
+@dataclass
+class FrameCell:
+    """A cell making a DataFrame as dataframe_code writes it: its id, the
+    DataFrame's name, and its data."""
+
+    cell_id: str
+    name: str
+    data: FrameData
+
+
+def find_frames(notebook) -> list[FrameCell]:
+    """The cells making a DataFrame as dataframe_code writes it (a chart's
+    too), top to bottom: ones whose data can be updated, and that can be
+    renamed."""
+    found = []
+    for cell in notebook.cells:
+        try:
+            tree = ast.parse(cell.source)
+        except (SyntaxError, ValueError):
+            continue
+        names = [statement.targets[0].id for statement in tree.body
+                 if isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                 and isinstance(statement.targets[0], ast.Name) and _makes_frame(statement, statement.targets[0].id)]
+        data = frame_data(cell.source, names[-1]) if names else None
+        if data is not None:
+            found.append(FrameCell(cell.id, names[-1], data))
+    return found
+
+
+def frame_labels(frames) -> list[str]:
+    """How the DataFrame dialog's list names each: "sales: Month, Sales,
+    Cost (12 rows)", numbered if two would read the same."""
+    labels = []
+    for frame in frames:
+        columns = frame.data.labels
+        shown = ", ".join(columns[:4]) + (", …" if len(columns) > 4 else "")
+        rows = len(frame.data.columns[0]) if frame.data.columns else 0
+        labels.append(f"{frame.name}: {shown} ({rows} row{'' if rows == 1 else 's'})")
+    return [f"{label} ({labels[:i].count(label) + 1})" if labels.count(label) > 1 else label
+            for i, label in enumerate(labels)]
+
+
+def update_frame_code(source: str, name: str, model, cells) -> str:
+    """A DataFrame cell's code with `name = pd.DataFrame({...})` written
+    afresh from the sheet's (row, col) cells, and its comment saying which
+    cells it's of; anything else in it stays."""
+    tree = ast.parse(source)
+    statement = [statement for statement in tree.body if _makes_frame(statement, name)][-1]
+    at = _Positions(source)
+    start, end = at(statement.lineno, statement.col_offset), at(statement.end_lineno, statement.end_col_offset)
+    comment, assignment = dataframe_parts(model, cells, name)
+    comments = list(FRAME_COMMENT.finditer(source, 0, start))
+    source = source[:start] + assignment + source[end:]
+    if comments:
+        source = source[:comments[-1].start()] + comment + source[comments[-1].end():]
+    return source
 
 
 # --- Renaming a graph's DataFrame ---

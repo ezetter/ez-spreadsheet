@@ -146,8 +146,10 @@ Data to Sheet…**, which brings a DataFrame back into the sheet.
 
 ### Sending cells as a DataFrame
 
-DataFrame asks what to call the DataFrame, then opens the notebook with a new
-cell that makes a pandas DataFrame of the data and shows it, and the cell runs:
+DataFrame makes a DataFrame of the selected cells, or, if no more than one
+cell is selected, of the whole sheet (the block holding all its data). It asks
+what to call the DataFrame, then opens the notebook with a new cell that makes
+a pandas DataFrame of the data and shows it, and the cell runs:
 
 ```python
 # Cells A1:C4 of the sheet, with row 1 as the column names.
@@ -165,7 +167,8 @@ df
 - Numbers are numbers (`$1,200` is 1200, and whole numbers are integers), text
   is text, and empty cells and errors are missing values (NaN).
 - Selecting whole columns or rows takes just the part with data in it. If
-  nothing selected has data, no cell is made.
+  nothing selected has data, or the sheet is empty, no cell is made (unless
+  the notebook has DataFrames to rename; see below).
 - The DataFrame dialog's name starts at `df`, or `df2`, `df3`, and so on if
   the notebook already sets `df`; type another, such as `sales`, to use that
   instead. It has to be a Python name: letters, digits, and `_`, not starting
@@ -175,6 +178,24 @@ df
   `get_ipython`). Until it is, the dialog says why under it, and OK is
   unavailable. A name the notebook already sets is fine; the dialog says so,
   and the new DataFrame takes its place from there on. Cancel adds nothing.
+
+Once the notebook has DataFrames (written as EzSheet writes them, a chart's
+included), the DataFrame dialog has a **DataFrame** list at the top: **New
+DataFrame**, then each of them, such as "sales: Month, Sales, Cost (12
+rows)". It starts at New DataFrame, unless no more than one cell is selected
+and the notebook's current cell makes one of them. Choosing one of them:
+
+- **Name** shows its name; a new one renames it, just as the Chart dialog's
+  DataFrame name does: in its cell and the cells after it that use it, and
+  not to a name the notebook already uses.
+- **Update its data from** the selected cells (or the whole sheet), unchecked
+  to start with, writes its data afresh from them: the `pd.DataFrame({...})`
+  in its cell and the comment above it saying which cells it's of. Anything
+  else you added to the cell stays. It's unavailable if those cells have no
+  data.
+- OK does either or both. Its cell runs again, so Python has its new name or
+  data, and with new data, so do its charts, redrawn with it. Each change is
+  an edit in its cell, so Cmd+Z there brings back the old code.
 - The data is a snapshot, written into the cell as Python, so it's readable,
   editable, and still works after a restart. Editing the sheet afterwards
   doesn't change the DataFrame; send the cells again for a fresh one. Each new

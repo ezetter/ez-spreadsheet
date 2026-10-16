@@ -42,7 +42,7 @@ from .functions import ANGLE_UNITS, DEGREES, RADIANS
 from .frame_name_dialog import FrameNameDialog
 from .kernel import KernelRunner
 from .graph_dialog import GraphDialog, graph_labels
-from .graphs import change_graph, find_graphs, rename_frame, used_names
+from .graphs import change_graph, find_frames, find_graphs, rename_frame, update_frame_code, used_names
 from .load_data import answer, data_request, frames, frames_request, sheet_writes
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
@@ -1147,24 +1147,80 @@ class MainWindow(QMainWindow):
         return self.notebook_window
 
     def send_to_notebook(self) -> str | None:
-        """Put the selected cells in a pandas DataFrame, named in the
-        DataFrame dialog (df, df2, ... to start with), in a new notebook
-        cell, open the notebook, and run the cell. Returns the new cell's id,
-        or None if the selection is empty or the dialog was cancelled."""
+        """Notebook > DataFrame. The DataFrame dialog names a new pandas
+        DataFrame (df, df2, ... to start with) of the selected cells, or (with
+        no more than one cell selected) of the whole sheet's data, which goes
+        in a new notebook cell and runs. With DataFrames in the notebook, it
+        lists them too, to rename one, or update its data from those cells
+        (see _change_frame). Returns the cell's id, or None if there's no data
+        and no DataFrame to change, or the dialog was cancelled."""
         self._commit_pending_edit()
-        cells = data_block(self.model, self._selected_cells())
-        if not cells:
-            self._show_status("The selection is empty. Select cells with data to make a DataFrame of them.")
+        cells, source, problem = self._sheet_data()
+        frames = find_frames(self.notebook)
+        if problem is not None and not frames:
+            self._show_status(f"There's nothing to make a DataFrame of: {problem[0].lower()}{problem[1:]} "
+                              "Select cells with data to make a DataFrame of them.")
             return None
-        name = self._ask_frame_name(next_frame_name(self.notebook), f"the selected cells, {_block_name(cells)}")
-        if name is None:
+        answer = self._ask_dataframe(frames, self._first_frame(frames), next_frame_name(self.notebook), source,
+                                     problem)
+        if answer is None:
             return None
+        index, name, update = answer
+        if index is not None:
+            return self._change_frame(frames[index], name, update, cells, source)
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas = importing_cell(self.notebook, "pandas")
         [cell_id] = self._run_in_notebook([dataframe_code(self.model, cells, name, pandas is None)], [pandas])
         self.notebook_window.reveal(cell_id)  # so its table can be seen
-        self._show_status(f"Sent the selection to the notebook as {name}.")
+        self._show_status(f"Sent {source} to the notebook as {name}.")
         return cell_id
+
+    def _first_frame(self, frames) -> int | None:
+        """Which item the DataFrame dialog's list starts at: New DataFrame
+        (None), unless no more than one cell is selected and the notebook's
+        current cell makes one of the DataFrames."""
+        current_id = self.notebook_window.current_id if self.notebook_window is not None else None
+        ids = [frame.cell_id for frame in frames]
+        return ids.index(current_id) if len(self._selected_cells()) <= 1 and current_id in ids else None
+
+    def _change_frame(self, frame, name: str, update: bool, cells, source: str) -> str | None:
+        """Rename one of the notebook's DataFrames (in its cell, and the cells
+        after it that use it), or write its data afresh from the sheet's
+        cells (in its cell, keeping anything else there), or both. Its cell
+        runs again; with new data, so do its charts. Returns its cell's id,
+        or None if there was nothing to change or it couldn't be changed."""
+        renamed, unread = {}, []
+        try:
+            if name != frame.name:
+                renamed, unread = rename_frame(self.notebook, frame.cell_id, frame.name, name)
+            if update:
+                code = renamed.get(frame.cell_id, self.notebook.cell(frame.cell_id).source)
+                renamed[frame.cell_id] = update_frame_code(code, name, self.model, cells)
+        except ValueError as e:
+            self._show_error(f"Couldn't change the DataFrame {frame.name}.", str(e))
+            return None
+        if not renamed:
+            self._show_status(f"{frame.name} is unchanged: give it a new name, or check Update data.")
+            return None
+        window = self.show_notebook()
+        for cell_id, code in renamed.items():
+            window.replace_source(cell_id, code)
+        charts = [graph.cell_id for graph in find_graphs(self.notebook) if graph.frame_cell == frame.cell_id]
+        window.ran.discard(frame.cell_id)  # Python has its old name, or data
+        window.run_needed([importing_cell(self.notebook, "pandas", frame.cell_id), frame.cell_id])
+        if update:
+            for chart in charts:
+                window.run_needing(chart, [importing_cell(self.notebook, "seaborn", chart)])
+        window.set_current(frame.cell_id, focus=True)
+        window.reveal(frame.cell_id)
+        done = []
+        if name != frame.name:
+            done.append(f"Renamed {frame.name} to {name} in {_cells(len(renamed))}.")
+        if update:
+            redrawn = f" Redrawing its {_cells(len(charts), 'chart')}." if charts else ""
+            done.append(f"Updated {name} with {source}.{redrawn}")
+        self._show_status(" ".join(done) + _unread_note(unread, frame.name))
+        return frame.cell_id
 
     def send_graph_to_notebook(self) -> str | None:
         """Notebook > Chart. With charts in the notebook, the Chart dialog
@@ -1175,7 +1231,7 @@ class MainWindow(QMainWindow):
         which run. Returns the chart cell's id, or None if there's nothing
         that can be charted (an error says why) or the dialog was cancelled."""
         self._commit_pending_edit()
-        cells, source, problem = self._chart_data()
+        cells, source, problem = self._sheet_data()
         columns = None
         if problem is None:
             try:
@@ -1198,10 +1254,10 @@ class MainWindow(QMainWindow):
             return self._make_chart(cells, source, choice)
         return self._change_chart(graphs, index, choice)
 
-    def _chart_data(self) -> tuple[set, str, str | None]:
-        """What a new chart is of: the selected cells, or, with no more than
-        one cell selected, the whole sheet's data. (cells, how to name them,
-        what's wrong if there's nothing there)."""
+    def _sheet_data(self) -> tuple[set, str, str | None]:
+        """What a new chart or DataFrame is of: the selected cells, or, with
+        no more than one cell selected, the whole sheet's data. (cells, how
+        to name them, what's wrong if there's nothing there)."""
         selected = self._selected_cells()
         if len(selected) > 1:
             cells = data_block(self.model, selected)
@@ -1286,14 +1342,8 @@ class MainWindow(QMainWindow):
         label = graph_labels([*graphs[:index], dataclasses.replace(graph, frame=frame), *graphs[index + 1:]])[index]
         status = f"Redrawing the chart {label}."
         if renamed:
-            cells = f"{len(renamed)} cell{'s' if len(renamed) > 1 else ''}"
-            status = f"Renamed {graph.frame} to {frame} in {cells}. {status}"
-        if unread:
-            several = len(unread) > 1
-            cells, still = (f"{len(unread)} cells", "they still say") if several else ("1 cell", "it still says")
-            status += (f" {cells} using {graph.frame} couldn't be read as Python (such as one with a %magic), "
-                       f"so {still} {graph.frame}.")
-        self._show_status(status)
+            status = f"Renamed {graph.frame} to {frame} in {_cells(len(renamed))}. {status}"
+        self._show_status(status + _unread_note(unread, graph.frame))
         return graph.cell_id
 
     def _ask_chart(self, graphs, current: int | None, columns, source: str, problem: str | None,
@@ -1316,11 +1366,17 @@ class MainWindow(QMainWindow):
                              taken=assigned_names(self.notebook))
         return dialog.choice() if dialog.exec() == QDialog.Accepted else None
 
-    def _ask_frame_name(self, name: str, source: str) -> str | None:
-        """The DataFrame dialog: what to call the DataFrame of `source`,
-        starting at `name`, or None if cancelled."""
-        dialog = FrameNameDialog(self, name, source, assigned_names(self.notebook))
-        return dialog.name() if dialog.exec() == QDialog.Accepted else None
+    def _ask_dataframe(self, frames, current: int | None, name: str, source: str,
+                       problem: str | None) -> tuple[int | None, str, bool] | None:
+        """The DataFrame dialog: (which of the notebook's `frames` to change,
+        None for a new DataFrame of `source`, starting at frames[current];
+        its name, starting at `name` for a new one; whether to update its
+        data), or None if cancelled. `problem` says why `source` has no data."""
+        dialog = FrameNameDialog(self, name, source, assigned_names(self.notebook), frames, current, problem,
+                                 used_names(self.notebook))
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.chosen_frame(), dialog.name(), dialog.update()
 
     def load_data_to_sheet(self) -> None:
         """Ask the notebook's Python for its DataFrames, then which one to
@@ -1887,3 +1943,17 @@ def _block_name(cells) -> str:
     """The block holding the (row, col) cells, such as A1:C4."""
     rows, cols = [row for row, _ in cells], [col for _, col in cells]
     return f"{cell_name(min(rows), min(cols))}:{cell_name(max(rows), max(cols))}"
+
+
+def _cells(count: int, what: str = "cell") -> str:
+    """"1 cell", "3 cells"."""
+    return f"{count} {what}{'' if count == 1 else 's'}"
+
+
+def _unread_note(unread, name: str) -> str:
+    """What a rename says of the cells using `name` it couldn't read (and so left as they are)."""
+    if not unread:
+        return ""
+    still = "it still says" if len(unread) == 1 else "they still say"
+    return (f" {_cells(len(unread))} using {name} couldn't be read as Python (such as one with a %magic), "
+            f"so {still} {name}.")

@@ -277,14 +277,24 @@ def dataframe_code(model, cells, name: str = "df", import_pandas: bool = True) -
     `import_pandas` false, it leaves out "import pandas as pd" (an earlier
     cell has it).
     """
+    comment, assignment = dataframe_parts(model, cells, name)
+    lines = ["import pandas as pd", ""] if import_pandas else []
+    return "\n".join([*lines, comment, assignment, name])
+
+
+FRAME_COMMENT = re.compile(r"^# Cells [A-Z]+\d+:[A-Z]+\d+ of the sheet\b.*$", re.M)  # as dataframe_parts writes it
+
+
+def dataframe_parts(model, cells, name: str) -> tuple[str, str]:
+    """dataframe_code's comment saying which cells it's of, and its
+    `name = pd.DataFrame({...})` (see dataframe_code)."""
     frame = _frame(model, cells)
     note = f", with row {frame.header_row + 1} as the column names" if frame.header_row is not None else ""
-    lines = ["import pandas as pd", ""] if import_pandas else []
-    lines += [f"# Cells {frame.where} of the sheet{note}.", f"{name} = pd.DataFrame({{"]
+    lines = [f"{name} = pd.DataFrame({{"]
     for label, values in zip(frame.labels, frame.columns):
         lines.append(f"    {label!r}: [{', '.join(_python_value(v) for v in values)}],")
-    lines += ["})", name]
-    return "\n".join(lines)
+    lines.append("})")
+    return f"# Cells {frame.where} of the sheet{note}.", "\n".join(lines)
 
 
 # --- Graphing them with Seaborn ---

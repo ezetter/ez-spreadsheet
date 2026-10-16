@@ -3,7 +3,17 @@ from PySide6.QtWidgets import QFormLayout
 
 from py_spread.frame_name_dialog import FrameNameDialog, FrameNameField
 from py_spread.graph_dialog import GraphDialog
-from py_spread.graphs import GraphCell, find_graphs, rename_frame, used_names
+from py_spread.graphs import (
+    FrameCell,
+    GraphCell,
+    find_frames,
+    find_graphs,
+    frame_labels,
+    rename_frame,
+    update_frame_code,
+    used_names,
+)
+from py_spread.model import SheetModel
 from py_spread.notebook import FrameData, GraphColumns, Notebook, assigned_names, frame_name_problem
 from py_spread.window import MainWindow
 from tests.test_notebook import FakeKernel
@@ -98,6 +108,33 @@ def test_used_names(app):
     assert "math" not in used_names(notebook)
 
 
+# --- The notebook's DataFrames, and new data for one ---
+
+def test_finds_the_dataframes(app):
+    notebook, ids = notebook_of("import pandas as pd", FRAME_CELL, CHART_CELL, "other = pd.read_csv('x.csv')",
+                                FRAME_CELL.replace("df", "sales"), "%timeit x")
+    frames = find_frames(notebook)
+    assert [(frame.cell_id, frame.name) for frame in frames] == [(ids[1], "df"), (ids[4], "sales")]
+    assert frames[0].data.labels == ["a", "b"] and frames[0].data.columns == [[1, 2], [3, 4]]
+    assert frame_labels(frames) == ["df: a, b (2 rows)", "sales: a, b (2 rows)"]
+
+
+def test_frame_labels():
+    wide = FrameData(list("abcdef"), [[1]] * 6)
+    assert frame_labels([FrameCell("x", "df", wide), FrameCell("y", "df", wide)]) == [
+        "df: a, b, c, d, … (1 row) (1)", "df: a, b, c, d, … (1 row) (2)"]
+
+
+def test_update_frame_code(app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "Month", (0, 1): "Sales", (1, 0): "Jan", (1, 1): "5", (2, 0): "Feb", (2, 1): "7"})
+    source = "import pandas as pd\n\n" + FRAME_CELL + "\ndf['c'] = df.a * 2  # mine\ndf"
+    updated = update_frame_code(source, "df", model, {(r, c) for r in range(3) for c in range(2)})
+    assert updated == ("import pandas as pd\n\n# Cells A1:B3 of the sheet, with row 1 as the column names.\n"
+                       "df = pd.DataFrame({\n    'Month': ['Jan', 'Feb'],\n    'Sales': [5, 7],\n})\ndf\n"
+                       "df['c'] = df.a * 2  # mine\ndf")  # the rest stays
+
+
 # --- The DataFrame dialog ---
 
 def test_dataframe_dialog(app):
@@ -112,6 +149,44 @@ def test_dataframe_dialog(app):
     assert not dialog.field.note.isHidden()
     dialog.field.edit.setText("sales")  # the notebook has one: fine, it's replaced
     assert dialog.ok_button.isEnabled() and "already sets sales" in dialog.field.note.text()
+
+
+def two_frames():
+    return [FrameCell("a", "df", FrameData(["x", "y"], [[1], [2]])),
+            FrameCell("b", "sales", FrameData(["Month"], [["Jan", "Feb"]]))]
+
+
+def test_dataframe_dialog_lists_the_dataframes(app):
+    dialog = FrameNameDialog(None, "df2", "the whole sheet, A1:C3", {"df", "sales"}, two_frames(), None,
+                             used={"df", "sales", "np"})
+    assert [dialog.frame_box.itemText(i) for i in range(3)] == [
+        "New DataFrame", "df: x, y (1 row)", "sales: Month (2 rows)"]
+    assert dialog.chosen_frame() is None and dialog.name() == "df2"
+    assert not dialog.form.isRowVisible(dialog.update_box) and not dialog.update()
+    assert dialog.summary.text() == "A DataFrame of the whole sheet, A1:C3, in a new notebook cell."
+    dialog.frame_box.setCurrentIndex(2)
+    assert (dialog.chosen_frame(), dialog.name(), dialog.update()) == (1, "sales", False)
+    assert dialog.form.isRowVisible(dialog.update_box) and not dialog.update_box.isChecked()  # unchecked
+    assert dialog.update_box.text() == "Update its data from the whole sheet, A1:C3"
+    dialog.update_box.setChecked(True)
+    dialog.field.edit.setText("revenue")
+    assert (dialog.name(), dialog.update()) == ("revenue", True)
+    assert "Renames sales to revenue" in dialog.field.note.text() and dialog.ok_button.isEnabled()
+    dialog.field.edit.setText("np")  # the notebook uses it
+    assert not dialog.ok_button.isEnabled()
+    dialog.frame_box.setCurrentIndex(0)
+    assert dialog.name() == "df2" and not dialog.update()  # each keeps what was typed for it
+    dialog.frame_box.setCurrentIndex(2)
+    assert dialog.name() == "np"
+
+
+def test_dataframe_dialog_without_data(app):
+    dialog = FrameNameDialog(None, "df2", "the sheet", (), two_frames(), 0, "The sheet is empty.")
+    assert dialog.chosen_frame() == 0 and dialog.ok_button.isEnabled()  # it can still be renamed
+    assert not dialog.update_box.isEnabled() and dialog.update_box.toolTip() == "The sheet is empty."
+    dialog.frame_box.setCurrentIndex(0)
+    assert not dialog.ok_button.isEnabled()
+    assert dialog.summary.text() == "A new DataFrame of the sheet can't be made. The sheet is empty."
 
 
 def test_field_renaming(app):
@@ -225,7 +300,7 @@ def test_naming_a_dataframe(window, dialogs):
     assert dialogs.frame_name_prompts == [("df", "the selected cells, A1:C3")]
     source = window.notebook.cell(cell_id).source
     assert "sales = pd.DataFrame({" in source and source.endswith("\nsales")
-    assert window.statusBar().currentMessage() == "Sent the selection to the notebook as sales."
+    assert window.statusBar().currentMessage() == "Sent the selected cells, A1:C3 to the notebook as sales."
     dialogs.frame_name_answer = None
     window.send_to_notebook()
     assert dialogs.frame_name_prompts[-1][0] == "df"  # sales isn't one of df, df2, ...: df is still free
@@ -325,3 +400,95 @@ def test_renaming_with_a_cell_that_isnt_plain_python(window, dialogs):
     assert window.notebook.cell(magic).source == "%timeit df.sum()"
     assert window.statusBar().currentMessage().endswith(
         "1 cell using df couldn't be read as Python (such as one with a %magic), so it still says df.")
+
+
+def test_dataframe_of_the_whole_sheet_with_no_selection(window, dialogs):
+    window.view.setCurrentIndex(window.model.index(5, 5))
+    cell_id = window.send_to_notebook()
+    assert dialogs.frame_name_prompts == [("df", "the whole sheet, A1:C3")]
+    assert window.notebook.cell(cell_id).source.startswith("# Cells A1:C3 of the sheet")
+
+
+def test_no_dataframe_of_an_empty_sheet(app, dialogs):
+    window = MainWindow()
+    window.kernel = FakeKernel()
+    assert window.send_to_notebook() is None and dialogs.frame_name_prompts == []
+    assert "the sheet is empty" in window.statusBar().currentMessage()
+    window.setWindowModified(False)
+    window.close()
+
+
+def dataframe_and_chart(window):
+    """df of A1:C3, and a chart of it (df2) too: (df's cell, a cell using it, the chart's cell)."""
+    window.view.select_range(0, 0, 2, 2)
+    frame_id = window.send_to_notebook()
+    other = window.notebook_window.add_cell_below("print(df.shape)")
+    chart = window.send_graph_to_notebook()
+    return frame_id, other, chart
+
+
+def test_dataframe_dialog_offers_the_notebooks_dataframes(window, dialogs):
+    frame_id, _other, _chart = dataframe_and_chart(window)
+    window.send_to_notebook()
+    frames, current, problem = dialogs.dataframe_prompts[-1]
+    assert [frame.name for frame in frames] == ["df", "df2"] and current is None and problem is None
+    window.notebook_window.set_current(frame_id)
+    window.view.setCurrentIndex(window.model.index(0, 0))  # one cell: the notebook's current DataFrame
+    window.send_to_notebook()
+    assert dialogs.dataframe_prompts[-1][1] == 0
+
+
+def test_renaming_from_the_dataframe_dialog(window, dialogs):
+    frame_id, other, _chart = dataframe_and_chart(window)
+    dialogs.dataframe_answer = (0, "sales", False)
+    runs = len(window.kernel.runs)
+    assert window.send_to_notebook() == frame_id
+    assert "sales = pd.DataFrame({" in window.notebook.cell(frame_id).source
+    assert window.notebook.cell(other).source == "print(sales.shape)"
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id]  # Python gets the new name
+    assert window.statusBar().currentMessage() == "Renamed df to sales in 2 cells."
+
+
+def test_updating_a_dataframes_data(window, dialogs):
+    window.view.select_range(0, 0, 2, 1)  # Month and Sales
+    frame_id = window.send_graph_to_notebook()
+    frame_id, chart = window.notebook.cells[-2].id, frame_id
+    window.model.set_cells({(1, 1): "999", (3, 0): "Mar", (3, 1): "130", (3, 2): "80"})
+    window.view.select_range(0, 0, 3, 1)
+    dialogs.dataframe_answer = (0, None, True)
+    runs = len(window.kernel.runs)
+    window.send_to_notebook()
+    source = window.notebook.cell(frame_id).source
+    assert source.startswith("# Cells A1:B4 of the sheet") and "'Sales': [999, 120, 130]," in source
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, chart]  # and its chart is redrawn
+    assert window.statusBar().currentMessage() == (
+        "Updated df with the selected cells, A1:B4. Redrawing its 1 chart.")
+
+
+def test_renaming_and_updating_at_once(window, dialogs):
+    frame_id, other, _chart = dataframe_and_chart(window)
+    window.view.setCurrentIndex(window.model.index(9, 9))  # no selection: the whole sheet
+    dialogs.dataframe_answer = (0, "sales", True)
+    window.send_to_notebook()
+    source = window.notebook.cell(frame_id).source
+    assert source.startswith("# Cells A1:C3 of the sheet") and "sales = pd.DataFrame({" in source
+    assert window.notebook.cell(other).source == "print(sales.shape)"
+    assert window.statusBar().currentMessage() == (
+        "Renamed df to sales in 2 cells. Updated sales with the whole sheet, A1:C3.")
+
+
+def test_nothing_to_change(window, dialogs):
+    frame_id, _other, _chart = dataframe_and_chart(window)
+    dialogs.dataframe_answer = (0, None, False)
+    assert window.send_to_notebook() is None
+    assert window.statusBar().currentMessage() == "df is unchanged: give it a new name, or check Update data."
+
+
+def test_renaming_with_no_data_to_update_from(window, dialogs):
+    frame_id, _other, _chart = dataframe_and_chart(window)
+    window.model.set_cells({(r, c): "" for r in range(3) for c in range(3)})
+    window.view.setCurrentIndex(window.model.index(0, 0))
+    dialogs.dataframe_answer = (0, "sales", False)
+    window.send_to_notebook()
+    assert dialogs.dataframe_prompts[-1][2] == "The sheet is empty."
+    assert "sales = pd.DataFrame({" in window.notebook.cell(frame_id).source

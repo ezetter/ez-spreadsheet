@@ -40,6 +40,10 @@ class Dialogs:
         self.frame_name_cancel = False  # the DataFrame dialog's Cancel
         self.rename_answer = None  # a new name typed for a chart's DataFrame, when changing it; None keeps it
         self.frame_name_prompts = []  # (the name it started at, what it's of) each time either asks
+        # The DataFrame dialog, with DataFrames in the notebook: (which, name, update data), which being a
+        # DataFrame's index or "new", and a name of None keeping the default or its own; None: as it starts.
+        self.dataframe_answer = None
+        self.dataframe_prompts = []  # (the DataFrames offered, the one it started at, why there's no data)
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
 
 
@@ -76,11 +80,17 @@ def dialogs(monkeypatch):
 
     monkeypatch.setattr(MainWindow, "_ask_delete_shift", ask_delete_shift)
 
-    def ask_frame_name(window, name, source):
+    def ask_dataframe(window, frames, current, name, source, problem):
         dialogs.frame_name_prompts.append((name, source))
-        return None if dialogs.frame_name_cancel else dialogs.frame_name_answer or name
+        dialogs.dataframe_prompts.append((list(frames), current, problem))
+        if dialogs.frame_name_cancel:
+            return None
+        which, typed, update = dialogs.dataframe_answer or ("new" if current is None else current, None, False)
+        if which == "new":  # as the dialog for a new one, which has no OK if there's no data
+            return None if problem is not None else (None, typed or dialogs.frame_name_answer or name, False)
+        return which, typed or frames[which].name, update
 
-    monkeypatch.setattr(MainWindow, "_ask_frame_name", ask_frame_name)
+    monkeypatch.setattr(MainWindow, "_ask_dataframe", ask_dataframe)
 
     def ask_graph_options(window, columns, source, frame):
         dialogs.graph_prompts.append((list(columns.labels), (window.graph_kind, window.graph_marker)))
