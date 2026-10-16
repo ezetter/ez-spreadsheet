@@ -152,13 +152,24 @@ class SheetModel(QAbstractTableModel):
             if isinstance(self.value(row, col), float):
                 return Qt.AlignRight | Qt.AlignVCenter
             return Qt.AlignLeft | Qt.AlignVCenter
-        if role == Qt.ForegroundRole:  # a custom format's color: [Red]
+        if role == Qt.ForegroundRole:
             fmt = self._formats.get((row, col))
-            if fmt is None or fmt.kind != "custom":
+            if fmt is not None and fmt.kind == "custom":  # a custom format's color, [Red], comes first
+                value = self.value(row, col)
+                color = fmt.color(value) if isinstance(value, (float, str)) else None
+                if color:
+                    return QColor(COLORS[color])
+            style = self._styles.get((row, col))
+            if style is None:
                 return None
-            value = self.value(row, col)
-            color = fmt.color(value) if isinstance(value, (float, str)) else None
-            return QColor(COLORS[color]) if color else None
+            if style.color is not None:
+                return QColor(style.color)
+            if style.fill is not None:  # a fill, and the sheet's own text color: black or white, to be read
+                return QColor("#000000" if QColor(style.fill).lightnessF() > 0.55 else "#ffffff")
+            return None
+        if role == Qt.BackgroundRole:
+            style = self._styles.get((row, col))
+            return QColor(style.fill) if style is not None and style.fill is not None else None
         return None
 
     def setData(self, index, value, role=Qt.EditRole):

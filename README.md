@@ -229,6 +229,22 @@ selected cells' font and its size; they show the current cell's.
   saved with the sheet, travel with copy and paste, can be undone, and are
   given by Fill.
 
+## Colors
+
+After **B** and *I*, the toolbar has Google Sheets' **text color** button (an
+A) and **fill color** button (a paint bucket). Each shows Google Sheets'
+palette: grays, bright colors, and lighter and darker shades of them, with
+**Reset** above (no color of the cell's own) and **Custom…** below (any
+color). The bar under the A or bucket shows the current cell's color.
+Format > **Text Color…** and **Fill Color…** choose any color too.
+
+- A filled cell without a text color of its own shows its text in black or
+  white, whichever can be read on the fill.
+- A custom number format's color (`[Red]`) comes before the cell's text
+  color, as in Google Sheets.
+- Colors are kept, saved, copied, undone, and filled like the other styles,
+  and Default Font leaves them as they are.
+
 ## Notebook
 
 Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by

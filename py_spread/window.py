@@ -8,6 +8,7 @@ from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QPointF,
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
+    QColor,
     QFont,
     QFontDatabase,
     QGuiApplication,
@@ -22,6 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QColorDialog,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -90,6 +92,8 @@ from .recent import add_recent_file, clear_recent_files, menu_labels, recent_fil
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
+from .colors import ICON_SIZE as COLOR_ICON_SIZE
+from .colors import ColorMenu, fill_color_icon, text_color_icon
 from .custom_format_dialog import CustomFormatDialog
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
 from .textstyle import MAX_SIZE, MIN_SIZE, PLAIN, SIZES
@@ -861,6 +865,12 @@ class MainWindow(QMainWindow):
         action.triggered.connect(lambda _checked=False: self._set_font(None, None, "Default Font"))
         menu.addAction(action)
         self.format_actions["Default Font"] = action
+        menu.addSeparator()
+        for key, name in (("color", "Text Color…"), ("fill", "Fill Color…")):
+            action = QAction(name, self)
+            action.triggered.connect(lambda _checked=False, k=key: self._custom_color(k))
+            menu.addAction(action)
+            self.format_actions[name] = action
 
     def _build_formulas_menu(self):
         menu = self.menuBar().addMenu("Formulas")
@@ -1053,6 +1063,7 @@ class MainWindow(QMainWindow):
         style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
         self.format_actions["Bold"].setChecked(style.bold)
         self.format_actions["Italic"].setChecked(style.italic)
+        self._paint_color_icons()
         if getattr(self, "font_box", None) is not None:
             self.font_box.blockSignals(True)
             index = self.font_box.findData(style.font) if style.font is not None else 0
@@ -1282,6 +1293,7 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
         if event.type() == QEvent.PaletteChange and getattr(self, "number_buttons", None):
             self._paint_decimal_icons()  # light to dark, or back
+            self._paint_color_icons()
 
     def _add_style_buttons(self, toolbar):
         """B and I toolbar buttons for the Format menu's Bold and Italic, drawn
@@ -1299,6 +1311,65 @@ class MainWindow(QMainWindow):
             font.setBold(name == "Bold")
             font.setItalic(name == "Italic")
             button.setFont(font)
+        self._add_color_buttons(toolbar)
+
+    def _add_color_buttons(self, toolbar):
+        """Text color (an A) and fill color (a paint bucket), each showing
+        Google Sheets' palette of colors, with Reset and Custom…; their bars
+        show the current cell's colors."""
+        self.color_buttons, self.color_menus = {}, {}
+        for key, tip in (("color", "Text color"), ("fill", "Fill color")):
+            menu = ColorMenu("Reset", self)
+            menu.chosen.connect(lambda color, k=key: self._set_color(k, color))
+            menu.custom.connect(lambda k=key: self._custom_color(k))
+            button = QToolButton()
+            button.setToolTip(tip)
+            button.setIconSize(COLOR_ICON_SIZE)
+            button.setMenu(menu)
+            button.setPopupMode(QToolButton.MenuButtonPopup)  # an arrow beside it, as Notebook has
+            button.clicked.connect(lambda _checked=False, b=button: b.showMenu())
+            toolbar.addWidget(button)
+            self.color_buttons[key], self.color_menus[key] = button, menu
+        self._paint_color_icons()
+
+    def _paint_color_icons(self, *_args) -> None:
+        """The color buttons' icons, in the toolbar's text color, with the current cell's colors in their bars."""
+        if not getattr(self, "color_buttons", None):
+            return
+        current = self.view.currentIndex()
+        style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
+        ink, ratio = self.palette().color(QPalette.ButtonText), max(self.devicePixelRatioF(), 2.0)
+        shown = (style.color, style.fill, ink.name(), ratio)
+        if shown == getattr(self, "_color_icons_shown", None):
+            return  # (painted already)
+        self._color_icons_shown = shown
+        text_bar = QColor(style.color) if style.color else ink
+        fill_bar = QColor(style.fill) if style.fill else None
+        self.color_buttons["color"].setIcon(text_color_icon(ink, text_bar, ratio))
+        self.color_buttons["fill"].setIcon(fill_color_icon(ink, fill_bar, ratio))
+
+    _COLOR_NAMES = {"color": "Text Color", "fill": "Fill Color"}
+
+    def _set_color(self, key: str, color: str | None) -> None:
+        """The selected cells' text color, or fill color (None: Reset, none of their own)."""
+        self._commit_pending_edit()
+        styles = {cell: dataclasses.replace(self.model.cell_style(*cell), **{key: color})
+                  for cell in self._selected_cells()}
+        self.model.set_styles(styles, self._COLOR_NAMES[key])
+        self._show_current_style()
+
+    def _custom_color(self, key: str) -> None:
+        """Custom…: any color, starting at the current cell's."""
+        current = self.view.currentIndex()
+        style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
+        color = self._ask_color(getattr(style, key), self._COLOR_NAMES[key])
+        if color is not None:
+            self._set_color(key, color)
+
+    def _ask_color(self, start: str | None, title: str) -> str | None:
+        """The color dialog: the color chosen, #rrggbb, or None if cancelled."""
+        color = QColorDialog.getColor(QColor(start) if start else QColor("#000000"), self, title)
+        return color.name() if color.isValid() else None
 
     def _add_angle_button(self, toolbar):
         """A toolbar button showing the angle unit, DEG or RAD, that switches it."""
