@@ -178,3 +178,12 @@ def test_copy_and_paste_bring_fonts(window):
     window.view.select_range(3, 3, 3, 3)
     window.clipboard.paste()
     assert model.cell_style(3, 3) == CellStyle(font="Georgia", size=18.0)
+
+
+def test_size_box_is_as_wide_as_its_digits(window):
+    box = window.font_size_box
+    digits = box.fontMetrics().horizontalAdvance("000")
+    assert digits < box.sizeHint().width() < digits + 50  # three digits and the arrow, not a combo box's usual
+    width = box.sizeHint().width()
+    window.set_zoom(200)
+    assert box.sizeHint().width() > width  # zoomed with the toolbar

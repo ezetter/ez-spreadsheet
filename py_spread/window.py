@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QStyle,
+    QStyleOptionComboBox,
     QStyleOptionViewItem,
     QStyledItemDelegate,
     QTableView,
@@ -1258,14 +1260,12 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda _checked=False, s=step: self._step_font_size(s))
             self.font_size_buttons[key] = button
         toolbar.addWidget(self.font_size_buttons["smaller"])
-        self.font_size_box = QComboBox()
+        self.font_size_box = _SizeBox()
         self.font_size_box.setEditable(True)
         self.font_size_box.setInsertPolicy(QComboBox.NoInsert)
         self.font_size_box.setToolTip("Font size")
         for size in SIZES:
             self.font_size_box.addItem(str(size))
-        self.font_size_box.setMinimumContentsLength(3)
-        self.font_size_box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.font_size_box.textActivated.connect(lambda _text: self._size_typed())
         toolbar.addWidget(self.font_size_box)
         toolbar.addWidget(self.font_size_buttons["bigger"])
@@ -2345,6 +2345,21 @@ def _unread_note(unread, name: str) -> str:
     still = "it still says" if len(unread) == 1 else "they still say"
     return (f" {_cells(len(unread))} using {name} couldn't be read as Python (such as one with a %magic), "
             f"so {still} {name}.")
+
+
+class _SizeBox(QComboBox):
+    """The font size box: as wide as three digits and its arrow (in its font,
+    so it zooms with the toolbar), not a combo box's usual width."""
+
+    def sizeHint(self):
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        text = QSize(self.fontMetrics().horizontalAdvance("000"), self.fontMetrics().height())
+        return self.style().sizeFromContents(QStyle.CT_ComboBox, option, text, self).expandedTo(
+            QSize(0, super().sizeHint().height()))
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
 
 
 def _decimals_icon(digits: str, left: bool, color, ratio: float = 2.0) -> QIcon:
