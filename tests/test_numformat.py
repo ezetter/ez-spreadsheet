@@ -6,7 +6,8 @@ from PySide6.QtCore import Qt
 from py_spread.fill import SequenceFill
 from py_spread.formula import parse_number
 from py_spread.model import SheetModel
-from py_spread.numformat import GENERAL, NumberFormat, format_value, from_json, parse_formatted
+from py_spread.errors import CellError
+from py_spread.numformat import GENERAL, NumberFormat, format_value, from_json, parse_formatted, to_json
 from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
 from py_spread.window import MainWindow
 
@@ -64,7 +65,7 @@ def test_format_value(value, fmt, text):
 
 
 @pytest.mark.parametrize("data", [
-    {"kind": "percent"}, {"kind": "number", "decimals": -1}, {"kind": "number", "decimals": 11},
+    {"kind": "fraction"}, {"kind": "number", "decimals": -1}, {"kind": "number", "decimals": 11},
     {"kind": "number", "decimals": True}, {"kind": "number", "thousands": "yes"}, "currency",
 ])
 def test_from_json_rejects(data):
@@ -158,7 +159,7 @@ def test_version_1_files_still_open(tmp_path):
 def test_bad_format_in_file(tmp_path):
     path = tmp_path / "bad.ezs"
     path.write_text(json.dumps({"format": "ezsheet", "version": 2, "rows": 10, "columns": 5,
-                                "cells": {}, "formats": {"A1": {"kind": "percent"}}}))
+                                "cells": {}, "formats": {"A1": {"kind": "fraction"}}}))
     with pytest.raises(SheetFileError):
         load_sheet(str(path))
 
@@ -177,8 +178,13 @@ def window(app):
 def test_format_menu(window):
     menu = [m for m in window.menuBar().actions() if m.text() == "Format"][0].menu()
     names = [a.text() for a in menu.actions() if a.text()]
-    assert names == ["General  (1234.5)", "Number  (1,234.50)", "Currency  ($1,234.50)",
-                     "Increase Decimals", "Decrease Decimals", "Bold", "Italic"]
+    assert names == ["Number", "Increase Decimals", "Decrease Decimals", "Bold", "Italic"]
+    assert menu.actions()[0].menu() is window.number_menu  # Format > Number, as Google Sheets has it
+    assert [a.text() for a in window.number_menu.actions() if a.text()] == [
+        "Automatic", "Plain text", "Number  (1,000.12)", "Percent  (10.12%)", "Scientific  (1.01E+03)",
+        "Accounting  ($ (1,000.12))", "Financial  ((1,000.12))", "Currency  ($1,000.12)",
+        "Currency rounded  ($1,000)", "Date  (9/26/2008)", "Time  (3:59:00 PM)",
+        "Date time  (9/26/2008 15:59:00)", "Duration  (24:01:00)"]
 
 
 def test_currency_menu_item(window):
@@ -193,7 +199,7 @@ def test_currency_menu_item(window):
 def test_general_menu_item_shows_typed_dollars_plainly(window):
     window.model.set_cell(0, 0, "$1,234.50")
     window.view.select_range(0, 0, 0, 0)
-    window.format_actions["General"].trigger()
+    window.format_actions["Automatic"].trigger()
     assert window.model.display_text(0, 0) == "1234.5"
     assert window.edit_bar.text() == "$1,234.50"  # the typed text is kept
 
@@ -308,11 +314,117 @@ def test_currency_toolbar_button(window):
     from PySide6.QtTest import QTest
     buttons = toolbar_buttons(window)
     assert buttons[:2] == [window.autosum_button, window.fill_button]
-    assert [b.text() for b in buttons[2:]] == ["Notebook", "$", "B", "I", "DEG"]  # no decimal buttons
+    assert [b.text() for b in buttons[2:]] == ["Notebook", "$", "%", "", "", "123", "B", "I", "DEG"]
     currency = buttons[3]
-    assert currency.defaultAction() is window.format_actions["Currency"]  # same action as the menu
-    assert window.format_actions["Currency"].text() == "Currency  ($1,234.50)"  # menu text unchanged
+    assert currency is window.number_buttons["currency"]
     window.model.set_cell(0, 0, "1234.5")
     window.view.select_range(0, 0, 0, 0)
     QTest.mouseClick(currency, Qt.LeftButton)
     assert window.model.display_text(0, 0) == "$1,234.50"
+    assert window.format_actions["Currency"].isChecked()  # in the Number menu
+
+
+# --- Google Sheets' formats ---
+
+@pytest.mark.parametrize("kind, decimals, value, shown", [
+    ("percent", 2, 0.1012, "10.12%"), ("percent", 0, -0.256, "-26%"), ("percent", 1, 12.5, "1,250.0%"),
+    ("scientific", 2, 1012, "1.01E+03"), ("scientific", 2, -0.000123, "-1.23E-04"), ("scientific", 2, 0, "0.00E+00"),
+    ("scientific", 2, 9.996, "1.00E+01"), ("scientific", 0, 2.5e20, "3E+20"),
+    ("accounting", 2, -1000.12, "$ (1,000.12)"), ("accounting", 2, 1000.12, "$ 1,000.12 "),
+    ("accounting", 2, 0.001, "$ - "), ("financial", 2, -1000.12, "(1,000.12)"), ("financial", 2, 5, "5.00"),
+    ("currency", 0, 1000.5, "$1,001"), ("date", 0, 39717.66, "9/26/2008"), ("date", 0, 1, "12/31/1899"),
+    ("time", 0, 0.5, "12:00:00 PM"), ("time", 0, 0.0, "12:00:00 AM"), ("time", 0, 39717.6659722222, "3:59:00 PM"),
+    ("datetime", 0, 39717.25, "9/26/2008 06:00:00"), ("duration", 0, 1.000694444, "24:01:00"),
+    ("duration", 0, -0.5, "-12:00:00"), ("duration", 0, 3.75, "90:00:00"), ("date", 0, 1e9, "1000000000"),
+])
+def test_google_sheets_formats(kind, decimals, value, shown):
+    assert format_value(value, NumberFormat(kind, decimals)) == shown
+
+
+def test_menu_examples_are_what_the_formats_show():
+    from py_spread.numformat import MENU_FORMATS
+    samples = {"Number": 1000.12, "Percent": 0.1012, "Scientific": 1012, "Accounting": -1000.12,
+               "Financial": -1000.12, "Currency": 1000.12, "Currency rounded": 1000.12, "Date": 39717,
+               "Time": 0.6659722222, "Date time": 39717.6659722222, "Duration": 1.000694444}
+    for name, fmt, example in filter(None, MENU_FORMATS):
+        if example:
+            assert format_value(samples[name], fmt) == example, name
+
+
+@pytest.mark.parametrize("typed, value, fmt", [
+    ("10%", 0.1, NumberFormat("percent", 0, False)), ("12.5%", 0.125, NumberFormat("percent", 1, False)),
+    ("-3%", -0.03, NumberFormat("percent", 0, False)), ("1,200%", 12.0, NumberFormat("percent", 0, True)),
+    ("33.3%", 0.333, NumberFormat("percent", 1, False)),
+])
+def test_typed_percentages(typed, value, fmt):
+    assert parse_formatted(typed) == (value, fmt)
+
+
+@pytest.mark.parametrize("typed", ["%", "10 %", "$10%", "10%%", "1,2%"])
+def test_not_percentages(typed):
+    assert parse_formatted(typed) is None
+
+
+def test_typed_percentage_in_the_sheet(window):
+    model = window.model
+    model.set_cells({(0, 0): "12.5%", (1, 0): "=A1*2"})
+    assert model.value(0, 0) == 0.125 and model.display_text(0, 0) == "12.5%"  # as typed
+    assert model.display_text(1, 0) == "25.0%"  # a formula of it: shown as it is
+
+
+def test_plain_text(window):
+    model = window.model
+    model.set_cells({(0, 0): "007", (1, 0): "=A1+1", (2, 0): "=1+2"})
+    window.view.select_range(0, 0, 0, 0)
+    window.format_actions["Plain text"].trigger()
+    assert model.value(0, 0) == "007" and model.display_text(0, 0) == "007"  # text, as typed
+    assert model.data(model.index(0, 0), Qt.TextAlignmentRole) != Qt.AlignRight | Qt.AlignVCenter
+    assert isinstance(model.value(1, 0), CellError)  # text + 1
+    window.view.select_range(2, 0, 2, 0)
+    window.format_actions["Plain text"].trigger()
+    assert model.value(2, 0) == 3.0  # formulas still work
+    window.undo_action.trigger()
+    window.undo_action.trigger()
+    assert model.value(0, 0) == 7.0  # a number again
+
+
+def test_dates_and_times_have_no_decimals_to_change(window):
+    model = window.model
+    model.set_cells({(0, 0): "39717.66", (1, 0): "0.1234"})
+    model.set_formats({(0, 0): NumberFormat("date", 0), (1, 0): NumberFormat("percent")}, "Formats")
+    window.view.select_range(0, 0, 1, 0)
+    window.format_actions["Increase Decimals"].trigger()
+    assert [model.display_text(r, 0) for r in range(2)] == ["9/26/2008", "12.340%"]
+
+
+def test_percent_and_decimal_toolbar_buttons(window):
+    from PySide6.QtTest import QTest
+    model = window.model
+    model.set_cell(0, 0, "0.1234")
+    window.view.select_range(0, 0, 0, 0)
+    QTest.mouseClick(window.number_buttons["percent"], Qt.LeftButton)
+    assert model.display_text(0, 0) == "12.34%" and window.format_actions["Percent"].isChecked()
+    QTest.mouseClick(window.number_buttons["fewer"], Qt.LeftButton)
+    assert model.display_text(0, 0) == "12.3%"
+    QTest.mouseClick(window.number_buttons["more"], Qt.LeftButton)
+    QTest.mouseClick(window.number_buttons["more"], Qt.LeftButton)
+    assert model.display_text(0, 0) == "12.340%"
+    assert window.number_buttons["formats"].menu() is window.number_menu  # 123: all of them
+    assert not window.number_buttons["fewer"].icon().isNull() and window.number_buttons["fewer"].toolTip() == (
+        "Decrease decimal places")
+
+
+def test_number_menu_checks_the_current_cells_format(window):
+    model = window.model
+    model.set_cells({(0, 0): "$5.00", (1, 0): "5", (2, 0): "1,234.567"})
+    model.set_formats({(1, 0): NumberFormat("currency", 0)}, "Currency rounded")
+    for row, name in ((0, "Currency"), (1, "Currency rounded"), (2, "Number"), (5, "Automatic")):
+        window.view.setCurrentIndex(model.index(row, 0))
+        assert window.format_actions[name].isChecked(), name
+
+
+@pytest.mark.parametrize("fmt", [NumberFormat(kind) for kind in
+                                 ("text", "percent", "scientific", "accounting", "financial", "date", "time",
+                                  "datetime", "duration")])
+def test_new_formats_saved(fmt):
+    assert from_json(to_json(fmt)) == fmt

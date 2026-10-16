@@ -683,7 +683,7 @@ class SheetModel(QAbstractTableModel):
                     candidates = sorted(k for k in self._cells if _in_range(k, node[1:]))
                 for candidate in candidates:
                     fmt = self._shown_format(candidate, seen)
-                    if fmt is not None and fmt.kind != "general":
+                    if fmt is not None and fmt.kind not in ("general", "text"):
                         inferred = fmt
                         break
                 if inferred:
@@ -702,7 +702,8 @@ class SheetModel(QAbstractTableModel):
         if key in self._formula_keys:
             self._compute(key)
         else:
-            number = parse_number(raw)
+            fmt = self._formats.get(key)
+            number = None if fmt is not None and fmt.kind == "text" else parse_number(raw)  # Plain text: text
             self._values[key] = raw if number is None else number
         return self._values[key]
 

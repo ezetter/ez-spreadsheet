@@ -4,8 +4,20 @@ import dataclasses
 import os
 import uuid
 
-from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QStandardPaths, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication, QKeySequence, QPen, QUndoCommand
+from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QPointF, QSize, QStandardPaths, Qt, Signal
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QFont,
+    QGuiApplication,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+    QUndoCommand,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -73,7 +85,7 @@ from .recent import add_recent_file, clear_recent_files, menu_labels, recent_fil
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
-from .numformat import GENERAL, MAX_DECIMALS, NumberFormat, format_number
+from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number
 from .textstyle import PLAIN
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
@@ -766,15 +778,23 @@ class MainWindow(QMainWindow):
     def _build_format_menu(self):
         menu = self.menuBar().addMenu("Format")
         self.format_actions = {}
-        for name, fmt, example in (
-            ("General", GENERAL, "1234.5"),
-            ("Number", NumberFormat("number"), "1,234.50"),
-            ("Currency", NumberFormat("currency"), "$1,234.50"),
-        ):
-            action = QAction(f"{name}  ({example})", self)
+        # Format > Number, as Google Sheets has it; the toolbar's 123 button shows it too. The current
+        # cell's format is checked.
+        self.number_menu = menu.addMenu("Number")
+        group = QActionGroup(self)
+        self.number_formats = {}  # name -> format
+        for entry in MENU_FORMATS:
+            if entry is None:
+                self.number_menu.addSeparator()
+                continue
+            name, fmt, example = entry
+            action = QAction(f"{name}  ({example})" if example else name, self)
+            action.setCheckable(True)
+            group.addAction(action)
             action.triggered.connect(lambda _checked=False, n=name, f=fmt: self._set_number_format(n, f))
-            menu.addAction(action)
+            self.number_menu.addAction(action)
             self.format_actions[name] = action
+            self.number_formats[name] = fmt
         menu.addSeparator()
         for name, delta in (("Increase Decimals", 1), ("Decrease Decimals", -1)):
             action = QAction(name, self)
@@ -936,6 +956,7 @@ class MainWindow(QMainWindow):
         style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
         self.format_actions["Bold"].setChecked(style.bold)
         self.format_actions["Italic"].setChecked(style.italic)
+        self._show_current_format()
 
     def _selected_cells(self) -> list[tuple[int, int]]:
         indexes = self.view.selectedIndexes() or [self.view.currentIndex()]
@@ -944,6 +965,16 @@ class MainWindow(QMainWindow):
     def _set_number_format(self, name: str, fmt: NumberFormat):
         self._commit_pending_edit()
         self.model.set_formats({key: fmt for key in self._selected_cells()}, f"{name} Format")
+        self._show_current_format()
+
+    def _show_current_format(self, *_args) -> None:
+        """Check the Number menu's format for the current cell's: the one it
+        is, or else the one of its kind (Number, for one with 3 decimals)."""
+        current = self.view.currentIndex()
+        fmt = (self.model.number_format(current.row(), current.column()) if current.isValid() else None) or GENERAL
+        names = [name for name, known in self.number_formats.items() if known == fmt]
+        names = names or [name for name, known in self.number_formats.items() if known.kind == fmt.kind]
+        self.format_actions[names[0] if names else "Automatic"].setChecked(True)
 
     def _change_decimals(self, name: str, delta: int):
         """Show one more or one fewer decimal place in each selected number,
@@ -952,9 +983,9 @@ class MainWindow(QMainWindow):
         formats = {}
         for row, col in self._selected_cells():
             value = self.model.value(row, col)
-            if not isinstance(value, float):
-                continue
             shown = self.model.number_format(row, col)
+            if not isinstance(value, float) or shown is not None and shown.kind in DATE_KINDS:
+                continue  # (dates and times have no decimals to show)
             if shown is None or shown.kind == "general":
                 text = format_number(value)
                 decimals = len(text.split(".")[1]) if "." in text and "e" not in text else 0
@@ -1014,18 +1045,47 @@ class MainWindow(QMainWindow):
         self.statusBar()  # create it now so the window doesn't resize on the first message
 
     def _add_currency_button(self, toolbar):
-        """A toolbar button for the Format menu's Currency action; the button
-        shows the action's icon text."""
+        """Number format buttons, as Google Sheets has them: $ (Currency), %
+        (Percent), fewer and more decimals (drawn .0← and .00→), and 123,
+        showing the Format menu's Number menu of them all."""
         toolbar.addSeparator()
-        action = self.format_actions["Currency"]
-        action.setIconText("$")
-        action.setToolTip("Currency format ($1,234.50)")
-        toolbar.addAction(action)
-        button = toolbar.widgetForAction(action)
-        font = button.font()
-        font.setPointSize(15)  # closer to the Σ button; the menu item keeps normal text
-        button.setFont(font)
+        self.number_buttons = {}
+        for key, label, tip, action_name in (
+                ("currency", "$", "Format as currency ($1,000.12)", "Currency"),
+                ("percent", "%", "Format as percent (10.12%)", "Percent"),
+                ("fewer", "", "Decrease decimal places", "Decrease Decimals"),
+                ("more", "", "Increase decimal places", "Increase Decimals"),
+                ("formats", "123", "More formats", None)):
+            button = QToolButton()
+            button.setText(label)
+            button.setToolTip(tip)
+            font = button.font()
+            font.setPointSize(15)  # closer to the Σ button; the menu items keep normal text
+            button.setFont(font)
+            if action_name is not None:
+                action = self.format_actions[action_name]
+                button.clicked.connect(lambda _checked=False, a=action: a.trigger())
+            else:  # an arrow beside it, as Notebook has, but the whole button shows the menu
+                button.setMenu(self.number_menu)
+                button.setPopupMode(QToolButton.MenuButtonPopup)
+                button.clicked.connect(lambda _checked=False, b=button: b.showMenu())
+            toolbar.addWidget(button)
+            self.number_buttons[key] = button
+        self._paint_decimal_icons()
         self._add_style_buttons(toolbar)
+
+    def _paint_decimal_icons(self) -> None:
+        """The fewer and more decimals buttons' icons, in the toolbar's text color."""
+        color = self.palette().color(QPalette.ButtonText)
+        for key, digits, left in (("fewer", ".0", True), ("more", ".00", False)):
+            button = self.number_buttons[key]
+            button.setIcon(_decimals_icon(digits, left, color, max(self.devicePixelRatioF(), 2.0)))
+            button.setIconSize(QSize(32, 28))
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.PaletteChange and getattr(self, "number_buttons", None):
+            self._paint_decimal_icons()  # light to dark, or back
 
     def _add_style_buttons(self, toolbar):
         """B and I toolbar buttons for the Format menu's Bold and Italic, drawn
@@ -2087,3 +2147,31 @@ def _unread_note(unread, name: str) -> str:
     still = "it still says" if len(unread) == 1 else "they still say"
     return (f" {_cells(len(unread))} using {name} couldn't be read as Python (such as one with a %magic), "
             f"so {still} {name}.")
+
+
+def _decimals_icon(digits: str, left: bool, color, ratio: float = 2.0) -> QIcon:
+    """Google Sheets' icon for fewer (.0 with ← under it) or more (.00 with
+    →) decimal places."""
+    width, height = 32, 28
+    pixmap = QPixmap(round(width * ratio), round(height * ratio))
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    font = QFont()
+    font.setPixelSize(18)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(color)
+    painter.drawText(0, -2, width, 19, Qt.AlignHCenter | Qt.AlignTop, digits)
+    pen = QPen(color, 2.0)
+    pen.setCapStyle(Qt.RoundCap)
+    painter.setPen(pen)
+    y, start, end = 23.5, width / 2 - 2, width / 2 + 11  # under the digits' right side
+    tip, tail = (start, end) if left else (end, start)
+    painter.drawLine(QPointF(tail, y), QPointF(tip, y))
+    head = 4.0 if left else -4.0
+    painter.drawLine(QPointF(tip, y), QPointF(tip + head, y - 3.5))
+    painter.drawLine(QPointF(tip, y), QPointF(tip + head, y + 3.5))
+    painter.end()
+    return QIcon(pixmap)

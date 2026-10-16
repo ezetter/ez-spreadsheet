@@ -85,19 +85,38 @@ dialogs, the notebook (code colors included), and the Ask Claude window.
 ## Number formats
 
 Numbers can be typed with a dollar sign and thousands separators: `$1,234.50`,
-`1,234`, `-$5`. They're numbers (formulas and AutoSum use them) and are shown
-just as typed. Commas must separate groups of three digits, so `1,5` stays
-text rather than being read as 15.
+`1,234`, `-$5`; or as a percentage: `12.5%` is 0.125. They're numbers
+(formulas and AutoSum use them) and are shown just as typed. Commas must
+separate groups of three digits, so `1,5` stays text rather than being read
+as 15.
 
-The Format menu gives the selected cells an explicit format:
+Format > Number gives the selected cells an explicit format, with the same
+choices as Google Sheets (the current cell's format is checked):
 
-- **General** shows numbers plainly (`1234.5`).
-- **Number** shows two decimals with thousands separators (`1,234.50`).
-- **Currency** adds a dollar sign (`$1,234.50`).
-- **Increase Decimals** and **Decrease Decimals** show one more or one fewer
-  decimal place, starting from how each number is shown now.
+- **Automatic** shows numbers plainly (`1234.5`), or as typed.
+- **Plain text** makes what's typed text, even a number: `007` stays `007`,
+  left-aligned, and formulas using it treat it as text. Formulas in the cell
+  still work.
+- **Number** shows two decimals with thousands separators (`1,000.12`).
+- **Percent** shows the number times 100, with a percent sign (`10.12%`).
+- **Scientific** shows one digit, decimals, and a power of ten (`1.01E+03`).
+- **Accounting** sets the dollar sign apart and puts negatives in
+  parentheses (`$ (1,000.12)`), with a space after positives so the digits
+  line up; zero shows as `$ -`.
+- **Financial** puts negatives in parentheses (`(1,000.12)`).
+- **Currency** adds a dollar sign (`$1,000.12`); **Currency rounded** shows
+  no decimals (`$1,000`).
+- **Date**, **Time**, and **Date time** show the number as days counted from
+  12/30/1899, as spreadsheets count them, so 39717.66 is `9/26/2008`,
+  `3:50:24 PM`, or `9/26/2008 15:50:24`. **Duration** shows it as a length
+  of time in hours, minutes, and seconds: 1.000694 is `24:01:00`.
+- **Increase Decimals** and **Decrease Decimals**, in the Format menu, show
+  one more or one fewer decimal place, starting from how each number is
+  shown now. Dates, times, and durations have none to change.
 
-Currency also has a toolbar button, `$`.
+The toolbar has Google Sheets' buttons for them: **$** (Currency), **%**
+(Percent), **.0←** and **.00→** (fewer and more decimal places), and
+**123**, whose menu is Format > Number.
 
 A cell keeps its format when you type a new value into it, so a Currency cell
 shows `1300` as `$1,300.00`. Values are rounded only for display, with halves
