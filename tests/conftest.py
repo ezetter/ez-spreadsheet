@@ -45,6 +45,8 @@ class Dialogs:
         self.dataframe_answer = None
         self.dataframe_prompts = []  # (the DataFrames offered, the one it started at, why there's no data)
         self.chart_frame_prompts = []  # the notebook's DataFrames (ChartFrames) the Chart dialog offered
+        self.custom_format_answer = None  # the Custom number format dialog's pattern; None cancels
+        self.custom_format_prompts = []  # (the pattern it started with, its sample) each time
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
 
 
@@ -92,6 +94,12 @@ def dialogs(monkeypatch):
         return which, typed or frames[which].name, update
 
     monkeypatch.setattr(MainWindow, "_ask_dataframe", ask_dataframe)
+
+    def ask_custom_format(window, pattern, sample):
+        dialogs.custom_format_prompts.append((pattern, sample))
+        return dialogs.custom_format_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_custom_format", ask_custom_format)
 
     def new_chart(columns, problem, frame, chart_frames, answer):
         """A new chart's choices, as the dialog makes them: of the cells, or a DataFrame named in it."""

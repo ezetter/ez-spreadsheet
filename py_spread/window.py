@@ -85,12 +85,14 @@ from .recent import add_recent_file, clear_recent_files, menu_labels, recent_fil
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
-from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number
+from .custom_format_dialog import CustomFormatDialog
+from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
 from .textstyle import PLAIN
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
 FILE_FILTER = f"EzSheet Sheets (*{EXTENSION})"
+CUSTOM_FORMAT = "Custom number format…"  # the Number menu's last item
 COLUMN_WIDTH = 100  # default sizes at 100% zoom
 ROW_HEIGHT = 24
 CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
@@ -795,6 +797,13 @@ class MainWindow(QMainWindow):
             self.number_menu.addAction(action)
             self.format_actions[name] = action
             self.number_formats[name] = fmt
+        self.number_menu.addSeparator()
+        action = QAction(CUSTOM_FORMAT, self)
+        action.setCheckable(True)
+        group.addAction(action)
+        action.triggered.connect(lambda _checked=False: self._custom_number_format())
+        self.number_menu.addAction(action)
+        self.format_actions[CUSTOM_FORMAT] = action
         menu.addSeparator()
         for name, delta in (("Increase Decimals", 1), ("Decrease Decimals", -1)):
             action = QAction(name, self)
@@ -967,11 +976,34 @@ class MainWindow(QMainWindow):
         self.model.set_formats({key: fmt for key in self._selected_cells()}, f"{name} Format")
         self._show_current_format()
 
+    def _custom_number_format(self) -> None:
+        """Format > Number > Custom number format…: a pattern for the selected
+        cells, starting at the current cell's format, as one."""
+        self._commit_pending_edit()
+        current = self.view.currentIndex()
+        fmt = self.model.number_format(current.row(), current.column()) if current.isValid() else None
+        value = self.model.value(current.row(), current.column()) if current.isValid() else None
+        pattern = self._ask_custom_format(pattern_of(fmt), value if isinstance(value, float) else 1234.5678)
+        if pattern is None:
+            self._show_current_format()  # (the menu checked it)
+            return
+        self.model.set_formats({key: NumberFormat("custom", pattern=pattern) for key in self._selected_cells()},
+                               "Custom Number Format")
+        self._show_current_format()
+
+    def _ask_custom_format(self, pattern: str, sample: float) -> str | None:
+        """The Custom number format dialog: the pattern, or None if cancelled."""
+        dialog = CustomFormatDialog(self, pattern, sample)
+        return dialog.pattern() if dialog.exec() == QDialog.Accepted else None
+
     def _show_current_format(self, *_args) -> None:
         """Check the Number menu's format for the current cell's: the one it
         is, or else the one of its kind (Number, for one with 3 decimals)."""
         current = self.view.currentIndex()
         fmt = (self.model.number_format(current.row(), current.column()) if current.isValid() else None) or GENERAL
+        if fmt.kind == "custom":
+            self.format_actions[CUSTOM_FORMAT].setChecked(True)
+            return
         names = [name for name, known in self.number_formats.items() if known == fmt]
         names = names or [name for name, known in self.number_formats.items() if known.kind == fmt.kind]
         self.format_actions[names[0] if names else "Automatic"].setChecked(True)
@@ -984,8 +1016,8 @@ class MainWindow(QMainWindow):
         for row, col in self._selected_cells():
             value = self.model.value(row, col)
             shown = self.model.number_format(row, col)
-            if not isinstance(value, float) or shown is not None and shown.kind in DATE_KINDS:
-                continue  # (dates and times have no decimals to show)
+            if not isinstance(value, float) or shown is not None and shown.kind in (*DATE_KINDS, "custom"):
+                continue  # (dates and times have no decimals to show; a custom format's are in its pattern)
             if shown is None or shown.kind == "general":
                 text = format_number(value)
                 decimals = len(text.split(".")[1]) if "." in text and "e" not in text else 0

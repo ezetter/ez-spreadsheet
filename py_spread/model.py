@@ -2,7 +2,7 @@
 a Qt table model, plus the unit its trig functions take angles in."""
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QFont, QUndoCommand, QUndoStack
+from PySide6.QtGui import QColor, QFont, QUndoCommand, QUndoStack
 
 from .formula import (
     CIRCULAR_ERROR,
@@ -20,6 +20,7 @@ from .formula import (
 )
 from .functions import DEGREES
 from . import names
+from .custom_format import COLORS
 from .numformat import DATE_KINDS, NumberFormat, format_value, parse_formatted
 from .textstyle import PLAIN, CellStyle
 from .references import cell_name, column_name
@@ -140,6 +141,13 @@ class SheetModel(QAbstractTableModel):
             if isinstance(self.value(row, col), float):
                 return Qt.AlignRight | Qt.AlignVCenter
             return Qt.AlignLeft | Qt.AlignVCenter
+        if role == Qt.ForegroundRole:  # a custom format's color: [Red]
+            fmt = self._formats.get((row, col))
+            if fmt is None or fmt.kind != "custom":
+                return None
+            value = self.value(row, col)
+            color = fmt.color(value) if isinstance(value, (float, str)) else None
+            return QColor(COLORS[color]) if color else None
         return None
 
     def setData(self, index, value, role=Qt.EditRole):
@@ -644,7 +652,9 @@ class SheetModel(QAbstractTableModel):
         raw = self.get_cell(row, col)
         value = self.value(row, col)
         if not isinstance(value, float):
-            return str(value) if is_formula(raw) else raw
+            text = str(value) if is_formula(raw) else raw
+            fmt = self._formats.get((row, col))
+            return fmt.text(text) if fmt is not None and isinstance(value, str) and value else text
         fmt = self._formats.get((row, col))
         if fmt is None and not is_formula(raw):
             return raw  # typed numbers show as typed, e.g. $1,234.50

@@ -17,6 +17,8 @@ decides how its number is shown:
 - date, time, datetime, duration: the number as days, counted from
   12/30/1899 as spreadsheets do (39717.66 is 9/26/2008 3:50:24 PM), or as
   a length of time (1.0007 days is 24:01:00)
+- custom:     a pattern, as Google Sheets writes them: #,##0.00;[Red](#,##0.00)
+  (see custom_format)
 """
 
 import datetime
@@ -24,8 +26,10 @@ import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from .custom_format import format_custom, pattern_problem
+
 KINDS = ("general", "text", "number", "percent", "scientific", "accounting", "financial", "currency",
-         "date", "time", "datetime", "duration")
+         "date", "time", "datetime", "duration", "custom")
 DATE_KINDS = ("date", "time", "datetime", "duration")  # no decimals to show more or fewer of
 MAX_DECIMALS = 10
 _EPOCH = datetime.datetime(1899, 12, 30)  # day 0, as spreadsheets count them
@@ -45,6 +49,17 @@ class NumberFormat:
     kind: str  # one of KINDS
     decimals: int = 2
     thousands: bool = True
+    pattern: str = ""  # a custom format's
+
+    def color(self, value) -> str | None:
+        """The color a custom format's section gives the value ([Red]), if any."""
+        if self.kind != "custom" or value is None:
+            return None
+        return format_custom(value, self.pattern)[1]
+
+    def text(self, text: str) -> str:
+        """Text shown in this format: as it is, unless a custom format has a text section ("Item: "@)."""
+        return format_custom(text, self.pattern)[0] if self.kind == "custom" else text
 
 
 GENERAL = NumberFormat("general")
@@ -160,6 +175,8 @@ def format_value(value: float, fmt: NumberFormat) -> str:
     kind = fmt.kind
     if kind in ("general", "text"):
         return format_number(value)
+    if kind == "custom":
+        return format_custom(value, fmt.pattern)[0]
     if kind == "scientific":
         return _scientific(value, fmt.decimals)
     if kind in DATE_KINDS:
@@ -222,13 +239,35 @@ def _date_time(value: float, kind: str) -> str:
 
 
 def to_json(fmt: NumberFormat) -> dict:
+    if fmt.kind == "custom":
+        return {"kind": "custom", "pattern": fmt.pattern}
     return {"kind": fmt.kind, "decimals": fmt.decimals, "thousands": fmt.thousands}
+
+
+def pattern_of(fmt: NumberFormat | None) -> str:
+    """A custom pattern that shows numbers as the format does (as the
+    Custom number format dialog starts), or "" for general."""
+    if fmt is None or fmt.kind in ("general", "text"):
+        return ""
+    if fmt.kind == "custom":
+        return fmt.pattern
+    digits = ("#,##0" if fmt.thousands else "0") + ("." + "0" * fmt.decimals if fmt.decimals else "")
+    return {
+        "number": digits, "percent": digits + "%", "currency": "$" + digits,
+        "scientific": "0" + ("." + "0" * fmt.decimals if fmt.decimals else "") + "E+00",
+        "accounting": f'"$ "{digits}_);"$ "({digits});"$ -"_)', "financial": f"{digits};({digits})",
+        "date": "m/d/yyyy", "time": "h:mm:ss AM/PM", "datetime": "m/d/yyyy hh:mm:ss", "duration": "[h]:mm:ss",
+    }[fmt.kind]
 
 
 def from_json(data) -> NumberFormat | None:
     """A format read from a file, or None if it's malformed."""
     if not isinstance(data, dict) or data.get("kind") not in KINDS:
         return None
+    if data["kind"] == "custom":
+        pattern = data.get("pattern")
+        return NumberFormat("custom", pattern=pattern) if isinstance(pattern, str) and not pattern_problem(
+            pattern) else None
     decimals = data.get("decimals", 2)
     thousands = data.get("thousands", True)
     if (not isinstance(decimals, int) or isinstance(decimals, bool)

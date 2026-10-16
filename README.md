@@ -127,9 +127,39 @@ choices as Google Sheets (the current cell's format is checked):
   12/30/1899, as spreadsheets count them, so 39717.66 is `9/26/2008`,
   `3:50:24 PM`, or `9/26/2008 15:50:24`. **Duration** shows it as a length
   of time in hours, minutes, and seconds: 1.000694 is `24:01:00`.
+- **Custom number format…** takes a pattern, as Google Sheets (and Excel)
+  write them, in a dialog that starts with the current cell's format as one,
+  previews it (with the current cell's number, its negative, zero, and some
+  text, in their colors), and lists common ones to start from. A pattern has
+  up to four sections, separated by semicolons: positive; negative; zero;
+  text. With one, negatives get a minus sign; with two, the first is for
+  zero too.
+  - `0` is a digit, shown even as a leading or trailing zero; `#` one shown
+    only if needed; `?` one shown as a space if not. `.` is the decimal
+    point; a comma between digits separates thousands, and one after the
+    last digit divides by a thousand (`#,##0.0,"K"` shows 1234567 as
+    `1,234.6K`). `%` multiplies by 100, and `E+00` shows scientific
+    notation (`##0.0E+0` in powers of three). Characters among the digits
+    stay in place: `000-00-0000`, `(###) ###-####`.
+  - `"text"` and `\x` show text; `_x` a space; `[$€]` a currency sign; `$ -
+    + ( ) / :` and spaces show as they are; `*x` is ignored; `General` shows
+    the number plainly.
+  - `[Red]` (or Black, White, Green, Blue, Yellow, Magenta, Cyan) colors a
+    section's text; `[>1000]` (or `<`, `<=`, `>=`, `=`, `<>`) makes a
+    section's choice a condition: `[>=1000]#,##0,"K";0`.
+  - Dates and times: `d dd ddd dddd` (26, 26, Fri, Friday), `m mm mmm mmmm
+    mmmmm` (9, 09, Sep, September, S), `yy yyyy`, `h hh`, `m mm` after an
+    hour or before seconds (minutes), `s ss` with `.0`, `.00`, or `.000`,
+    `AM/PM` or `A/P` for a 12-hour clock, and `[h]`, `[m]`, `[s]` for
+    elapsed time beyond 24 hours (`[h]:mm`).
+  - `@` is a text value, in the text section: `"Item: "@`.
+
+  Fractions (`# ?/?`) aren't supported. A pattern that can't be read says why
+  in the dialog, and OK is unavailable until it can be.
 - **Increase Decimals** and **Decrease Decimals**, in the Format menu, show
   one more or one fewer decimal place, starting from how each number is
-  shown now. Dates, times, and durations have none to change.
+  shown now. Dates, times, and durations have none to change, and a custom
+  format's are in its pattern.
 
 The toolbar has Google Sheets' buttons for them: **$** (Currency), **%**
 (Percent), **.0←** and **.00→** (fewer and more decimal places), and

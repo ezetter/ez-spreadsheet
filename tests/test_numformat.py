@@ -184,7 +184,7 @@ def test_format_menu(window):
         "Automatic", "Plain text", "Number  (1,000.12)", "Percent  (10.12%)", "Scientific  (1.01E+03)",
         "Accounting  ($ (1,000.12))", "Financial  ((1,000.12))", "Currency  ($1,000.12)",
         "Currency rounded  ($1,000)", "Date  (9/26/2008)", "Time  (3:59:00 PM)",
-        "Date time  (9/26/2008 15:59:00)", "Duration  (24:01:00)"]
+        "Date time  (9/26/2008 15:59:00)", "Duration  (24:01:00)", "Custom number format…"]
 
 
 def test_currency_menu_item(window):
