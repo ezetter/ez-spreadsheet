@@ -428,3 +428,39 @@ def test_number_menu_checks_the_current_cells_format(window):
                                   "datetime", "duration")])
 def test_new_formats_saved(fmt):
     assert from_json(to_json(fmt)) == fmt
+
+
+# --- Typed dates and times ---
+
+@pytest.mark.parametrize("typed, value, kind", [
+    ("9/26/2008", 39717, "date"), ("9/26/08", 39717, "date"), ("2008-09-26", 39717, "date"),
+    ("1/1/29", 47119, "date"), ("1/1/30", 10959, "date"), ("12/31/1899", 1, "date"), ("2/29/2024", 45351, "date"),
+    ("3:59 PM", 0.6659722222222222, "time"), ("12:00 AM", 0, "time"), ("12:30 pm", 0.5208333333333334, "time"),
+    ("15:59:30", 0.6663194444444445, "time"), ("9/26/2008 15:59", 39717.665972222225, "datetime"),
+    ("9/26/2008 3:59 PM", 39717.665972222225, "datetime"), ("2008-09-26T10:00", 39717.416666666664, "datetime"),
+])
+def test_typed_dates_and_times(typed, value, kind):
+    parsed = parse_formatted(typed)
+    assert parsed == (pytest.approx(value), NumberFormat(kind, 0))
+
+
+@pytest.mark.parametrize("typed", ["2/30/2024", "13/1/2024", "1/2", "9/26/2008x", "25:00", "13:00 PM", "0:00 AM",
+                                   "12:60", "9/26/200815:59", "1:2", "2008-13-01"])
+def test_not_dates_or_times(typed):
+    assert parse_formatted(typed) is None
+
+
+def test_typed_dates_in_the_sheet(window):
+    model = window.model
+    model.set_cells({(0, 0): "9/26/2008", (1, 0): "10/3/2008", (2, 0): "=A1+7", (3, 0): "=A2-A1",
+                     (4, 0): "=(A2-A1)*24", (5, 0): "3:59 PM", (6, 0): "=A6+0.5", (7, 0): "$5", (8, 0): "=A8-A8"})
+    assert model.value(0, 0) == 39717 and model.display_text(0, 0) == "9/26/2008"  # a number, shown as typed
+    assert [model.display_text(r, 0) for r in range(2, 9)] == [
+        "10/3/2008",  # a date and days: a date
+        "7", "168",  # one date from another: days, not a date
+        "3:59 PM", "3:59:00 AM", "$5", "$0"]
+    assert model.data(model.index(0, 0), Qt.TextAlignmentRole) == Qt.AlignRight | Qt.AlignVCenter
+    window.view.setCurrentIndex(model.index(0, 0))
+    assert window.format_actions["Date"].isChecked()
+    model.set_formats({(0, 0): NumberFormat("number", 0, False)}, "Number")
+    assert model.display_text(0, 0) == "39717"  # its day number

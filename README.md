@@ -90,6 +90,23 @@ Numbers can be typed with a dollar sign and thousands separators: `$1,234.50`,
 separate groups of three digits, so `1,5` stays text rather than being read
 as 15.
 
+Dates and times can be typed too, and are numbers the same way: the number of
+days from 12/30/1899, as spreadsheets count them, with the time of day as a
+fraction of one.
+
+- Dates: `9/26/2008`, `9/26/08`, or `2008-09-26`. A two-digit year below 30
+  is in the 2000s (`1/1/29` is 2029), others in the 1900s (`1/1/30` is
+  1930), as Google Sheets takes them. A date that doesn't exist, such as
+  `2/30/2024`, stays text, and so does a month and day without a year
+  (`1/2`), so fractions aren't taken for dates.
+- Times: `15:59`, `15:59:30`, `3:59 PM` (`12:00 AM` is midnight).
+- Both: `9/26/2008 15:59`, `9/26/2008 3:59 PM`, or `2008-09-26T15:59`.
+
+They show as typed, and their cells count as Date, Time, or Date time. So
+`=A1+7` of a date is the date a week later; `=B1-A1` of two dates is the days
+between them, a plain number (`=(B1-A1)*24` the hours), not a date. Fill
+continues them: `1/30/2024, 1/31/2024` continues `2/1/2024, 2/2/2024`.
+
 Format > Number gives the selected cells an explicit format, with the same
 choices as Google Sheets (the current cell's format is checked):
 

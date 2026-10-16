@@ -733,3 +733,12 @@ def test_num_cells_is_one_undo_step(window):
 
 def selected(window):
     return sorted((i.row(), i.column()) for i in window.view.selectedIndexes())
+
+
+def test_sequence_of_typed_dates(window):
+    window.model.set_cell(0, 0, "1/30/2024")
+    window.model.set_cell(1, 0, "1/31/2024")
+    select(window, 0, 0, 3, 0)
+    fill(window, "sequence")
+    assert column(window, 0, range(4)) == ["1/30/2024", "1/31/2024", "2/1/2024", "2/2/2024"]
+    assert window.model.value(3, 0) == window.model.value(0, 0) + 3

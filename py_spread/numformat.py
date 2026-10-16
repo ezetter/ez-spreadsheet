@@ -1,8 +1,9 @@
 """Number formats: how a numeric value is shown, as Google Sheets has them.
 
 Numbers can be typed with a dollar sign and thousands separators ($1,234.50,
-1,234, -$5), or as a percentage (12.5% is 0.125). They count as numbers and
-are shown as typed. A cell can also be given an explicit format, which then
+1,234, -$5), or as a percentage (12.5% is 0.125), or as a date or time
+(9/26/2008, 2008-09-26, 3:59 PM, 9/26/2008 15:59), which is the number of
+days from 12/30/1899. They count as numbers and are shown as typed. A cell can also be given an explicit format, which then
 decides how its number is shown:
 
 - general:    as plain as possible (1234.5); the menus call it Automatic
@@ -72,6 +73,10 @@ MENU_FORMATS = (
 )
 
 # A number typed as a percentage: 12.5%, -3%, 1,200%.
+# A date (9/26/2008, 9/26/08, 2008-09-26), a time (15:59, 3:59 PM, 15:59:30), or both.
+_DATE = r"(?:(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<year>\d{4}|\d{2})|(?P<iso_year>\d{4})-(?P<iso_month>\d{1,2})-(?P<iso_day>\d{1,2}))"
+_TIME = r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::(?P<second>\d{2}(?:\.\d+)?))?(?:\s*(?P<half>[AaPp][Mm]))?"
+_DATE_TIMES = (re.compile(rf"{_DATE}(?:[ T]+{_TIME})?"), re.compile(_TIME))
 _PERCENT = re.compile(r"(?P<sign>[+-]?)(?P<whole>\d{1,3}(?:,\d{3})+|\d+)?(?:\.(?P<fraction>\d*))?%")
 
 
@@ -79,6 +84,9 @@ def parse_formatted(text: str) -> tuple[float, NumberFormat] | None:
     """The value and implied format of a number typed with a dollar sign or
     thousands separators, or as a percentage, or None for anything else
     (plain numbers included)."""
+    when = parse_date_time(text)
+    if when is not None:
+        return when
     percent = _PERCENT.fullmatch(text.strip())
     if percent:
         whole, fraction = percent["whole"], percent["fraction"]
@@ -101,6 +109,44 @@ def parse_formatted(text: str) -> tuple[float, NumberFormat] | None:
     value = float((whole or "0").replace(",", "") + "." + (fraction or "0"))
     fmt = NumberFormat("currency" if has_dollar else "number", len(fraction or ""), has_commas)
     return (-value if negative else value), fmt
+
+
+def parse_date_time(text: str) -> tuple[float, NumberFormat] | None:
+    """The day number (days from 12/30/1899, with the time of day as a
+    fraction) and the Date, Time, or Date time format of a typed date, time,
+    or both, or None if it isn't one (or isn't a real date: 2/30/2024).
+    Two-digit years are 2000-2029 below 30, else 1930-1999, as Google
+    Sheets takes them."""
+    match = next(filter(None, (pattern.fullmatch(text.strip()) for pattern in _DATE_TIMES)), None)
+    if not match:
+        return None
+    groups = match.groupdict()
+    days = 0
+    has_date = groups.get("year") is not None or groups.get("iso_year") is not None
+    if has_date:
+        if match["year"] is not None:
+            year, month, day = int(match["year"]), int(match["month"]), int(match["day"])
+            if len(match["year"]) == 2:
+                year += 2000 if year < 30 else 1900
+        else:
+            year, month, day = int(match["iso_year"]), int(match["iso_month"]), int(match["iso_day"])
+        try:
+            days = (datetime.datetime(year, month, day) - _EPOCH).days
+        except ValueError:
+            return None
+    has_time = match["hour"] is not None
+    if has_time:
+        hour, minute = int(match["hour"]), int(match["minute"])
+        second = float(match["second"] or 0)
+        if match["half"]:  # 12 AM is midnight, 12 PM noon
+            if not 1 <= hour <= 12:
+                return None
+            hour = hour % 12 + (12 if match["half"].lower() == "pm" else 0)
+        if hour > 23 or minute > 59 or second >= 60:
+            return None
+        days += (hour * 3600 + minute * 60 + second) / 86400
+    kind = "datetime" if has_date and has_time else "date" if has_date else "time"
+    return float(days), NumberFormat(kind, 0)
 
 
 def format_number(value: float) -> str:

@@ -20,7 +20,7 @@ from .formula import (
 )
 from .functions import DEGREES
 from . import names
-from .numformat import NumberFormat, format_value, parse_formatted
+from .numformat import DATE_KINDS, NumberFormat, format_value, parse_formatted
 from .textstyle import PLAIN, CellStyle
 from .references import cell_name, column_name
 from .storage import SheetData
@@ -675,7 +675,7 @@ class SheetModel(QAbstractTableModel):
         seen.add(key)
         inferred = None
         ast = self._parse(key)[0]
-        if not isinstance(ast, CellError):
+        if not isinstance(ast, CellError) and not self._dates_subtracted(ast, seen):
             for node in ordered_references(ast):
                 if node[0] == "ref":
                     candidates = [node[1:]]
@@ -690,6 +690,29 @@ class SheetModel(QAbstractTableModel):
                     break
         self._inferred_formats[key] = inferred
         return inferred
+
+    def _dates_subtracted(self, ast, seen: set) -> bool:
+        """Whether a formula subtracts one date (or time) from another, as
+        =B1-A1 does: a number of days, not a date, so it isn't shown as one."""
+        def dated(node) -> bool:
+            for ref in ordered_references(node):
+                candidates = [ref[1:]] if ref[0] == "ref" else sorted(k for k in self._cells if _in_range(k, ref[1:]))
+                for candidate in candidates:
+                    fmt = self._shown_format(candidate, set(seen))
+                    if fmt is not None and fmt.kind not in ("general", "text"):
+                        return fmt.kind in DATE_KINDS
+            return False
+
+        stack = [ast]
+        while stack:
+            node = stack.pop()
+            if not isinstance(node, tuple) or not node:
+                continue
+            if node[0] == "bin" and node[1] == "-" and dated(node[2]) and dated(node[3]):
+                return True
+            stack.extend(part for part in node[1:] if isinstance(part, (tuple, list)))
+            stack.extend(item for part in node[1:] if isinstance(part, list) for item in part)
+        return False
 
     def value(self, row: int, col: int):
         """The computed value: None (empty), float, str, or CellError."""
