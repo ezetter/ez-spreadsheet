@@ -194,14 +194,18 @@ and the notebook's current cell makes one of them. Choosing one of them:
   else you added to the cell stays. It's unavailable if those cells have no
   data.
 - OK does either or both. Its cell runs again, so Python has its new name or
-  data. With new data, the cells after it that use it run again too, top to
-  bottom, so its charts are redrawn and your own cells using it
-  (`print(df.shape)`) see the new data: the same cells a rename changes, so
-  not ones past a cell setting its name afresh, or cells Python can't read
-  (such as ones with a `%magic`). A cell that uses only something worked
-  out from it (`total = df.Sales.sum()` in one cell, `print(total)` in
-  another) runs again only if it uses the DataFrame itself too. Each change
-  is an edit in its cell, so Cmd+Z there brings back the old code.
+  data. With new data, the cells after it that depend on it run again too,
+  top to bottom, so its charts are redrawn and your own cells see the new
+  data: cells using it (`print(df.shape)`), cells using what's worked out
+  from it (`total = df.Sales.sum()` in one cell, `print(total)` in another,
+  and so on down the line), and cells using what's changed with it
+  (`results.append(df.Sales.max())`, then `print(results)`). A name set
+  afresh, to something not from it (`total = 0`, or `df = pd.read_csv(...)`),
+  stops counting from there; and modules and Python's own names don't count
+  as changed with it (`pd.concat([df])` doesn't make every cell using `pd`
+  depend on it). Cells Python can't read, such as ones with a `%magic`,
+  don't run again. Each change is an edit in its cell, so Cmd+Z there brings
+  back the old code.
 - The data is a snapshot, written into the cell as Python, so it's readable,
   editable, and still works after a restart. Editing the sheet afterwards
   doesn't change the DataFrame; send the cells again for a fresh one. Each new

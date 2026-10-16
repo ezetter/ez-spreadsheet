@@ -46,7 +46,7 @@ from .graphs import (
     change_graph,
     find_frames,
     find_graphs,
-    frame_users,
+    dependent_cells,
     rename_frame,
     update_frame_code,
     used_names,
@@ -1195,8 +1195,8 @@ class MainWindow(QMainWindow):
         """Rename one of the notebook's DataFrames (in its cell, and the cells
         after it that use it), or write its data afresh from the sheet's
         cells (in its cell, keeping anything else there), or both. Its cell
-        runs again; with new data, so do the cells after it that use it (its
-        charts among them). Returns its cell's id, or None if there was
+        runs again; with new data, so do the cells after it that depend on it
+        (its charts among them; see dependent_cells). Returns its cell's id, or None if there was
         nothing to change or it couldn't be changed."""
         renamed, unread = {}, []
         try:
@@ -1214,10 +1214,10 @@ class MainWindow(QMainWindow):
         window = self.show_notebook()
         for cell_id, code in renamed.items():
             window.replace_source(cell_id, code)
-        users = frame_users(self.notebook, frame.cell_id, name) if update else []
+        users = dependent_cells(self.notebook, frame.cell_id, name) if update else []
         window.ran.discard(frame.cell_id)  # Python has its old name, or data
         window.run_needed([importing_cell(self.notebook, "pandas", frame.cell_id), frame.cell_id])
-        for cell_id in users:  # with the new data, charts redrawn with it
+        for cell_id in users:  # with the new data, and what's worked out from it; charts redrawn with it
             window.run_needing(cell_id, [importing_cell(self.notebook, module, cell_id)
                                          for module in ("pandas", "seaborn")])
         window.set_current(frame.cell_id, focus=True)
@@ -1226,7 +1226,7 @@ class MainWindow(QMainWindow):
         if name != frame.name:
             done.append(f"Renamed {frame.name} to {name} in {_cells(len(renamed))}.")
         if update:
-            rerun = f" Running the {_cells(len(users))} using it again." if users else ""
+            rerun = f" Running the {_cells(len(users))} depending on it again." if users else ""
             done.append(f"Updated {name} with {source}.{rerun}")
         self._show_status(" ".join(done) + _unread_note(unread, frame.name))
         return frame.cell_id

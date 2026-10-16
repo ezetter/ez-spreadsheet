@@ -9,7 +9,7 @@ from py_spread.graphs import (
     find_frames,
     find_graphs,
     frame_labels,
-    frame_users,
+    dependent_cells,
     rename_frame,
     update_frame_code,
     used_names,
@@ -87,7 +87,27 @@ def test_renaming_stops_at_another_dataframe_of_that_name(app):
 def test_cells_using_the_dataframe(app):
     notebook, ids = notebook_of("print(df)", FRAME_CELL, CHART_CELL, "x = 1", "print(df.a)", "%timeit df.sum()",
                                 "df = pd.read_csv('other.csv')", "print(df)")
-    assert frame_users(notebook, ids[1], "df") == [ids[2], ids[4]]  # not before it, or past another df
+    assert dependent_cells(notebook, ids[1], "df") == [ids[2], ids[4]]  # not before it, or past another df
+
+
+def test_cells_using_whats_worked_out_from_it(app):
+    notebook, ids = notebook_of(
+        "import numpy as np\nimport pandas as pd\nresults = []", FRAME_CELL + "\nfirst = df.a[0]",
+        "total = df.b.sum()", "print(total)", "doubled = total * 2", "print(doubled, np.pi)",
+        "results.append(df.a.max())\nmerged = pd.concat([df])", "print(results)", "print(pd, np.e, len([]))",
+        "def scaled(k):\n    return df.a * k", "print(scaled(2))", "print(first)",
+        "total = 0", "print(total)", "chart.set(title='x')", "chart = sns.relplot(data=df, x='a', y='b')",
+        "chart.figure", "def f(df):\n    return df\nprint(f(1))")
+    expected = [2, 3, 4, 5, 6, 7, 9, 10, 11, 15, 16]  # not 8: pd and np aren't changed with it; nor 13 or 14
+    assert dependent_cells(notebook, ids[1], "df") == [ids[i] for i in expected]
+
+
+def test_dependents_end_where_its_set_afresh(app):
+    notebook, ids = notebook_of(FRAME_CELL, "total = df.b.sum()", "df = pd.read_csv('x.csv')\ntotal = 1",
+                                "print(df, total)")
+    assert dependent_cells(notebook, ids[0], "df") == [ids[1]]
+    notebook, ids = notebook_of(FRAME_CELL, "df = df.dropna()", "print(df)")
+    assert dependent_cells(notebook, ids[0], "df") == [ids[1], ids[2]]  # still the same DataFrame
 
 
 def test_cells_that_arent_plain_python(app):
@@ -469,7 +489,7 @@ def test_updating_a_dataframes_data(window, dialogs):
     assert source.startswith("# Cells A1:B4 of the sheet") and "'Sales': [999, 120, 130]," in source
     assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, chart]  # and its chart is redrawn
     assert window.statusBar().currentMessage() == (
-        "Updated df with the selected cells, A1:B4. Running the 1 cell using it again.")
+        "Updated df with the selected cells, A1:B4. Running the 1 cell depending on it again.")
 
 
 def test_renaming_and_updating_at_once(window, dialogs):
@@ -484,7 +504,7 @@ def test_renaming_and_updating_at_once(window, dialogs):
     assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, other]  # not the chart: it's of df2
     assert window.statusBar().currentMessage() == (
         "Renamed df to sales in 2 cells. Updated sales with the whole sheet, A1:C3. "
-        "Running the 1 cell using it again.")
+        "Running the 1 cell depending on it again.")
 
 
 def test_updating_runs_the_cells_using_it_again(window, dialogs):
@@ -494,12 +514,13 @@ def test_updating_runs_the_cells_using_it_again(window, dialogs):
     first = nb.add_cell_below("total = df.Sales.sum()")
     nb.add_cell_below("x = 1")
     second = nb.add_cell_below("print(total, df.shape)")
+    third = nb.add_cell_below("print(total * 2)")  # just what's worked out from it
     nb.add_cell_below("df = pd.read_csv('other.csv')\ndf")
     nb.add_cell_below("print(df)")  # the other df
     dialogs.dataframe_answer = (0, None, True)
     runs = len(window.kernel.runs)
     window.send_to_notebook()
-    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, first, second]
+    assert [run[0] for run in window.kernel.runs[runs:]] == [frame_id, first, second, third]
 
 
 def test_nothing_to_change(window, dialogs):

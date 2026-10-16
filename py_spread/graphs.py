@@ -10,6 +10,7 @@ in the cells after it that use it.
 """
 
 import ast
+import builtins
 import re
 from dataclasses import dataclass, field
 
@@ -344,13 +345,149 @@ def rename_frame(notebook, frame_cell_id: str, old: str, new: str) -> tuple[dict
     return {cell.id: _renamed(cell.source, uses, old, new) for cell, uses in found}, unread
 
 
-def frame_users(notebook, frame_cell_id: str, name: str) -> list[str]:
+def dependent_cells(notebook, frame_cell_id: str, name: str) -> list[str]:
     """The ids of the cells after the one making the DataFrame `name` (as
-    dataframe_code writes it) that use it, top to bottom, as rename_frame
-    finds them: until one sets `name` afresh. (Not cells that can't be read
-    as Python.)"""
-    found, _unread = _frame_uses(notebook, frame_cell_id, name)
-    return [cell.id for cell, _uses in found if cell.id != frame_cell_id]
+    dataframe_code writes it) that depend on it, top to bottom, to run again
+    when its data changes: cells using it, and cells using what's worked out
+    from it (total = df.Sales.sum() in one cell, print(total) in another), or
+    changed with it (results.append(df.Sales.max())), and so on. A name set
+    afresh, to something not from it (total = 0, df = pd.read_csv(...)),
+    doesn't count from there on. Modules and Python's built-in names don't
+    count as changed with it (pd.concat([df])). Cells that can't be read as
+    Python aren't among them."""
+    trees = []
+    for cell in notebook.cells:
+        try:
+            trees.append((cell, ast.parse(cell.source)))
+        except (SyntaxError, ValueError):
+            trees.append((cell, None))
+    modules = {alias.asname or alias.name.split(".")[0] for _cell, tree in trees if tree is not None
+               for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names}
+    tracked, dependent = {name}, []
+    for cell, tree in trees[notebook.index_of(frame_cell_id):]:
+        if tree is None:
+            continue
+        statements = tree.body
+        if cell.id == frame_cell_id:  # after where it's made (the last, as frame_data reads it)
+            made = [i for i, statement in enumerate(statements) if _makes_frame(statement, name)]
+            if not made:
+                raise ValueError(f"the cell doesn't make the DataFrame {name}")
+            statements = statements[made[-1] + 1:]
+        depends = False
+        for statement in statements:
+            reader = _Reads(tracked)
+            reader.visit(statement)
+            if reader.found:
+                depends = True
+                tracked |= _bound_names(statement) | {
+                    changed for changed in _changed_names(statement)
+                    if changed not in modules and not hasattr(builtins, changed)}
+            else:
+                tracked -= _bound_names(statement)  # set afresh
+        if depends and cell.id != frame_cell_id:
+            dependent.append(cell.id)
+        if not tracked:
+            break
+    return dependent
+
+
+class _Reads(ast.NodeVisitor):
+    """Which of some names a piece of code reads (total, or total += 1; not
+    total = 1), but not inside a function taking a parameter of that name."""
+
+    def __init__(self, names):
+        self.names = set(names)
+        self.found = set()
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.names:
+            self.found.add(node.id)
+
+    def visit_AugAssign(self, node):
+        if isinstance(node.target, ast.Name) and node.target.id in self.names:
+            self.found.add(node.target.id)
+        self.generic_visit(node)
+
+    def _function(self, node):
+        args = node.args
+        params = [arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg) if arg]
+        outside = [*args.defaults, *(default for default in args.kw_defaults if default is not None)]
+        if not isinstance(node, ast.Lambda):
+            outside += [*node.decorator_list, *([node.returns] if node.returns else []),
+                        *(arg.annotation for arg in params if arg.annotation)]
+        for part in outside:
+            self.visit(part)
+        inside = _Reads(self.names - {arg.arg for arg in params})
+        for part in node.body if isinstance(node.body, list) else [node.body]:
+            inside.visit(part)
+        self.found |= inside.found
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = _function
+
+
+def _bound_names(statement) -> set[str]:
+    """The names a top-level statement sets (not inside its functions)."""
+    names = set()
+
+    def target(node):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, (ast.Tuple, ast.List)):
+            for element in node.elts:
+                target(element)
+        elif isinstance(node, ast.Starred):
+            target(node.value)
+
+    def walk(node):
+        if isinstance(node, ast.Assign):
+            for each in node.targets:
+                target(each)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            target(node.target)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        else:
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                target(node.target)
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        target(item.optional_vars)
+            for handler in getattr(node, "handlers", []):
+                if handler.name:
+                    names.add(handler.name)
+                for child in handler.body:
+                    walk(child)
+            for field_name in ("body", "orelse", "finalbody"):
+                for child in getattr(node, field_name, []):
+                    walk(child)
+
+    walk(statement)
+    names.update(node.target.id for node in ast.walk(statement) if isinstance(node, ast.NamedExpr))
+    return names
+
+
+def _changed_names(statement) -> set[str]:
+    """The names of things a statement may change in place: whose method it
+    calls (results.append(...)), or whose item or attribute it sets
+    (results['max'] = ..., results.max = ...)."""
+    def base(node):
+        while isinstance(node, (ast.Attribute, ast.Subscript)):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) else None
+
+    names = set()
+    for node in ast.walk(statement):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            names.add(base(node.func.value))
+        elif isinstance(node, (ast.Assign, ast.AugAssign, ast.Delete)):
+            for each in node.targets if isinstance(node, (ast.Assign, ast.Delete)) else [node.target]:
+                if isinstance(each, (ast.Attribute, ast.Subscript)):
+                    names.add(base(each.value))
+    names.discard(None)
+    return names
 
 
 def _frame_uses(notebook, frame_cell_id: str, name: str) -> tuple[list, list[str]]:
