@@ -104,6 +104,14 @@ fraction of one.
   Date format, or typing `3/7` into a Date cell, makes it `3/7/2026` (as
   the cell's text, so it stays that date next year). Undo takes it back to
   `3/7` with the format.
+
+Likewise, a fraction typed as text (`3/7`, `-22/7`, or a mixed number such
+as `1 1/4`) is a number in a cell formatted to show numbers (Number,
+Percent, Scientific, Fraction, the currency formats, or a custom format of
+digits): giving it the format, or typing it into such a cell, makes it the
+formula working it out, as if you'd typed `=3/7` (`=1+1/4`), so Percent
+shows `42.86%`. Dates, times, and Automatic leave it as text, and so does a
+zero denominator (`3/0`). Undo takes it back with the format.
 - Times: `15:59`, `15:59:30`, `3:59 PM` (`12:00 AM` is midnight).
 - Both: `9/26/2008 15:59`, `9/26/2008 3:59 PM`, or `2008-09-26T15:59`.
 

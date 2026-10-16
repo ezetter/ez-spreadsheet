@@ -188,6 +188,36 @@ def complete_date(text: str, year: int | None = None) -> str | None:
     return f"{month}/{day}/{year}"
 
 
+_FRACTION = re.compile(r"(?P<sign>[+-]?)(?:(?P<whole>\d+)\s+)?(?P<numerator>\d+)/(?P<denominator>\d+)")
+
+
+def fraction_formula(text: str) -> str | None:
+    """A fraction typed as text (3/7, -22/7, 1 1/4), which is text until it's
+    in a cell formatted to show numbers, as the formula working it out:
+    =3/7, =-22/7, =1+1/4. None for anything else (or a zero denominator)."""
+    match = _FRACTION.fullmatch(text.strip())
+    if not match or int(match["denominator"]) == 0:
+        return None
+    fraction = f"{int(match['numerator'])}/{int(match['denominator'])}"
+    value = f"{int(match['whole'])}+{fraction}" if match["whole"] else fraction
+    if match["sign"] == "-":
+        return f"=-({value})" if match["whole"] else f"=-{value}"
+    return f"={value}"
+
+
+def shows_numbers(fmt: NumberFormat | None) -> bool:
+    """Whether a format shows a number as a number (Number, Percent,
+    Currency, Fraction, a custom one of digits...), not as a date or a time,
+    or plainly."""
+    if fmt is None or fmt.kind in ("general", "text", *DATE_KINDS):
+        return False
+    if fmt.kind == "custom":
+        if pattern_problem(fmt.pattern) is not None:
+            return False
+        return not any(section.is_date for section in parse_pattern(fmt.pattern).sections)
+    return True
+
+
 def shows_dates(fmt: NumberFormat | None) -> bool:
     """Whether a format shows a date: Date, Date time, or a custom one with a day, month, or year."""
     if fmt is None:

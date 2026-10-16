@@ -549,3 +549,44 @@ def test_complete_date():
     assert complete_date("2/29", 2024) == "2/29/2024" and complete_date("2/29", 2026) is None
     assert complete_date("3/7/2026", 2026) is None and complete_date("13/1", 2026) is None
     assert complete_date("1/2/3") is None
+
+
+# --- A fraction, in a cell formatted to show numbers ---
+
+@pytest.mark.parametrize("name, shown", [
+    ("Percent", "42.86%"), ("Fraction", " 3/7 "), ("Number", "0.43"), ("Scientific", "4.29E-01"),
+    ("Currency", "$0.43"), ("Accounting", "$ 0.43 "),
+])
+def test_number_formats_make_a_fraction_a_number(window, name, shown):
+    model = window.model
+    model.set_cell(0, 0, "3/7")
+    window.view.select_range(0, 0, 0, 0)
+    window.format_actions[name].trigger()
+    assert model.get_cell(0, 0) == "=3/7" and model.value(0, 0) == pytest.approx(3 / 7)
+    assert model.display_text(0, 0) == shown
+    window.undo_action.trigger()  # one step: the format and the formula
+    assert model.get_cell(0, 0) == "3/7" and model.cell_format(0, 0) is None
+
+
+def test_typing_a_fraction_in_a_number_cell(window):
+    model = window.model
+    model.set_formats({(r, 0): NumberFormat("custom", pattern="# ??/??") for r in range(4)}, "Fraction")
+    model.set_formats({(4, 0): NumberFormat("time", 0), (5, 0): GENERAL}, "Others")
+    for row, typed in enumerate(["1 1/4", "-22/7", "3/0", "two/three", "3/7", "3/7"]):
+        model.set_cell(row, 0, typed)
+    assert [model.get_cell(r, 0) for r in range(6)] == ["=1+1/4", "=-22/7", "3/0", "two/three", "3/7", "3/7"]
+    assert model.display_text(0, 0) == "1  1/4 " and model.display_text(1, 0) == "-3  1/7 "
+
+
+def test_custom_formats_of_dates_and_times_arent_number_formats():
+    from py_spread.numformat import shows_numbers
+    assert shows_numbers(NumberFormat("custom", pattern="#,##0.00")) and shows_numbers(NumberFormat("percent"))
+    assert not shows_numbers(NumberFormat("custom", pattern="h:mm")) and not shows_numbers(GENERAL)
+    assert not shows_numbers(NumberFormat("custom", pattern="[Purple]0"))
+
+
+def test_fraction_formula():
+    from py_spread.numformat import fraction_formula
+    assert [fraction_formula(t) for t in ("3/7", "-22/7", "+1/2", "1 1/4", "-1 1/2", "007/08", "3/0", "3/7/2026",
+                                          "1/2/3", "a/b")] == [
+        "=3/7", "=-22/7", "=1/2", "=1+1/4", "=-(1+1/2)", "=7/8", None, None, None, None]

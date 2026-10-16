@@ -21,7 +21,16 @@ from .formula import (
 from .functions import DEGREES
 from . import names
 from .custom_format import COLORS
-from .numformat import DATE_KINDS, NumberFormat, complete_date, format_value, parse_formatted, shows_dates
+from .numformat import (
+    DATE_KINDS,
+    NumberFormat,
+    complete_date,
+    format_value,
+    fraction_formula,
+    parse_formatted,
+    shows_dates,
+    shows_numbers,
+)
 from .textstyle import PLAIN, CellStyle
 from .references import cell_name, column_name
 from .storage import SheetData
@@ -188,9 +197,11 @@ class SheetModel(QAbstractTableModel):
         recalculating and notifying views a single time. `description` names
         the step in the Undo menu.
 
-        A month and day without a year (3/7) in a cell formatted to show
-        dates, as it's typed or the format's given, gets this year: 3/7/2026."""
-        writes = self._with_years(writes, formats or {})
+        Text that's a fraction (3/7) in a cell formatted to show numbers, as
+        it's typed or the format's given, is a number: the formula =3/7. In
+        one formatted to show dates, it's a month and day, this year's:
+        3/7/2026."""
+        writes = self._completed(writes, formats or {})
         before, after = {}, {}
         for key, value in writes.items():
             text = "" if value is None else str(value)
@@ -208,15 +219,22 @@ class SheetModel(QAbstractTableModel):
                 self, (before, formats_before, styles_before, names_before, columns_before),
                 (after, formats_after, styles_after, names_after, columns_after), description))
 
-    def _with_years(self, writes: dict, formats: dict) -> dict:
-        """The writes, with this year added to months and days in cells formatted to show dates."""
+    def _completed(self, writes: dict, formats: dict) -> dict:
+        """The writes, with fractions written as text (3/7) made numbers
+        (=3/7) in cells formatted to show numbers, and dates (3/7/2026) in
+        ones formatted to show dates."""
         completed = dict(writes)
         for key in {*writes, *formats}:
             fmt = formats[key] if key in formats else self._formats.get(key)
-            if not shows_dates(fmt):
-                continue
             text = writes[key] if key in writes else self._cells.get(key)
-            full = complete_date(str(text)) if text is not None else None
+            if text is None:
+                continue
+            if shows_dates(fmt):
+                full = complete_date(str(text))
+            elif shows_numbers(fmt):
+                full = fraction_formula(str(text))
+            else:
+                continue
             if full is not None:
                 completed[key] = full
         return completed
