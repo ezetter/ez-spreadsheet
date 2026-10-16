@@ -913,6 +913,7 @@ def test_bad_image_shows_its_text(app):
 
 class FakeKernel(QObject):
     state_changed = Signal(str)
+    evaluated = Signal(str, object, str)
     started = Signal(str, int)
     output = Signal(str, dict)
     finished = Signal(str, object, str)
@@ -930,6 +931,10 @@ class FakeKernel(QObject):
         self.output.emit(cell_id, {"output_type": "execute_result", "metadata": {},
                                    "data": {"text/plain": f"result {self.count}"}, "execution_count": self.count})
         self.finished.emit(cell_id, self.count, "ok")
+
+    def evaluate(self, request_id, code, expression):
+        self.questions = getattr(self, "questions", 0) + 1
+        self.evaluated.emit(request_id, None, "FakeKernel doesn't evaluate.")  # (so just the cells' DataFrames)
 
     def interrupt(self):
         self.interrupts += 1

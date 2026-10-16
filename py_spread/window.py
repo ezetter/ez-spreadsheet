@@ -1160,11 +1160,51 @@ class MainWindow(QMainWindow):
         no more than one cell selected) of the whole sheet's data, which goes
         in a new notebook cell and runs. With DataFrames in the notebook, it
         lists them too, to rename one, or update its data from those cells
-        (see _change_frame). Returns the cell's id, or None if there's no data
-        and no DataFrame to change, or the dialog was cancelled."""
+        (see _change_frame): those its cells write out, and others its Python
+        has, which it's asked for first (see _find_frames), so the dialog may
+        come when Python answers. Returns the cell's id if it's done straight
+        away, else None (as when there's no data and no DataFrame to change,
+        or the dialog was cancelled)."""
         self._commit_pending_edit()
         cells, source, problem = self._sheet_data()
-        frames = find_frames(self.notebook)
+        done = []
+        self._find_frames(lambda frames: done.append(self._dataframe_dialog(frames, cells, source, problem)))
+        return done[0] if done else None
+
+    def _find_frames(self, done) -> None:
+        """done(the notebook's DataFrames, as FrameCells): the ones its cells
+        write out, and the others its Python has. If nothing in the notebook
+        has run in this Python process (as when the sheet's just opened), it
+        runs first. Python answers in the background, after the cells
+        running; if it can't, done gets just the ones the cells write out."""
+        if not self._notebook_has_code():
+            done(find_frames(self.notebook))
+            return
+        self._run_notebook_if_not_run()
+        self._show_status("Looking for DataFrames in the notebook…")
+
+        def answered(value, _error):
+            self._show_status("")
+            done(find_frames(self.notebook, frames(value) if value is not None else ()))
+
+        self._ask_notebook(*frames_request(), answered)
+
+    def _notebook_has_code(self) -> bool:
+        """Whether the notebook has any code but a new notebook's imports."""
+        return any(cell.source.strip() and cell.source.strip() != IMPORTS_CELL for cell in self.notebook.cells)
+
+    def _run_notebook_if_not_run(self) -> None:
+        """Run all the notebook's cells, if none has run (or is running) in
+        this Python process, so its DataFrames are there to ask about."""
+        window = self.notebook_window
+        if window is None or not (window.ran or window.running):
+            self._show_status("Running the notebook…")
+            self.show_notebook().run_all()
+
+    def _dataframe_dialog(self, frames, cells, source: str, problem: str | None) -> str | None:
+        """The DataFrame dialog, with the notebook's `frames`, and what comes
+        of it: a new DataFrame of `cells`, or one of `frames` changed (see
+        send_to_notebook)."""
         if problem is not None and not frames:
             self._show_status(f"There's nothing to make a DataFrame of: {problem[0].lower()}{problem[1:]} "
                               "Select cells with data to make a DataFrame of them.")
@@ -1204,7 +1244,8 @@ class MainWindow(QMainWindow):
                 renamed, unread = rename_frame(self.notebook, frame.cell_id, frame.name, name)
             if update:
                 code = renamed.get(frame.cell_id, self.notebook.cell(frame.cell_id).source)
-                renamed[frame.cell_id] = update_frame_code(code, name, self.model, cells)
+                pandas = importing_cell(self.notebook, "pandas", frame.cell_id)
+                renamed[frame.cell_id] = update_frame_code(code, name, self.model, cells, import_pandas=pandas is None)
         except ValueError as e:
             self._show_error(f"Couldn't change the DataFrame {frame.name}.", str(e))
             return None
@@ -1389,14 +1430,16 @@ class MainWindow(QMainWindow):
 
     def load_data_to_sheet(self) -> None:
         """Ask the notebook's Python for its DataFrames, then which one to
-        load, and put its data in the sheet at the current cell. Python
-        answers in the background (after any cells still running), so the
-        rest happens when it does."""
+        load, and put its data in the sheet at the current cell. If nothing
+        in the notebook has run in this Python process (as when the sheet's
+        just opened), it runs first. Python answers in the background (after
+        any cells still running), so the rest happens when it does."""
         self._commit_pending_edit()
-        if not self.kernel.has_kernel:
-            self._show_status("The notebook's Python isn't running, so there are no DataFrames to load. "
-                              "Run the notebook's cells first.")
+        if not self._notebook_has_code() and not self.kernel.has_kernel:
+            self._show_status("The notebook has no DataFrames to load. Make one in a cell first.")
             return
+        if self._notebook_has_code():
+            self._run_notebook_if_not_run()  # as when the sheet's just opened: so its DataFrames are there
         self._show_status("Looking for DataFrames in the notebook…")
         self._ask_notebook(*frames_request(), self._frames_found)
 

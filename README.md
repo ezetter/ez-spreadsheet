@@ -179,11 +179,20 @@ df
   unavailable. A name the notebook already sets is fine; the dialog says so,
   and the new DataFrame takes its place from there on. Cancel adds nothing.
 
-Once the notebook has DataFrames (written as EzSheet writes them, a chart's
-included), the DataFrame dialog has a **DataFrame** list at the top: **New
-DataFrame**, then each of them, such as "sales: Month, Sales, Cost (12
-rows)". It starts at New DataFrame, unless no more than one cell is selected
-and the notebook's current cell makes one of them. Choosing one of them:
+Once the notebook has DataFrames, the DataFrame dialog has a **DataFrame**
+list at the top: **New DataFrame**, then each of them, in the notebook's
+order. They're the ones EzSheet wrote (a chart's included), such as "sales:
+Month, Sales, Cost (12 rows)", and the ones your own code makes, such as
+`tips = sns.load_dataset('tips')`, listed as "tips: 244 rows × 7 columns".
+To find those, EzSheet asks the notebook's Python which DataFrames it has, so
+the dialog comes once any cells running have finished. If nothing in the
+notebook has run yet (say, the sheet was just opened), the notebook runs
+first, top to bottom. Each is matched to the last cell setting it afresh
+(not `tips = tips.dropna()`, which is still the same one); ones no cell sets,
+and ones called what EzSheet's chart code uses (`data`, `long`), aren't
+listed. The list starts at New DataFrame, unless no more than one cell is
+selected and the notebook's current cell makes one of them. Choosing one of
+them:
 
 - **Name** shows its name; a new one renames it, just as the Chart dialog's
   DataFrame name does: in its cell and the cells after it that use it, and
@@ -191,8 +200,11 @@ and the notebook's current cell makes one of them. Choosing one of them:
 - **Update its data from** the selected cells (or the whole sheet), unchecked
   to start with, writes its data afresh from them: the `pd.DataFrame({...})`
   in its cell and the comment above it saying which cells it's of. Anything
-  else you added to the cell stays. It's unavailable if those cells have no
-  data.
+  else you added to the cell stays. For one your own code makes, it replaces
+  the statement making it (`tips = sns.load_dataset('tips')` becomes `tips =
+  pd.DataFrame({...})`, with the comment above it), as the dialog says. It's
+  unavailable if those cells have no data, or if the DataFrame is made along
+  with others (`train, test = split(tips)`).
 - OK does either or both. Its cell runs again, so Python has its new name or
   data. With new data, the cells after it that depend on it run again too,
   top to bottom, so its charts are redrawn and your own cells see the new
@@ -384,9 +396,10 @@ sheet with its top-left corner at the current cell:
 - It replaces whatever was in those cells, as one step that Undo reverses. The
   sheet grows if the data doesn't fit, and the new data is selected.
 - The DataFrames are the ones that exist now, in the Python the notebook's
-  cells have run in. If Python isn't running (say, the sheet was just opened)
-  or has no DataFrames, the status bar says so: run the cells that make them
-  first. If cells are still running, the list comes once they finish.
+  cells have run in. If nothing in the notebook has run yet (say, the sheet
+  was just opened), the notebook runs first, top to bottom, and the list
+  comes once it's finished, as it does if cells are still running. If there
+  are no DataFrames, the status bar says so.
 - DataFrames over 100,000 values are listed but can't be loaded, as they'd make
   the sheet slow.
 

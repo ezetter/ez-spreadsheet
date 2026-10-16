@@ -189,10 +189,10 @@ def test_cancel_loads_nothing(window, dialogs):
     assert len(window.kernel.questions) == 1  # just the list
 
 
-def test_python_not_running(window, dialogs):
+def test_nothing_to_run_and_python_not_running(window, dialogs):
     window.kernel.has_kernel = False
     window.load_data_to_sheet()
-    assert "isn't running" in window.statusBar().currentMessage()
+    assert "no DataFrames to load" in window.statusBar().currentMessage()
     assert dialogs.load_prompts == [] and window.kernel.questions == []
 
 

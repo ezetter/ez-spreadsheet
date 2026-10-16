@@ -178,11 +178,18 @@ class FrameNameDialog(QDialog):
             frame = self.frames[index]
             self.field.set_renaming(frame.name, self._typed.get(index))
             self.field.edit.setToolTip(FRAME_RENAME_TIP)
-            self._say(f"Rename {frame.name}, or update its data, or both. Its cell runs again when you click OK.")
-            self.update_box.setEnabled(self.problem is None)
-            self.update_box.setToolTip(
-                self.problem or f"Write its data afresh from {self.source}, in its cell. Its charts are redrawn.")
-            if self.problem is not None:
+            summary = f"Rename {frame.name}, or update its data, or both. Its cell runs again when you click OK."
+            if frame.data is None and frame.updatable:  # your own code makes it
+                summary += f" Updating its data replaces {_shortened(frame.code)} with the sheet's."
+            self._say(summary)
+            if not frame.updatable:
+                tip = f"It's made along with others ({_shortened(frame.code)}), so its data can't be written here."
+            else:
+                tip = self.problem or (f"Write its data afresh from {self.source}, in its cell. The cells depending "
+                                       "on it run again.")
+            self.update_box.setEnabled(self.problem is None and frame.updatable)
+            self.update_box.setToolTip(tip)
+            if not self.update_box.isEnabled():
                 self.update_box.setChecked(False)
         self._update_ok()
 
@@ -198,3 +205,9 @@ class FrameNameDialog(QDialog):
         """OK, if the name will do, and a new DataFrame has data."""
         new = self.chosen_frame() is None
         self.ok_button.setEnabled(self.field.problem() is None and not (new and self.problem is not None))
+
+
+def _shortened(code: str, most: int = 60) -> str:
+    """Code's first line, cut short if it's long."""
+    line = code.splitlines()[0] if code else ""
+    return line if len(line) <= most and "\n" not in code else line[:most - 1].rstrip() + "…"

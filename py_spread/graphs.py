@@ -23,6 +23,7 @@ from .notebook import (
     GraphColumns,
     GraphError,
     dataframe_parts,
+    frame_name_problem,
     marker_keyword,
     plot_function,
 )
@@ -247,37 +248,67 @@ def frame_data(source: str, frame: str) -> FrameData | None:
 @dataclass
 class FrameCell:
     """A cell making a DataFrame as dataframe_code writes it: its id, the
-    DataFrame's name, and its data."""
+    DataFrame's name, and its data; or a cell of your own code making one
+    (tips = sns.load_dataset('tips')) that the notebook's Python has: its
+    size there, and that code."""
 
     cell_id: str
     name: str
-    data: FrameData
+    data: FrameData | None = None  # written out in the cell, as dataframe_code writes it
+    shape: tuple[int, int] | None = None  # (rows, columns), as Python has it, for one of your own
+    code: str = ""  # the statement making one of your own
+    updatable: bool = True  # whether its data can be written afresh: it's made on its own (not a, b = ...)
 
 
-def find_frames(notebook) -> list[FrameCell]:
-    """The cells making a DataFrame as dataframe_code writes it (a chart's
-    too), top to bottom: ones whose data can be updated, and that can be
-    renamed."""
-    found = []
+def find_frames(notebook, found=()) -> list[FrameCell]:
+    """The notebook's DataFrames, top to bottom: the cells making one as
+    dataframe_code writes it (a chart's too), and for the others the
+    notebook's Python has (`found`: (name, rows, columns) each, as
+    load_data.frames reads them), the last cell setting one afresh in your
+    own code. (Not ones no cell makes, such as a deleted cell's, nor ones
+    whose name EzSheet's code uses itself, such as a chart's `data`.)"""
+    trees = []
     for cell in notebook.cells:
         try:
-            tree = ast.parse(cell.source)
+            trees.append((cell, ast.parse(cell.source)))
         except (SyntaxError, ValueError):
-            continue
+            pass
+    frames = []
+    for cell, tree in trees:
         names = [statement.targets[0].id for statement in tree.body
                  if isinstance(statement, ast.Assign) and len(statement.targets) == 1
                  and isinstance(statement.targets[0], ast.Name) and _makes_frame(statement, statement.targets[0].id)]
         data = frame_data(cell.source, names[-1]) if names else None
         if data is not None:
-            found.append(FrameCell(cell.id, names[-1], data))
-    return found
+            frames.append(FrameCell(cell.id, names[-1], data))
+    written = {frame.cell_id for frame in frames}
+    for name, rows, columns in found:
+        if frame_name_problem(name) is not None:
+            continue
+        making = [(cell, statement) for cell, tree in trees for statement in tree.body
+                  if _starts_frame(statement, name)]
+        if not making or making[-1][0].id in written:
+            continue
+        cell, statement = making[-1]
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        alone = len(targets) == 1 and isinstance(targets[0], ast.Name)
+        code = ast.get_source_segment(cell.source, statement) or ""
+        frames.append(FrameCell(cell.id, name, shape=(rows, columns), code=code, updatable=alone))
+    order = {cell.id: index for index, (cell, _tree) in enumerate(trees)}
+    return sorted(frames, key=lambda frame: order[frame.cell_id])
 
 
 def frame_labels(frames) -> list[str]:
     """How the DataFrame dialog's list names each: "sales: Month, Sales,
-    Cost (12 rows)", numbered if two would read the same."""
+    Cost (12 rows)", or for one of your own, "tips: 244 rows × 7 columns",
+    numbered if two would read the same."""
     labels = []
     for frame in frames:
+        if frame.data is None:
+            rows, columns = frame.shape or (0, 0)
+            labels.append(f"{frame.name}: {rows:,} row{'' if rows == 1 else 's'} × "
+                          f"{columns} column{'' if columns == 1 else 's'}")
+            continue
         columns = frame.data.labels
         shown = ", ".join(columns[:4]) + (", …" if len(columns) > 4 else "")
         rows = len(frame.data.columns[0]) if frame.data.columns else 0
@@ -286,12 +317,15 @@ def frame_labels(frames) -> list[str]:
             for i, label in enumerate(labels)]
 
 
-def update_frame_code(source: str, name: str, model, cells) -> str:
+def update_frame_code(source: str, name: str, model, cells, import_pandas: bool = False) -> str:
     """A DataFrame cell's code with `name = pd.DataFrame({...})` written
-    afresh from the sheet's (row, col) cells, and its comment saying which
-    cells it's of; anything else in it stays."""
+    afresh from the sheet's (row, col) cells, in place of the statement
+    making it (for one of your own, such as tips = sns.load_dataset('tips'),
+    that code), with the comment saying which cells it's of; anything else
+    in it stays. `import_pandas` puts "import pandas as pd" first (nothing
+    above has it)."""
     tree = ast.parse(source)
-    statement = [statement for statement in tree.body if _makes_frame(statement, name)][-1]
+    statement = [statement for statement in tree.body if _starts_frame(statement, name)][-1]
     at = _Positions(source)
     start, end = at(statement.lineno, statement.col_offset), at(statement.end_lineno, statement.end_col_offset)
     comment, assignment = dataframe_parts(model, cells, name)
@@ -299,6 +333,10 @@ def update_frame_code(source: str, name: str, model, cells) -> str:
     source = source[:start] + assignment + source[end:]
     if comments:
         source = source[:comments[-1].start()] + comment + source[comments[-1].end():]
+    else:
+        source = source[:start] + comment + "\n" + source[start:]
+    if import_pandas and not re.search(r"^import pandas as pd\b", source, re.M):
+        source = "import pandas as pd\n\n" + source
     return source
 
 
@@ -369,7 +407,7 @@ def dependent_cells(notebook, frame_cell_id: str, name: str) -> list[str]:
             continue
         statements = tree.body
         if cell.id == frame_cell_id:  # after where it's made (the last, as frame_data reads it)
-            made = [i for i, statement in enumerate(statements) if _makes_frame(statement, name)]
+            made = [i for i, statement in enumerate(statements) if _starts_frame(statement, name)]
             if not made:
                 raise ValueError(f"the cell doesn't make the DataFrame {name}")
             statements = statements[made[-1] + 1:]
@@ -504,7 +542,7 @@ def _frame_uses(notebook, frame_cell_id: str, name: str) -> tuple[list, list[str
             continue
         statements = tree.body
         if cell.id == frame_cell_id:  # from where it's made (the last, as frame_data reads it)
-            made = [i for i, statement in enumerate(statements) if _makes_frame(statement, name)]
+            made = [i for i, statement in enumerate(statements) if _starts_frame(statement, name)]
             if not made:
                 raise ValueError(f"the cell doesn't make the DataFrame {name}")
             statements = statements[made[-1]:]
@@ -520,6 +558,13 @@ def _frame_uses(notebook, frame_cell_id: str, name: str) -> tuple[list, list[str
         if ended:
             break
     return found, unread
+
+
+def _starts_frame(statement, name: str) -> bool:
+    """Whether a statement sets `name` afresh by assigning it (df =
+    pd.DataFrame(...), tips = sns.load_dataset('tips'), train, test = ...;
+    not df = df.dropna(), which is still the same one)."""
+    return isinstance(statement, (ast.Assign, ast.AnnAssign)) and _rebinds(statement, name)
 
 
 def _makes_frame(statement, name: str) -> bool:

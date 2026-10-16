@@ -1,4 +1,7 @@
+import pandas as pd
 import pytest
+import seaborn as sns
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFormLayout
 
 from py_spread.frame_name_dialog import FrameNameDialog, FrameNameField
@@ -538,3 +541,146 @@ def test_renaming_with_no_data_to_update_from(window, dialogs):
     window.send_to_notebook()
     assert dialogs.dataframe_prompts[-1][2] == "The sheet is empty."
     assert "sales = pd.DataFrame({" in window.notebook.cell(frame_id).source
+
+
+
+# --- DataFrames of your own, from the notebook's Python ---
+
+class RunningKernel(QObject):
+    """Stands in for the notebook's Python, running cells and questions here, in one namespace."""
+
+    evaluated = Signal(str, object, str)
+    state_changed = Signal(str)
+    started = Signal(str, int)
+    output = Signal(str, dict)
+    finished = Signal(str, object, str)
+    cancelled = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.namespace = {}
+        self.has_kernel, self.working_dir, self.count = False, None, 0
+        self.runs, self.questions = [], []
+
+    def run(self, cell_id, code):
+        self.has_kernel = True
+        self.runs.append(cell_id)
+        self.count += 1
+        try:
+            exec(code, self.namespace)
+        except Exception as e:  # noqa: BLE001 -- as the kernel reports it
+            self.output.emit(cell_id, {"output_type": "error", "ename": type(e).__name__, "evalue": str(e),
+                                       "traceback": []})
+            self.finished.emit(cell_id, self.count, "error")
+            return
+        self.finished.emit(cell_id, self.count, "ok")
+
+    def evaluate(self, request_id, code, expression):
+        self.questions.append(expression)
+        if not self.has_kernel:
+            self.evaluated.emit(request_id, None, "Python isn't running.")
+            return
+        exec(code, self.namespace)
+        self.evaluated.emit(request_id, repr(eval(expression, self.namespace)), "")
+
+    def interrupt(self):
+        pass
+
+    def restart(self):
+        pass
+
+    def shutdown(self, timeout=5.0):
+        pass
+
+
+TIPS = pd.DataFrame({"total_bill": [16.99, 10.34], "tip": [1.01, 1.66], "day": ["Sun", "Sun"]})
+
+
+@pytest.fixture
+def tips_window(app, monkeypatch, tmp_path):
+    """A sheet whose notebook loads the tips DataFrame by its own code, opened afresh: nothing's run."""
+    monkeypatch.setattr(sns, "load_dataset", lambda name: TIPS.copy())  # (no download)
+    window = MainWindow()
+    window.notebook.load({"cells": [
+        {"cell_type": "code", "source": "import pandas as pd\nimport seaborn as sns", "outputs": []},
+        {"cell_type": "code", "source": "tips = sns.load_dataset('tips')\ntips.head()", "outputs": []},
+        {"cell_type": "code", "source": "train, test = tips[:1], tips[1:]", "outputs": []},
+        {"cell_type": "code", "source": "average = tips.tip.mean()", "outputs": []},
+        {"cell_type": "code", "source": "print(average)", "outputs": []},
+    ]})
+    window.kernel = RunningKernel()
+    window.model.set_cells({(0, 0): "total_bill", (0, 1): "tip", (1, 0): "20", (1, 1): "3",
+                            (2, 0): "30", (2, 1): "5", (3, 0): "40", (3, 1): "6"})
+    window.show()
+    yield window
+    if window.notebook_window is not None:
+        window.notebook_window.hide()
+    window.setWindowModified(False)
+    window.close()
+
+
+def test_dataframe_dialog_lists_your_own_dataframes(tips_window, dialogs):
+    window = tips_window
+    window.view.setCurrentIndex(window.model.index(0, 0))
+    dialogs.frame_name_cancel = True
+    window.send_to_notebook()
+    assert len(window.kernel.runs) == 5  # the notebook ran first: it hadn't
+    frames, current, problem = dialogs.dataframe_prompts[-1]
+    assert [(frame.name, frame.shape, frame.updatable) for frame in frames] == [
+        ("tips", (2, 3), True), ("train", (1, 3), False), ("test", (1, 3), False)]
+    assert frames[0].code == "tips = sns.load_dataset('tips')"
+    assert frame_labels(frames) == ["tips: 2 rows × 3 columns", "train: 1 row × 3 columns",
+                                    "test: 1 row × 3 columns"]
+    window.send_to_notebook()
+    assert len(window.kernel.runs) == 5  # it's run now: not again
+
+
+def test_renaming_your_own_dataframe(tips_window, dialogs):
+    window = tips_window
+    dialogs.dataframe_answer = (0, "restaurant", False)
+    window.send_to_notebook()
+    sources = [cell.source for cell in window.notebook.cells]
+    assert sources[1] == "restaurant = sns.load_dataset('tips')\nrestaurant.head()"
+    assert sources[2:4] == ["train, test = restaurant[:1], restaurant[1:]", "average = restaurant.tip.mean()"]
+    assert "restaurant" in window.kernel.namespace
+
+
+def test_updating_your_own_dataframe(tips_window, dialogs):
+    window = tips_window
+    window.view.select_range(0, 0, 3, 1)
+    dialogs.dataframe_answer = (0, None, True)
+    window.send_to_notebook()
+    source = window.notebook.cells[1].source
+    assert source.startswith("# Cells A1:B4 of the sheet, with row 1 as the column names.\ntips = pd.DataFrame({")
+    assert source.endswith("})\ntips.head()") and "load_dataset" not in source
+    assert list(window.kernel.namespace["tips"].tip) == [3, 5, 6]
+    assert window.kernel.namespace["average"] == pytest.approx(14 / 3)  # what depends on it ran again
+    assert window.statusBar().currentMessage() == (
+        "Updated tips with the selected cells, A1:B4. Running the 3 cells depending on it again.")
+
+
+def test_dataframe_dialog_for_your_own_dataframes(app):
+    frames = [FrameCell("a", "tips", shape=(244, 7), code="tips = sns.load_dataset('tips')"),
+              FrameCell("b", "train", shape=(10, 7), code="train, test = split(tips)", updatable=False)]
+    dialog = FrameNameDialog(None, "df", "the whole sheet, A1:B4", (), frames, 0)
+    assert "replaces tips = sns.load_dataset('tips') with the sheet's" in dialog.summary.text()
+    assert dialog.update_box.isEnabled()
+    dialog.frame_box.setCurrentIndex(2)
+    assert not dialog.update_box.isEnabled() and "made along with others" in dialog.update_box.toolTip()
+
+
+def test_load_data_runs_the_notebook_first(tips_window, dialogs):
+    window = tips_window
+    dialogs.load_answer = "tips"
+    window.view.setCurrentIndex(window.model.index(10, 0))
+    window.load_data_to_sheet()
+    assert len(window.kernel.runs) == 5 and dialogs.load_prompts[0][0][0] == ("tips", 2, 3)
+    assert window.model.get_cell(10, 0) == "total_bill" and window.model.get_cell(11, 2) == "Sun"
+
+
+def test_python_that_cant_answer(window, dialogs):
+    window.view.select_range(0, 0, 2, 2)
+    window.send_to_notebook()  # FakeKernel can't evaluate: just the DataFrames the cells write out
+    window.send_to_notebook()
+    assert [frame.name for frame in dialogs.dataframe_prompts[-1][0]] == ["df"]
