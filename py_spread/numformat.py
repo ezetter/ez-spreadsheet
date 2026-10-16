@@ -68,7 +68,8 @@ TEXT = NumberFormat("text")
 # The Format menu's number formats, and the toolbar's 123 menu: (name,
 # format, an example), None between groups. Currency rounded is just
 # currency with no decimals, and Fraction a custom format (its example
-# without the spaces that line fractions up).
+# without the spaces that line fractions up); so are the long dates, which
+# are named by their examples, as Google Sheets shows them.
 MENU_FORMATS = (
     ("Automatic", GENERAL, ""),
     ("Plain text", TEXT, ""),
@@ -84,6 +85,8 @@ MENU_FORMATS = (
     ("Currency rounded", NumberFormat("currency", 0), "$1,000"),
     None,
     ("Date", NumberFormat("date", 0), "9/26/2008"),
+    ("Friday, September 26", NumberFormat("custom", pattern="dddd, mmmm d"), ""),
+    ("Friday, September 26, 2008", NumberFormat("custom", pattern="dddd, mmmm d, yyyy"), ""),
     ("Time", NumberFormat("time", 0), "3:59:00 PM"),
     ("Date time", NumberFormat("datetime", 0), "9/26/2008 15:59:00"),
     ("Duration", NumberFormat("duration", 0), "24:01:00"),

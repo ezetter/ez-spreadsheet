@@ -183,7 +183,8 @@ def test_format_menu(window):
     assert [a.text() for a in window.number_menu.actions() if a.text()] == [
         "Automatic", "Plain text", "Number  (1,000.12)", "Percent  (10.12%)", "Scientific  (1.01E+03)",
         "Fraction  (1000 3/25)", "Accounting  ($ (1,000.12))", "Financial  ((1,000.12))", "Currency  ($1,000.12)",
-        "Currency rounded  ($1,000)", "Date  (9/26/2008)", "Time  (3:59:00 PM)",
+        "Currency rounded  ($1,000)", "Date  (9/26/2008)", "Friday, September 26", "Friday, September 26, 2008",
+        "Time  (3:59:00 PM)",
         "Date time  (9/26/2008 15:59:00)", "Duration  (24:01:00)", "Custom number format…"]
 
 
@@ -349,6 +350,8 @@ def test_menu_examples_are_what_the_formats_show():
     for name, fmt, example in filter(None, MENU_FORMATS):
         if example:
             assert " ".join(format_value(samples[name], fmt).split()) == example, name
+        elif fmt.kind == "custom":  # named by its example
+            assert format_value(39717, fmt) == name
 
 
 @pytest.mark.parametrize("typed, value, fmt", [
@@ -487,3 +490,17 @@ def test_fraction_format(window, tmp_path):
     assert other.format_actions["Fraction"].isChecked()
     other.setWindowModified(False)
     other.close()
+
+
+def test_long_date_formats(window):
+    model = window.model
+    model.set_cells({(0, 0): "9/26/2008", (1, 0): "39717.5"})
+    window.view.select_range(0, 0, 1, 0)
+    window.view.setCurrentIndex(model.index(0, 0))
+    window.view.select_range(0, 0, 1, 0)
+    window.format_actions["Friday, September 26, 2008"].trigger()
+    assert [model.display_text(r, 0) for r in range(2)] == ["Friday, September 26, 2008"] * 2
+    assert window.format_actions["Friday, September 26, 2008"].isChecked()
+    window.format_actions["Friday, September 26"].trigger()
+    assert model.display_text(0, 0) == "Friday, September 26"
+    assert window.format_actions["Friday, September 26"].isChecked()

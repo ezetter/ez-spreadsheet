@@ -128,7 +128,10 @@ choices as Google Sheets (the current cell's format is checked):
 - **Date**, **Time**, and **Date time** show the number as days counted from
   12/30/1899, as spreadsheets count them, so 39717.66 is `9/26/2008`,
   `3:50:24 PM`, or `9/26/2008 15:50:24`. **Duration** shows it as a length
-  of time in hours, minutes, and seconds: 1.000694 is `24:01:00`.
+  of time in hours, minutes, and seconds: 1.000694 is `24:01:00`. Two long
+  dates are listed by how they look, as Google Sheets lists them:
+  **Friday, September 26** and **Friday, September 26, 2008** (the custom
+  formats `dddd, mmmm d` and `dddd, mmmm d, yyyy`).
 - **Custom number format…** takes a pattern, as Google Sheets (and Excel)
   write them, in a dialog that starts with the current cell's format as one,
   previews it (with the current cell's number, its negative, zero, and some
