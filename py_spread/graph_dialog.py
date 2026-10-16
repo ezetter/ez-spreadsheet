@@ -6,6 +6,7 @@ changing one of the notebook's charts. (The code calls charts graphs.)"""
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
 from .appearance import error_color
+from .frame_name_dialog import FrameNameField
 from .notebook import (
     ALL_SERIES,
     CATEGORICAL,
@@ -78,10 +79,15 @@ class GraphDialog(QDialog):
     chart); the controls show what a chart draws now, and its columns can be
     changed if its DataFrame's cell was found. A new chart is of `columns`,
     from `new_source` (such as "the selected cells, A1:C4"), or can't be
-    made, for the reason `new_problem` gives."""
+    made, for the reason `new_problem` gives.
+
+    At the top, the DataFrame's name: for a new chart, starting at `frame`,
+    and changeable (a Python name; one of `taken`, which the notebook
+    already sets, is replaced); for one of the graphs, its own, shown."""
 
     def __init__(self, parent=None, columns=None, kind: str = "line", marker: str | None = None,
-                 graphs=None, current: int | None = None, new_source: str = "", new_problem: str | None = None):
+                 graphs=None, current: int | None = None, new_source: str = "", new_problem: str | None = None,
+                 frame: str = "df", taken=()):
         super().__init__(parent)
         self.setWindowTitle("Chart")
         self.setMinimumWidth(self.fontMetrics().averageCharWidth() * 48)
@@ -95,6 +101,9 @@ class GraphDialog(QDialog):
         layout.addWidget(self.summary)
 
         self.form = form = QFormLayout()
+        self._new_name = frame  # what a new chart's DataFrame is called, as typed
+        self.name_field = FrameNameField(frame, taken)
+        form.addRow("DataFrame name:", self.name_field)
         self.graph_box = None
         if self.graphs:
             self.graph_box = QComboBox()
@@ -154,6 +163,7 @@ class GraphDialog(QDialog):
         self.x_box.currentIndexChanged.connect(lambda _index: self._x_changed())
         self.y_box.currentIndexChanged.connect(lambda _index: self._y_changed())
         self.col_box.currentIndexChanged.connect(lambda _index: self._col_changed())
+        self.name_field.changed.connect(self._name_changed)
         self.marker_box.activated.connect(self._marker_chosen)
         if self.graphs:
             self.graph_box.setCurrentIndex(0 if current is None else current + 1)
@@ -196,9 +206,13 @@ class GraphDialog(QDialog):
         """Whether a categorical scatter is sideways, with the y column its categories."""
         return self.kind() in CATEGORICAL and self.categories_box.isChecked()
 
+    def frame(self) -> str | None:
+        """A new chart's DataFrame name (None when changing a chart)."""
+        return self.name_field.name() if self.chosen_graph() is None else None
+
     def choice(self) -> GraphChoice:
         return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue(), self.y_categories(),
-                           self.col())
+                           self.col(), self.frame())
 
     # --- Showing settings ---
 
@@ -221,6 +235,7 @@ class GraphDialog(QDialog):
             self._say(f"A new chart of {self.new_source} can't be made. {problem}", error=True)
         else:
             self._say(f"A new chart of {self.new_source}." if self.new_source else "")
+        self.name_field.set_name(self._new_name)
         self._allow(problem is None)
         self._show(kind, marker, None, None, None, False, None)
 
@@ -229,6 +244,7 @@ class GraphDialog(QDialog):
         self._x_chosen = self._y_chosen = True  # a chart's own columns stay, whatever the type
         self._older_ys = graph.y_labels if len(graph.y_labels) > 1 else None  # its series, kept as they are
         self._say("Change this chart. It's redrawn when you click OK.")
+        self.name_field.set_fixed(graph.frame)
         self._allow(True)
         self.columns = graph.columns
         if graph.columns is not None and graph.x_label not in graph.columns.labels:
@@ -364,10 +380,20 @@ class GraphDialog(QDialog):
         self.summary.setStyleSheet(f"color: {error_color(self.palette())};" if error else "")
 
     def _allow(self, allowed: bool) -> None:
-        """Whether the type and marker can be chosen, and OK clicked."""
+        """Whether the type, marker, and name can be chosen, and OK clicked."""
         self._allowed = allowed
-        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box, self.ok_button):
+        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box, self.name_field):
             widget.setEnabled(allowed)
+        self._update_ok()
+
+    def _update_ok(self) -> None:
+        """OK, unless a new chart can't be made, or its DataFrame's name won't do."""
+        self.ok_button.setEnabled(self._allowed and self.name_field.problem() is None)
+
+    def _name_changed(self) -> None:
+        if self.chosen_graph() is None:
+            self._new_name = self.name_field.edit.text()  # kept while a chart to change is looked at
+        self._update_ok()
 
     # --- Following changes ---
 

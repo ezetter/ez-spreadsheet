@@ -146,8 +146,8 @@ Data to Sheet…**, which brings a DataFrame back into the sheet.
 
 ### Sending cells as a DataFrame
 
-DataFrame opens the notebook with a new cell that makes a pandas DataFrame of
-the data and shows it, and the cell runs:
+DataFrame asks what to call the DataFrame, then opens the notebook with a new
+cell that makes a pandas DataFrame of the data and shows it, and the cell runs:
 
 ```python
 # Cells A1:C4 of the sheet, with row 1 as the column names.
@@ -166,11 +166,19 @@ df
   is text, and empty cells and errors are missing values (NaN).
 - Selecting whole columns or rows takes just the part with data in it. If
   nothing selected has data, no cell is made.
+- The DataFrame dialog's name starts at `df`, or `df2`, `df3`, and so on if
+  the notebook already sets `df`; type another, such as `sales`, to use that
+  instead. It has to be a Python name: letters, digits, and `_`, not starting
+  with a digit or `_`, and not one of Python's keywords or built-in names
+  (such as `list`), or one that EzSheet's code or the notebook's Python uses
+  (`pd`, `sns`, `chart`, `data`, `long`, `In`, `Out`, `display`,
+  `get_ipython`). Until it is, the dialog says why under it, and OK is
+  unavailable. A name the notebook already sets is fine; the dialog says so,
+  and the new DataFrame takes its place from there on. Cancel adds nothing.
 - The data is a snapshot, written into the cell as Python, so it's readable,
   editable, and still works after a restart. Editing the sheet afterwards
-  doesn't change the DataFrame; send the cells again for a fresh one. The next
-  is called `df2`, then `df3`, and so on, and each new cell goes at the end of
-  the notebook.
+  doesn't change the DataFrame; send the cells again for a fresh one. Each new
+  cell goes at the end of the notebook.
 
 ### Charting cells
 
@@ -194,6 +202,10 @@ chart = sns.relplot(
 
 The Chart dialog has these choices:
 
+- **DataFrame name**, at the top: what to call the new chart's DataFrame,
+  starting at `df` (or `df2`, ...) and following the same rules as the
+  DataFrame dialog's name. For a chart being changed (see below), it shows
+  that chart's DataFrame, greyed out.
 - **Chart type:** Line, Scatter, or Categorical scatter. Line and Scatter are
   drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
   a column of categories (text such as species or months) across and spreads

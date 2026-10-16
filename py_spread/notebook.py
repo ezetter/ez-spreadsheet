@@ -6,6 +6,8 @@ notebook cell holds the data, written out as Python, so it's readable,
 editable, and works the same after the kernel restarts.
 """
 
+import builtins
+import keyword
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -183,6 +185,36 @@ def next_frame_name(notebook: Notebook) -> str:
     return f"df{number}"
 
 
+_USED_NAMES = {**dict.fromkeys(("pd", "sns", "chart", "data", "long"), "EzSheet's code uses it"),
+               **dict.fromkeys(("In", "Out", "get_ipython", "display"), "the notebook's Python uses it")}
+
+
+def frame_name_problem(name: str) -> str | None:
+    """Why `name` can't be a DataFrame's (a Python name, and not one that
+    something else needs), or None if it can."""
+    if not name:
+        return "The DataFrame needs a name."
+    if not name.isidentifier():
+        return "A name is letters, digits, and _, and can't start with a digit."
+    if keyword.iskeyword(name):
+        return f"{name} is one of Python's keywords."
+    if name.startswith("_"):
+        return "A name starting with _ is kept for Python's own use."
+    if name in _USED_NAMES:
+        return f"{name} can't be used: {_USED_NAMES[name]}."
+    if hasattr(builtins, name):
+        return f"{name} is one of Python's built-in names."
+    return None
+
+
+def assigned_names(notebook: Notebook) -> set[str]:
+    """The names the notebook's cells set at the start of a line (df = ...)."""
+    names = set()
+    for cell in notebook.cells:
+        names.update(re.findall(r"^(\w+)\s*=(?!=)", cell.source, re.M))
+    return names
+
+
 def data_block(model, cells) -> set[tuple[int, int]]:
     """The selected (row, col) cells inside the smallest block holding every
     selected cell that has something in it, so selecting whole columns or rows
@@ -292,8 +324,9 @@ class GraphChoice:
     coloring the points by its values, and whether a categorical scatter's
     y column is its categories, turning it sideways (as a column of text
     always is; for one of numbers, such as years, it has to be asked for),
-    and the col column, if any, splitting it into a panel for each of its
-    values (categories, or numbers such as years)."""
+    the col column, if any, splitting it into a panel for each of its
+    values (categories, or numbers such as years), and for a new chart,
+    what to call its DataFrame (None: the next of df, df2, ...)."""
 
     kind: str
     marker: str | None
@@ -302,6 +335,7 @@ class GraphChoice:
     hue: str | None = None
     y_categories: bool = False
     col: str | None = None
+    frame: str | None = None
 
 
 def _is_number(value) -> bool:

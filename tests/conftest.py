@@ -35,6 +35,10 @@ class Dialogs:
         self.chart_prompts = []  # (the new chart's columns, what it's of, why it can't be made) each time
         self.graph_change_prompts = []  # (the graphs offered, the one it started with)
         self.load_answer = None  # Load Data to Sheet: the DataFrame's name; None cancels
+        # The name typed for a new DataFrame, in the DataFrame dialog or for a new chart; None keeps the default.
+        self.frame_name_answer = None
+        self.frame_name_cancel = False  # the DataFrame dialog's Cancel
+        self.frame_name_prompts = []  # (the name it started at, what it's of) each time either asks
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
 
 
@@ -71,21 +75,29 @@ def dialogs(monkeypatch):
 
     monkeypatch.setattr(MainWindow, "_ask_delete_shift", ask_delete_shift)
 
-    def ask_graph_options(window, columns, source):
+    def ask_frame_name(window, name, source):
+        dialogs.frame_name_prompts.append((name, source))
+        return None if dialogs.frame_name_cancel else dialogs.frame_name_answer or name
+
+    monkeypatch.setattr(MainWindow, "_ask_frame_name", ask_frame_name)
+
+    def ask_graph_options(window, columns, source, frame):
         dialogs.graph_prompts.append((list(columns.labels), (window.graph_kind, window.graph_marker)))
+        dialogs.frame_name_prompts.append((frame, source))
         if dialogs.graph_answer is None:
             return None
         kind, marker, *axes = dialogs.graph_answer
         x = axes[0] if axes else columns.default_x(kind)
         return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
                            axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False,
-                           axes[4] if len(axes) > 4 else None)
+                           axes[4] if len(axes) > 4 else None, dialogs.frame_name_answer or frame)
 
     monkeypatch.setattr(MainWindow, "_ask_graph_options", ask_graph_options)
 
-    def ask_chart(window, graphs, current, columns, source, problem):
+    def ask_chart(window, graphs, current, columns, source, problem, frame):
         dialogs.graph_change_prompts.append((list(graphs), current))
         dialogs.chart_prompts.append((columns, source, problem))
+        dialogs.frame_name_prompts.append((frame, source))
         if dialogs.graph_change_answer is None:
             return None
         index, kind, marker, *axes = dialogs.graph_change_answer
@@ -95,7 +107,7 @@ def dialogs(monkeypatch):
             x = axes[0] if axes else columns.default_x(kind)
             return None, GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
                                      axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False,
-                                     axes[4] if len(axes) > 4 else None)
+                                     axes[4] if len(axes) > 4 else None, dialogs.frame_name_answer or frame)
         graph = graphs[index]
         return index, GraphChoice(kind, marker, axes[0] if axes else graph.x_label,
                                   axes[1] if len(axes) > 1 else graph.y_labels,

@@ -486,7 +486,7 @@ def test_dialog_starts_with_defaults(app):
 def test_dialog_starts_with_the_last_choices(app):
     dialog = GraphDialog(None, sales_columns(), "scatter", "D")
     assert dialog_state(dialog) == ("scatter", "Month", ["Sales"], None, "D")
-    assert dialog.choice() == GraphChoice("scatter", "D", "Month", ["Sales"], None)
+    assert dialog.choice() == GraphChoice("scatter", "D", "Month", ["Sales"], None, frame="df")
 
 
 def test_choosing_the_axes_and_hue(app):
@@ -639,16 +639,16 @@ def test_col_for_line_and_scatter_charts(app):
     dialog.x_box.activated.emit(dialog.x_box.currentIndex())
     assert items(dialog.col_box) == ["None", "Region", "Sales", "Cost"]
     dialog.col_box.setCurrentIndex(1)
-    assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Region")
+    assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Region", "df")
     dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Cost"]))
     dialog.y_box.activated.emit(dialog.y_box.currentIndex())
     assert dialog.choice().col == "Region"  # whatever's up
     dialog.kind_box.setCurrentIndex(1)  # Scatter: panels too
     assert dialog.form.isRowVisible(dialog.col_box)
-    assert dialog.choice() == GraphChoice("scatter", "o", "Month", ["Cost"], None, False, "Region")
+    assert dialog.choice() == GraphChoice("scatter", "o", "Month", ["Cost"], None, False, "Region", "df")
     dialog.kind_box.setCurrentIndex(2)  # Categorical scatter: panels too
     assert dialog.form.isRowVisible(dialog.col_box)
-    assert dialog.choice() == GraphChoice("strip", "o", "Month", ["Cost"], None, False, "Region")
+    assert dialog.choice() == GraphChoice("strip", "o", "Month", ["Cost"], None, False, "Region", "df")
     dialog.kind_box.setCurrentIndex(0)
     assert dialog.col() == "Region"
     assert items(dialog.col_box) == ["None", "Region", "Sales"]  # not Cost, up
@@ -664,7 +664,7 @@ def test_col_of_numbers_isnt_one_of_alls_lines(app):
     assert dialog.ys() == ["Year", "Sales", "Cost"] and items(dialog.col_box) == ["None", "Year", "Sales", "Cost"]
     dialog.col_box.setCurrentIndex(dialog.col_box.findData("Year"))
     assert dialog.y_box.currentText() == "All" and dialog.ys() == ["Sales", "Cost"]  # a panel for each year
-    assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Year")
+    assert dialog.choice() == GraphChoice("line", None, "Month", ["Sales", "Cost"], None, False, "Year", "df")
     assert items(dialog.y_box) == ["All", "Year", "Sales", "Cost"]
     dialog.col_box.setCurrentIndex(0)
     assert dialog.y_box.currentText() == "All" and dialog.ys() == ["Year", "Sales", "Cost"]
@@ -684,7 +684,7 @@ def test_linear_regression_checkbox(app):
     dialog.regression_box.setChecked(True)
     assert (dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()) == ("reg", "Sales", ["Cost"], "o")
     assert items(dialog.x_box) == ["Sales", "Cost"]  # numbers across, to fit a line to
-    assert dialog.choice() == GraphChoice("reg", "o", "Sales", ["Cost"], None, False, None)
+    assert dialog.choice() == GraphChoice("reg", "o", "Sales", ["Cost"], None, False, None, "df")
     dialog.regression_box.setChecked(False)
     assert (dialog.kind(), dialog.x()) == ("scatter", "Region")  # it follows the type again
     dialog.kind_box.setCurrentIndex(2)

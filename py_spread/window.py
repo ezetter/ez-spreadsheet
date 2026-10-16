@@ -39,6 +39,7 @@ from .csvfile import read_csv, write_csv
 from .fill import FILL_MODES, FillController, FillMode
 from .fill_dialogs import FillDialogs
 from .functions import ANGLE_UNITS, DEGREES, RADIANS
+from .frame_name_dialog import FrameNameDialog
 from .kernel import KernelRunner
 from .graph_dialog import GraphDialog, graph_labels
 from .graphs import change_graph, find_graphs, frame_cell
@@ -49,6 +50,7 @@ from .notebook import (
     GraphChoice,
     GraphError,
     Notebook,
+    assigned_names,
     data_block,
     dataframe_code,
     frame_graph_code,
@@ -1145,15 +1147,18 @@ class MainWindow(QMainWindow):
         return self.notebook_window
 
     def send_to_notebook(self) -> str | None:
-        """Put the selected cells in a pandas DataFrame in a new notebook cell,
-        open the notebook, and run the cell. Returns the new cell's id, or None
-        if the selection is empty."""
+        """Put the selected cells in a pandas DataFrame, named in the
+        DataFrame dialog (df, df2, ... to start with), in a new notebook
+        cell, open the notebook, and run the cell. Returns the new cell's id,
+        or None if the selection is empty or the dialog was cancelled."""
         self._commit_pending_edit()
         cells = data_block(self.model, self._selected_cells())
         if not cells:
             self._show_status("The selection is empty. Select cells with data to make a DataFrame of them.")
             return None
-        name = next_frame_name(self.notebook)
+        name = self._ask_frame_name(next_frame_name(self.notebook), f"the selected cells, {_block_name(cells)}")
+        if name is None:
+            return None
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas = importing_cell(self.notebook, "pandas")
         [cell_id] = self._run_in_notebook([dataframe_code(self.model, cells, name, pandas is None)], [pandas])
@@ -1182,9 +1187,10 @@ class MainWindow(QMainWindow):
             if problem is not None:
                 self._show_error(f"Can't make a chart of {source}.", problem)
                 return None
-            choice = self._ask_graph_options(columns, source)
+            choice = self._ask_graph_options(columns, source, next_frame_name(self.notebook))
             return None if choice is None else self._make_chart(cells, source, choice)
-        answer = self._ask_chart(graphs, self._first_chart(graphs), columns, source, problem)
+        answer = self._ask_chart(graphs, self._first_chart(graphs), columns, source, problem,
+                                 next_frame_name(self.notebook))
         if answer is None:
             return None
         index, choice = answer
@@ -1201,8 +1207,7 @@ class MainWindow(QMainWindow):
             cells = data_block(self.model, selected)
             if not cells:
                 return set(), "the selected cells", "The selection is empty."
-            rows, cols = [row for row, _ in cells], [col for _, col in cells]
-            return cells, f"the selected cells, {cell_name(min(rows), min(cols))}:{cell_name(max(rows), max(cols))}", None
+            return cells, f"the selected cells, {_block_name(cells)}", None
         used = self.model.used_range()
         if used is None:
             return set(), "the sheet", "The sheet is empty."
@@ -1225,7 +1230,7 @@ class MainWindow(QMainWindow):
         chosen of it in the next; open the notebook and run them. Returns the
         chart cell's id."""
         self.graph_kind, self.graph_marker = choice.kind, choice.marker
-        name = next_frame_name(self.notebook)
+        name = choice.frame or next_frame_name(self.notebook)
         self.show_notebook()  # a new notebook gets its imports cell first
         pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
         graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys, choice.hue,
@@ -1271,22 +1276,31 @@ class MainWindow(QMainWindow):
         self._show_status(f"Redrawing the chart {graph_labels(graphs)[index]}.")
         return graph.cell_id
 
-    def _ask_chart(self, graphs, current: int | None, columns, source: str,
-                   problem: str | None) -> tuple[int | None, GraphChoice] | None:
+    def _ask_chart(self, graphs, current: int | None, columns, source: str, problem: str | None,
+                   frame: str) -> tuple[int | None, GraphChoice] | None:
         """The Chart dialog with its list of the notebook's charts and New
         chart (current None): (which, None for a new one; the choices), or
         None if cancelled. `problem` says why a new chart of `source` can't
-        be made."""
+        be made; `frame` is what its DataFrame's name starts at."""
         dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, graphs=graphs, current=current,
-                             new_source=source, new_problem=problem)
+                             new_source=source, new_problem=problem, frame=frame,
+                             taken=assigned_names(self.notebook))
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog.chosen_graph(), dialog.choice()
 
-    def _ask_graph_options(self, columns, source: str) -> GraphChoice | None:
-        """The Chart dialog for a new chart of these GraphColumns: the choices, or None if cancelled."""
-        dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, new_source=source)
+    def _ask_graph_options(self, columns, source: str, frame: str) -> GraphChoice | None:
+        """The Chart dialog for a new chart of these GraphColumns, its
+        DataFrame's name starting at `frame`: the choices, or None if cancelled."""
+        dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, new_source=source, frame=frame,
+                             taken=assigned_names(self.notebook))
         return dialog.choice() if dialog.exec() == QDialog.Accepted else None
+
+    def _ask_frame_name(self, name: str, source: str) -> str | None:
+        """The DataFrame dialog: what to call the DataFrame of `source`,
+        starting at `name`, or None if cancelled."""
+        dialog = FrameNameDialog(self, name, source, assigned_names(self.notebook))
+        return dialog.name() if dialog.exec() == QDialog.Accepted else None
 
     def load_data_to_sheet(self) -> None:
         """Ask the notebook's Python for its DataFrames, then which one to
@@ -1847,3 +1861,9 @@ class MainWindow(QMainWindow):
                 # Leaving the bar commits what was typed, like leaving a cell.
                 self._store_edit_bar()
         return super().eventFilter(obj, event)
+
+
+def _block_name(cells) -> str:
+    """The block holding the (row, col) cells, such as A1:C4."""
+    rows, cols = [row for row, _ in cells], [col for _, col in cells]
+    return f"{cell_name(min(rows), min(cols))}:{cell_name(max(rows), max(cols))}"
