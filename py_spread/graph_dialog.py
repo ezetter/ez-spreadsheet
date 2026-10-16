@@ -6,7 +6,16 @@ changing one of the notebook's charts. (The code calls charts graphs.)"""
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
 from .appearance import error_color
-from .notebook import ALL_SERIES, CATEGORICAL, COL_WRAP, FACETED, GRAPH_TYPES, NEEDS_MARKERS, GraphChoice
+from .notebook import (
+    ALL_SERIES,
+    CATEGORICAL,
+    COL_WRAP,
+    FACETED,
+    GRAPH_TYPES,
+    NEEDS_MARKERS,
+    REGRESSION,
+    GraphChoice,
+)
 
 MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     None: "None",
@@ -21,6 +30,7 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     "*": "★ Star",
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
+TYPE_OF = {"swarm": "strip", "reg": "scatter"}  # the chart type of kinds that are a checkbox of another
 NO_HUE = "None"
 NO_COL = "None"
 NEW_CHART = "New chart"
@@ -31,6 +41,9 @@ HUE_TIP = "A column whose values color the points, with a legend"
 COL_TIP = (f"A column whose values each get a panel, {COL_WRAP} to a row, sharing their axes: categories "
            "(text), or numbers such as years")
 NO_COLS_TIP = "There's no column, besides the X and Y axes', to split the chart by."
+REGRESSION_TIP = ("Fit a straight line to the points, with a band showing its 95% confidence interval "
+                  "(Seaborn's lmplot). It needs numbers across, so the X axis offers only columns with numbers.")
+NO_REGRESSION_TIP = "A linear regression needs two columns with numbers: one across, and one up."
 _CURRENT = object()  # (for _set_axes: the Col chosen now)
 
 
@@ -43,20 +56,22 @@ def graph_labels(graphs) -> list[str]:
 
 
 class GraphDialog(QDialog):
-    """The chart type (Line, Scatter, or Categorical scatter, which can be a
-    swarm plot), the X axis column, the Y axis column, the Hue column whose
-    values color the points (None by default), the Col column splitting
-    it into a panel for each of its values (None by default; a column of
-    numbers, such as years, isn't one of All's lines then), and a marker
-    (None by default). Up takes a column with numbers, except that a
-    categorical scatter across a column of numbers can have its categories
-    up, turning it sideways: a column of text, or one of numbers (such as
-    years) with "Y axis as categories" checked. Across then takes only
-    columns with numbers. For a new graph of `columns` (GraphColumns), the axes start at
-    the type's defaults, and follow the type until an X axis is chosen (and
-    the Y axis follows the X until it's chosen). Scatter graphs need markers
-    to show their points, so None is unavailable for them; choosing one
-    switches None to circles, and Line switches them back.
+    """The chart type (Line, Scatter, which can have a linear regression
+    line fitted to it, or Categorical scatter, which can be a swarm plot),
+    the X axis column, the Y axis column, the Hue column whose values color
+    the points (None by default), the Col column splitting it into a panel
+    for each of its values (None by default; a column of numbers, such as
+    years, isn't one of All's lines then), and a marker (None by default).
+    Up takes a column with numbers, except that a categorical scatter
+    across a column of numbers can have its categories up, turning it
+    sideways: a column of text, or one of numbers (such as years) with "Y
+    axis as categories" checked. Across then takes only columns with
+    numbers, as it does for a linear regression. For a new graph of
+    `columns` (GraphColumns), the axes start at the type's defaults, and
+    follow the type until an X axis is chosen (and the Y axis follows the
+    X until it's chosen). Scatter graphs need markers to show their points,
+    so None is unavailable for them; choosing one switches None to circles,
+    and Line switches them back.
 
     Given the notebook's `graphs` (GraphCells), a Chart list chooses New
     chart or one of them to change, starting at graphs[current] (None: New
@@ -98,6 +113,9 @@ class GraphDialog(QDialog):
         self.categories_box = QCheckBox("Y axis as categories")
         self.categories_box.setToolTip(CATEGORIES_TIP)
         form.addRow("", self.categories_box)
+        self.regression_box = QCheckBox("Linear regression")
+        self.regression_box.setToolTip(REGRESSION_TIP)
+        form.addRow("", self.regression_box)
         self.x_box = QComboBox()
         form.addRow("X axis:", self.x_box)
         self.y_box = QComboBox()
@@ -121,6 +139,7 @@ class GraphDialog(QDialog):
         self.ok_button = box.button(QDialogButtonBox.Ok)
 
         self._loading = False
+        self._allowed = True  # whether the type can be chosen (see _allow)
         self._older_ys = None  # the series of a chart being changed that has several (they stay)
         self._every = []  # what All takes up now
         self._none_replaced = False  # a scatter graph swapped None for circles, to undo on Line
@@ -128,6 +147,7 @@ class GraphDialog(QDialog):
         self._y_chosen = bool(self.graphs)  # likewise, the y follows the x until chosen
         self.kind_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.swarm_box.toggled.connect(lambda _checked: self._kind_changed())
+        self.regression_box.toggled.connect(lambda _checked: self._kind_changed())
         self.categories_box.toggled.connect(lambda _checked: self._categories_toggled())
         self.x_box.activated.connect(self._x_picked)
         self.y_box.activated.connect(self._y_picked)
@@ -150,7 +170,11 @@ class GraphDialog(QDialog):
 
     def kind(self) -> str:
         kind = self.kind_box.currentData()
-        return "swarm" if kind in CATEGORICAL and self.swarm_box.isChecked() else kind
+        if kind in CATEGORICAL and self.swarm_box.isChecked():
+            return "swarm"
+        if kind == TYPE_OF["reg"] and self.regression_box.isChecked():
+            return "reg"
+        return kind
 
     def marker(self) -> str | None:
         return self.marker_box.currentData()
@@ -219,8 +243,9 @@ class GraphDialog(QDialog):
             self.marker_box.addItem(marker, marker)  # one set in the code that the list doesn't have
         self._none_replaced = False
         self.marker_box.setCurrentIndex(max(0, self.marker_box.findData(marker)))
-        self.kind_box.setCurrentIndex(max(0, self.kind_box.findData("strip" if kind in CATEGORICAL else kind)))
+        self.kind_box.setCurrentIndex(max(0, self.kind_box.findData(TYPE_OF.get(kind, kind))))
         self.swarm_box.setChecked(kind == "swarm")
+        self.regression_box.setChecked(kind in REGRESSION and (self.columns is None or self.columns.can_regress))
         self.categories_box.setChecked(y_categories)
         known = self.columns is not None
         for box in (self.x_box, self.y_box, self.hue_box, self.col_box, self.categories_box):
@@ -253,6 +278,8 @@ class GraphDialog(QDialog):
         kind = self.kind()
         col = self.col_box.currentData() if col is _CURRENT else col
         splitting = col if kind in FACETED else None
+        if x not in self.columns.x_options(None, kind):  # a linear regression's x has to have numbers
+            x = self.columns.default_x(kind, splitting)
         options = self.columns.y_options(x, kind)
         every = [y for y in self.columns.y_options(x) if y != splitting] if kind in ALL_SERIES else []
         if ys is not None and len(ys) > 1 and ys == self._every and len(every) > 1:
@@ -338,7 +365,8 @@ class GraphDialog(QDialog):
 
     def _allow(self, allowed: bool) -> None:
         """Whether the type and marker can be chosen, and OK clicked."""
-        for widget in (self.kind_box, self.swarm_box, self.marker_box, self.ok_button):
+        self._allowed = allowed
+        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box, self.ok_button):
             widget.setEnabled(allowed)
 
     # --- Following changes ---
@@ -350,6 +378,10 @@ class GraphDialog(QDialog):
         self.form.setRowVisible(self.swarm_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.categories_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.col_box, kind in FACETED)
+        self.form.setRowVisible(self.regression_box, self.kind_box.currentData() == TYPE_OF["reg"])
+        can_regress = self.columns is None or self.columns.can_regress
+        self.regression_box.setEnabled(self._allowed and can_regress)
+        self.regression_box.setToolTip(REGRESSION_TIP if can_regress else NO_REGRESSION_TIP)
         needs_markers = kind in NEEDS_MARKERS
         none_item = self.marker_box.model().item(0)
         none_item.setEnabled(not needs_markers)
@@ -368,7 +400,10 @@ class GraphDialog(QDialog):
                 self._set_axes(x, self.ys() if self._y_chosen else None)
                 self._fill_hues(self.hue_box.currentData() if self.hue_box.currentData() != x else None)
         # What works across and up depends on the type; and a new chart's y follows it until chosen.
-        self._set_axes(self.x(), self.ys() if self._y_chosen else None)
+        x, hue = self.x(), self.hue_box.currentData()
+        self._set_axes(x, self.ys() if self._y_chosen else None)
+        if self.x() != x:  # numbers across, for a linear regression
+            self._fill_hues(hue if hue != self.x() else None)
 
     def _categories_toggled(self) -> None:
         if not self._loading and self.columns is not None:

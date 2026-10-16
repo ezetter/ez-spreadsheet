@@ -424,6 +424,30 @@ def test_col_of_whole_numbers_with_gaps(years, pyplot):
     assert "dropna" not in graph_code(years, block(0, 0, 5, 3), "df", "line", None, x="Year", ys=["Sales"])
 
 
+def test_linear_regression(regions, pyplot):
+    code = graph_code(regions, block(0, 0, 6, 3), "df", "reg", "o", x="Sales", ys=["Cost"])
+    assert code.endswith("chart = sns.lmplot(\n    data=df, x='Sales', y='Cost',\n"
+                         "    markers='o', height=4, aspect=1.5,\n)")  # lmplot has no kind=
+    g = graph(regions, block(0, 0, 6, 3), "reg", "o", x="Sales", ys=["Cost"])
+    [points, band] = g.ax.collections
+    assert len(points.get_offsets()) == 6 and len(plotted(g)) == 1  # the points, and the line fitted to them
+    g = graph(regions, block(0, 0, 6, 3), "reg", "D", x="Sales", ys=["Cost"], hue="Month", col="Region")
+    assert len(g.axes.flat) == 3 and [t.get_text() for t in g.legend.texts] == ["Jan", "Feb"]
+
+
+def test_linear_regression_needs_numbers_across(regions, sales, pyplot):
+    with pytest.raises(ValueError):
+        graph_code(regions, block(0, 0, 6, 3), "df", "reg", "o", x="Month", ys=["Sales"])
+    assert "x='Sales', y='Cost'" in graph_code(regions, block(0, 0, 6, 3), "df", "reg", "o")  # by default
+    columns = graph_columns(regions, block(0, 0, 6, 3))
+    assert columns.x_options(None, "reg") == ["Sales", "Cost"] and columns.can_regress
+    assert not graph_columns(sales, block(0, 0, 3, 1)).can_regress  # Month and Sales: one column of numbers
+    code = graph_code(sales, block(0, 0, 3, 2), "df", "reg", "o", x="Cost", ys=["Sales"])
+    assert "data['Cost'] = pd.to_numeric(data['Cost'], errors='coerce')" in code and "astype" not in code
+    g = graph(sales, block(0, 0, 3, 2), "reg", "o", x="Cost", ys=["Sales"])
+    assert len(g.ax.collections[0].get_offsets()) == 2  # n/a isn't charted
+
+
 def test_x_with_the_only_numbers_goes_up_instead(app):
     model = SheetModel(rows=10, cols=4)
     model.set_cells({(0, 0): "n", (0, 1): "t", (1, 0): "1", (1, 1): "a", (2, 0): "2", (2, 1): "b"})
@@ -649,6 +673,43 @@ def test_col_of_numbers_isnt_one_of_alls_lines(app):
     assert dialog.ys() == ["Sales", "Cost"]
     dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Year"]))  # the years up: no panels of them
     assert (dialog.ys(), dialog.col()) == (["Year"], None) and dialog.y_box.itemData(0) == ["Year", "Sales", "Cost"]
+
+
+def test_linear_regression_checkbox(app):
+    dialog = GraphDialog(None, region_columns())
+    assert not dialog.form.isRowVisible(dialog.regression_box)  # just for Scatter
+    dialog.kind_box.setCurrentIndex(1)
+    assert dialog.form.isRowVisible(dialog.regression_box) and not dialog.regression_box.isChecked()
+    assert (dialog.kind(), dialog.x()) == ("scatter", "Region")
+    dialog.regression_box.setChecked(True)
+    assert (dialog.kind(), dialog.x(), dialog.ys(), dialog.marker()) == ("reg", "Sales", ["Cost"], "o")
+    assert items(dialog.x_box) == ["Sales", "Cost"]  # numbers across, to fit a line to
+    assert dialog.choice() == GraphChoice("reg", "o", "Sales", ["Cost"], None, False, None)
+    dialog.regression_box.setChecked(False)
+    assert (dialog.kind(), dialog.x()) == ("scatter", "Region")  # it follows the type again
+    dialog.kind_box.setCurrentIndex(2)
+    assert not dialog.form.isRowVisible(dialog.regression_box) and dialog.kind() == "strip"
+
+
+def test_linear_regression_takes_numbers_across(app):
+    dialog = GraphDialog(None, region_columns(), "scatter", "o")
+    dialog.x_box.setCurrentIndex(dialog.x_box.findData("Month"))
+    dialog.x_box.activated.emit(dialog.x_box.currentIndex())
+    dialog.hue_box.setCurrentIndex(dialog.hue_box.findData("Sales"))
+    dialog.col_box.setCurrentIndex(dialog.col_box.findData("Region"))
+    dialog.regression_box.setChecked(True)
+    assert (dialog.x(), dialog.ys(), dialog.hue(), dialog.col()) == ("Sales", ["Cost"], None, "Region")
+    assert items(dialog.hue_box) == ["None", "Region", "Month", "Cost"]  # any but x
+
+
+def test_linear_regression_needs_two_columns_of_numbers(app):
+    columns = GraphColumns(["Month", "Sales"], [False, True], [True, False])
+    dialog = GraphDialog(None, columns, "reg", "o")  # the last choice
+    assert dialog.kind() == "scatter" and not dialog.regression_box.isEnabled()
+    assert "two columns with numbers" in dialog.regression_box.toolTip()
+    remembered = GraphDialog(None, region_columns(), "reg", "D")
+    assert remembered.kind_box.currentText() == "Scatter" and remembered.regression_box.isChecked()
+    assert (remembered.kind(), remembered.x(), remembered.marker()) == ("reg", "Sales", "D")
 
 
 def test_categorical_scatter_across_isnt_the_col(app):
@@ -1313,6 +1374,21 @@ def test_change_a_graphs_columns(window, dialogs):
     assert source == graph_code(window.model, block(0, 0, 3, 2), "df", "strip", "D", x="Month", ys=["Sales"],
                                 import_pandas=False, import_seaborn=False)
     assert window.kernel.runs[-1][0] == graph_id
+
+
+def test_linear_regression_chart(window, dialogs):
+    window.model.set_cells({(0, 3): "Cost", (1, 3): "800", (2, 3): "950", (3, 3): "990"})
+    window.view.select_range(0, 0, 3, 3)  # Month, Sales, Note, Cost
+    dialogs.graph_answer = ("reg", "D", "Sales", ["Cost"])
+    graph_id = window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "sns.lmplot(" in source and "markers='D', height=4" in source and "kind=" not in source
+    assert window.graph_kind == "reg"  # remembered for next time
+    dialogs.graph_change_answer = (0, "scatter", "D")  # without the line: just the code's call changes
+    window.send_graph_to_notebook()
+    assert dialogs.graph_change_prompts[0][0][0].kind == "reg"
+    source = window.notebook.cell(graph_id).source
+    assert "sns.relplot(" in source and "kind='scatter',  # or 'line'" in source and "marker='D'," in source
 
 
 def test_swarm_graph_with_hue(window, dialogs):

@@ -258,16 +258,30 @@ def dataframe_code(model, cells, name: str = "df", import_pandas: bool = True) -
 # --- Graphing them with Seaborn ---
 
 GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter"}  # the Chart dialog's
-GRAPH_KINDS = ("line", "scatter", "strip", "swarm")  # Seaborn's kinds: swarm is a categorical scatter too
-CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories; the rest with relplot
-NEEDS_MARKERS = {"scatter", "strip", "swarm"}  # their points are nothing but markers
+GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "reg")  # Seaborn's kinds: swarm is a categorical
+# scatter too, and reg a scatter with a linear regression line
+CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories
+REGRESSION = {"reg"}  # drawn with lmplot, which fits a line to numbers both ways; the rest with relplot
+NEEDS_MARKERS = {"scatter", "strip", "swarm", "reg"}  # their points are nothing but markers
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
+OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
+               "swarm": "  # or 'strip'"}  # what follows kind=, naming the other kind its function draws
 FACETED = set(GRAPH_KINDS)  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
 
 
 class GraphError(ValueError):
     """The selected cells can't be graphed; the message says why."""
+
+
+def plot_function(kind: str) -> str:
+    """The Seaborn function drawing a kind of graph."""
+    return "catplot" if kind in CATEGORICAL else "lmplot" if kind in REGRESSION else "relplot"
+
+
+def marker_keyword(kind: str) -> str:
+    """What the function drawing a kind of graph calls its marker."""
+    return "markers" if kind in REGRESSION else "marker"
 
 
 @dataclass
@@ -328,10 +342,18 @@ class GraphColumns:
 
     def x_options(self, y: str | None, kind: str = "line", y_categories: bool = False) -> list[str]:
         """The columns that can go across: any, except that with categories
-        up a categorical scatter (sideways), only those with numbers."""
+        up a categorical scatter (sideways), only those with numbers; and a
+        linear regression needs numbers across too."""
         if self.sideways([y] if y in self.labels else [], kind, y_categories):
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != y]
+        if kind in REGRESSION:
+            return [label for label, numbers in zip(self.labels, self.numbers) if numbers]
         return list(self.labels)
+
+    @property
+    def can_regress(self) -> bool:
+        """Whether there are numbers to fit a line to: two columns of them."""
+        return sum(self.numbers) >= 2
 
     def sideways(self, ys: list[str], kind: str, y_categories: bool = False) -> bool:
         """Whether a categorical scatter has its categories up the y axis: a
@@ -350,12 +372,15 @@ class GraphColumns:
 
     def default_x(self, kind: str, col: str | None = None) -> str:
         """The first column that leaves another with numbers for y; for a
-        categorical scatter, the first such with text, as its categories.
-        Not the col splitting the chart into panels, if there's another."""
+        categorical scatter, the first such with text, as its categories,
+        and for a linear regression, with numbers. Not the col splitting
+        the chart into panels, if there's another."""
         usable = [label for label in self.labels if self.y_options(label)]
         usable = [label for label in usable if label != col] or usable
         if kind in CATEGORICAL:
             usable = [label for label, text in zip(self.labels, self.text) if text and label in usable] or usable
+        if kind in REGRESSION:
+            usable = [label for label in usable if label in self.x_options(None, kind)] or usable
         return usable[0]
 
     def default_ys(self, x: str, kind: str = "line", col: str | None = None) -> list[str]:
@@ -402,7 +427,9 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     the points colored by the `hue` column's values, if given. `kind` is
     "line" or "scatter" (relplot), or a categorical scatter (catplot):
     "strip" jitters each category's points, "swarm" spreads them so none
-    overlap. A categorical scatter can have its categories up the y axis
+    overlap; or "reg" (lmplot), a scatter with a linear regression line
+    fitted to its points, and the line's 95% confidence band, which needs
+    numbers across too. A categorical scatter can have its categories up the y axis
     instead, with numbers across, turning it sideways: as a y column of text
     does, or one of numbers (such as years) with `y_categories`. `marker` is a Matplotlib marker such as "o" for each point
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
@@ -422,7 +449,7 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     sideways = columns.sideways(ys, kind, y_categories)  # the categories go up, and the numbers across
     if (x not in columns.labels or not ys or any(y not in columns.y_options(x, kind) for y in ys)
             or len(ys) > 1 and any(columns.category(y) for y in ys)
-            or sideways and x not in columns.x_options(ys[0], kind, y_categories)):
+            or x not in columns.x_options(ys[0] if len(ys) == 1 else None, kind, y_categories)):
         raise ValueError(f"can't chart {ys!r} against {x!r}")
     if hue is not None and (hue not in columns.hue_options(x) or len(ys) > 1):
         raise ValueError(f"can't color the chart by {hue!r}")
@@ -430,9 +457,15 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         raise ValueError(f"can't split the chart by {col!r}")
     values = dict(zip(frame.labels, frame.columns))
 
-    labeled, measured = (ys[0], [x]) if sideways else (x, ys)  # the axis of labels; the columns of numbers
+    if sideways:  # the axis of labels; the columns of numbers
+        labeled, measured = ys[0], [x]
+    elif kind in REGRESSION:  # a line fitted to numbers both ways
+        labeled, measured = None, [x, *ys]
+    else:
+        labeled, measured = x, ys
     fixes = []  # changes Seaborn needs, made to a copy of the DataFrame
-    if any(isinstance(v, str) for v in values[labeled]) and any(_is_number(v) for v in values[labeled]):
+    if labeled is not None and any(isinstance(v, str) for v in values[labeled]) and any(
+            _is_number(v) for v in values[labeled]):
         fixes.append(f"data[{labeled!r}] = data[{labeled!r}].astype('string')  # numbers and text: all labels")
     for column in measured:
         if any(isinstance(v, str) for v in values[column]):
@@ -463,19 +496,14 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         lines.append(f"long = {data}.melt(id_vars={kept!r}, value_vars={ys!r}, "
                      f"var_name={series_name!r}, value_name={value!r})")
         plotted = f"data=long, x={x!r}, y={value!r}, hue={series_name!r}"
-    function = "catplot" if kind in CATEGORICAL else "relplot"
-    other = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
-             "swarm": "  # or 'strip'"}[kind]
-    marker = f"marker={marker!r}, " if marker else ""
-    lines += [f"chart = sns.{function}(", f"    {plotted},"]
+    marker = f"{marker_keyword(kind)}={marker!r}, " if marker else ""
+    lines += [f"chart = sns.{plot_function(kind)}(", f"    {plotted},"]
     if col is not None:  # smaller panels, so two to a row fit the notebook
         lines.append(f"    col={col!r}, col_wrap={COL_WRAP},  # a panel for each, {COL_WRAP} to a row")
+    if kind not in REGRESSION:  # (lmplot has just the one kind)
+        lines.append(f"    kind={kind!r},{OTHER_KINDS[kind]}")
     size = "height=2.5, aspect=1.2" if col is not None else "height=4, aspect=1.5"
-    lines += [
-        f"    kind={kind!r},{other}",
-        f"    {marker}{size},",
-        ")",
-    ]
+    lines += [f"    {marker}{size},", ")"]
     return "\n".join(lines)
 
 

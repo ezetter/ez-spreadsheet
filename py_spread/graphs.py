@@ -1,10 +1,10 @@
 """The notebook's charts (graphs, in the code's names): finding cells that
-draw a Seaborn chart (one sns.relplot or sns.catplot call), reading what
-they draw, and changing it, for the Chart dialog.
+draw a Seaborn chart (one sns.relplot, sns.catplot, or sns.lmplot call),
+reading what they draw, and changing it, for the Chart dialog.
 
-Changing a graph's type or marker touches only kind=, marker=, and which of
-relplot and catplot draws it, so anything else changed by hand in its cell
-stays. Changing its columns writes the cell afresh, from the data in the
+Changing a graph's type or marker touches only kind=, marker= (lmplot's
+markers=), and which of relplot, catplot, and lmplot draws it, so anything
+else changed by hand in its cell stays. Changing its columns writes the cell afresh, from the data in the
 DataFrame's own cell.
 """
 
@@ -12,14 +12,21 @@ import ast
 import re
 from dataclasses import dataclass, field
 
-from .notebook import CATEGORICAL, GRAPH_KINDS, FrameData, GraphColumns, GraphError
+from .notebook import (
+    GRAPH_KINDS,
+    OTHER_KINDS,
+    REGRESSION,
+    FrameData,
+    GraphColumns,
+    GraphError,
+    marker_keyword,
+    plot_function,
+)
 
-FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm")}  # the kinds each draws here
-DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip"}  # their kind when none is given
+FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm"), "lmplot": ("reg",)}  # here
+DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg"}  # their kind when none is given
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a (?:chart|graph)\b", re.M)  # as graph_code writes it (or did)
 _OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm)\1[^\n]*")  # "# or 'scatter'"
-_OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
-                "swarm": "  # or 'strip'"}  # as graph_code writes them
 _NOT_LITERAL = object()
 
 
@@ -73,8 +80,8 @@ def find_graphs(notebook) -> list[GraphCell]:
 
 def read_graph(source: str) -> GraphCell | None:
     """The graph a cell's code draws, or None if it doesn't draw exactly one
-    relplot or catplot graph of a kind the Chart dialog has, with a plain
-    marker."""
+    relplot, catplot, or lmplot graph of a kind the Chart dialog has, with a
+    plain marker."""
     found = _plot_call(source)
     if found is None:
         return None
@@ -82,8 +89,11 @@ def read_graph(source: str) -> GraphCell | None:
     function = call.func.attr
     keywords = {k.arg: k.value for k in call.keywords if k.arg}
     kind = _literal(keywords["kind"]) if "kind" in keywords else DEFAULT_KINDS[function]
-    marker = _literal(keywords["marker"]) if "marker" in keywords else None
-    if kind not in FUNCTION_KINDS[function] or not (marker is None or isinstance(marker, str) and marker):
+    if kind not in FUNCTION_KINDS[function]:
+        return None
+    key = marker_keyword(kind)
+    marker = _literal(keywords[key]) if key in keywords else None
+    if not (marker is None or isinstance(marker, str) and marker):  # (not a list of them, one per hue)
         return None
     graph = GraphCell("", kind, marker, frame=_frame_name(source, tree))
     x, y = _literal(keywords.get("x")), _literal(keywords.get("y"))
@@ -103,8 +113,8 @@ def read_graph(source: str) -> GraphCell | None:
 
 def change_graph(source: str, kind: str, marker: str | None) -> str:
     """The cell's code with its graph's kind and marker changed (no marker:
-    marker= is taken out), switching between relplot and catplot as the kind
-    needs."""
+    marker= is taken out), switching between relplot, catplot, and lmplot as
+    the kind needs. lmplot has no kind=, and calls its marker markers=."""
     if kind not in GRAPH_KINDS:  # (for a hue or new columns, the cell is written afresh)
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     if read_graph(source) is None:
@@ -114,13 +124,23 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
     keywords = {k.arg: k for k in call.keywords if k.arg}
     edits = []  # (start, end, new text), applied from the end backward
 
-    function = "catplot" if kind in CATEGORICAL else "relplot"
+    function = plot_function(kind)
     if call.func.attr != function:
         end = at(call.func.end_lineno, call.func.end_col_offset)
         edits.append((end - len(call.func.attr), end, function))
 
-    other = _OTHER_KINDS[kind]
-    if "kind" in keywords:
+    other = OTHER_KINDS.get(kind, "")
+    if kind in REGRESSION:
+        if "kind" in keywords:  # lmplot has none: out it goes, with "# or 'line'"
+            start, end = _keyword_span(source, at, keywords["kind"])
+            comment = _OTHER_KIND.match(source, end)
+            if comment:
+                end = comment.end()
+                line_start, line_end = source.rfind("\n", 0, start) + 1, _line_end(source, end)
+                if not source[line_start:start].strip() and not source[end:line_end].strip():
+                    start, end = line_start, min(line_end + 1, len(source))
+            edits.append((start, end, ""))
+    elif "kind" in keywords:
         value = keywords["kind"].value
         start, end = at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset)
         edits.append((start, end, repr(kind)))
@@ -130,32 +150,44 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
             edits.append((comment.start(), comment.end(), other))
         elif call.func.attr != function and re.fullmatch(r",[ \t]*", source[end:line_end]):
             edits.append((line_end, line_end, other))  # graph_code's layout, from an older one without it
-    else:
-        paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
-        edits.append((paren + 1, paren + 1, f"kind={kind!r}, "))
+    else:  # from lmplot, or relplot's or catplot's own kind
+        indent = _line_indent(source, at, call, keywords.get("height"))
+        if indent:  # graph_code's layout: a line of its own, before "marker='o', height=4, ..."
+            spot = at(keywords["height"].lineno, 0)
+            edits.append((spot, spot, f"{indent}kind={kind!r},{other}\n"))
+        else:
+            paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
+            edits.append((paren + 1, paren + 1, f"kind={kind!r}, "))
 
-    if "marker" in keywords:
-        keyword = keywords["marker"]
+    had, key = ("markers" if call.func.attr == "lmplot" else "marker"), marker_keyword(kind)
+    if had in keywords:
+        keyword = keywords[had]
         if marker:
             value = keyword.value
             edits.append((at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset),
                           repr(marker)))
+            if key != had:
+                start = at(keyword.lineno, keyword.col_offset)
+                edits.append((start, start + len(had), key))
         else:
             edits.append((*_keyword_span(source, at, keyword), ""))
     elif marker:
         if "height" in keywords:  # graph_code's layout: "marker='o', height=4, aspect=1.5,"
             height = keywords["height"]
             spot = at(height.lineno, height.col_offset)
-            edits.append((spot, spot, f"marker={marker!r}, "))
-        elif "kind" in keywords:
+            edits.append((spot, spot, f"{key}={marker!r}, "))
+        elif "kind" in keywords and kind not in REGRESSION:
             kind_end = at(keywords["kind"].end_lineno, keywords["kind"].end_col_offset)
             comma = re.compile(r"[ \t]*,").match(source, kind_end)
             spot = comma.end() if comma else kind_end
-            edits.append((spot, spot, f" marker={marker!r}," if comma else f", marker={marker!r}"))
-        else:  # kind was just added after the parenthesis; the marker goes with it
+            edits.append((spot, spot, f" {key}={marker!r}," if comma else f", {key}={marker!r}"))
+        elif kind not in REGRESSION:  # kind was just added after the parenthesis; the marker goes with it
             index = next(i for i, edit in enumerate(edits) if edit[2].startswith("kind="))
             start, end, text = edits[index]
-            edits[index] = (start, end, f"{text}marker={marker!r}, ")
+            edits[index] = (start, end, f"{text}{key}={marker!r}, ")
+        else:
+            paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
+            edits.append((paren + 1, paren + 1, f"{key}={marker!r}, "))
 
     for start, end, text in sorted(edits, key=lambda edit: edit[0], reverse=True):
         source = source[:start] + text + source[end:]
@@ -253,6 +285,17 @@ class _Positions:
     def __call__(self, lineno: int, col: int) -> int:
         line = self.lines[lineno - 1]
         return self.starts[lineno - 1] + len(line.encode("utf-8")[:col].decode("utf-8"))
+
+
+def _line_indent(source: str, at, call, keyword) -> str:
+    """The indentation of the line `keyword` is on, if its line starts with
+    one of the call's keywords (else "")."""
+    if keyword is None:
+        return ""
+    first = min((k for k in call.keywords if k.lineno == keyword.lineno), key=lambda k: k.col_offset)
+    start = at(first.lineno, first.col_offset)
+    indent = source[source.rfind("\n", 0, start) + 1:start]
+    return indent if indent and not indent.strip() else ""
 
 
 def _line_end(source: str, index: int) -> int:

@@ -202,6 +202,13 @@ The Chart dialog has these choices:
 - **Swarm plot**, shown only for a categorical scatter: spreads each
   category's points out so that none overlap, showing how they're
   distributed (`kind='swarm'`). With many points, it gets wide.
+- **Linear regression**, shown only for Scatter: fits a straight line to the
+  points, with a shaded band showing its 95% confidence interval, drawn with
+  Seaborn's `lmplot` instead of `relplot`. A line needs numbers both ways, so
+  while it's checked the X axis offers only columns with numbers (switching
+  to the first of them if the X axis was text), and text in the X axis column
+  isn't charted. With a hue, each color gets its own line; with a col, each
+  panel does. It's unavailable unless there are two columns with numbers.
 - **X axis:** any of the selected columns. Text in it gives categories, in
   the sheet's order.
 - **Y axis:** one of the other columns with numbers, or, for a line chart,
@@ -255,8 +262,8 @@ notebook, the dialog's Chart list says it instead; see below.)
 
 - The choices are in the cell's code too: change `kind='line'` to
   `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`), or add
-  or change `marker='o'` (any Matplotlib marker), and run the cell again
-  (Shift+Return).
+  or change `marker='o'` (any Matplotlib marker; `lmplot` calls it
+  `markers='o'`), and run the cell again (Shift+Return).
 - Text in the y columns isn't charted, and rows without an x value are left
   out. A line joins the points on either side of a missing value.
 - The chart is a picture of the data when the cell ran, saved with the
@@ -280,8 +287,9 @@ Choosing a chart shows its type, axes, hue, col, and marker. Change them and cli
 OK:
 
 - Changing only the type or marker changes just `kind=`, `marker=`, and
-  whether `relplot` or `catplot` draws it, so anything else you changed in the
-  cell stays.
+  whether `relplot`, `catplot`, or `lmplot` draws it, so anything else you
+  changed in the cell stays. (`lmplot` has no `kind=`, and calls its marker
+  `markers=`; switching to or from it takes out or puts back `kind=`.)
 - Changing the axes, the hue, or the col writes the chart's cell afresh, from
   the data in its DataFrame's cell, so changes you made to the chart's cell by
   hand are replaced. The columns can be changed only if that cell is found,
@@ -294,10 +302,11 @@ OK:
   code. The cell runs again to redraw the chart. If Python has restarted since
   its DataFrame was made (or the sheet was opened since), the imports cell and
   the DataFrame's cell run first.
-- Any cell drawing one `sns.relplot(...)` or `sns.catplot(...)` chart of a
-  kind the dialog has counts, including ones you write, as long as its `kind=`
-  and `marker=`, if it has them, are written out, such as `kind='line'` and
-  `marker='o'`.
+- Any cell drawing one `sns.relplot(...)`, `sns.catplot(...)`, or
+  `sns.lmplot(...)` chart of a kind the dialog has counts, including ones you
+  write, as long as its `kind=` and `marker=` (`markers=`), if it has them,
+  are written out, such as `kind='line'` and `marker='o'`. (An `lmplot` with
+  a list of markers, one per hue, can't be changed.)
 - Charts made when they were called graphs (in cells saying `# df as a graph`
   and `graph = sns.relplot(...)`) count too, and keep the name `graph` when
   only their type or marker changes.

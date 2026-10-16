@@ -6,7 +6,7 @@ import pytest
 from py_spread.graph_dialog import GraphDialog, graph_labels
 from py_spread.graphs import GraphCell, change_graph, find_graphs, frame_cell, frame_data, read_graph
 from py_spread.model import SheetModel
-from py_spread.notebook import FrameData, GraphColumns, Notebook, dataframe_code, graph_code
+from py_spread.notebook import FrameData, GraphChoice, GraphColumns, Notebook, dataframe_code, graph_code
 
 
 @pytest.fixture
@@ -45,6 +45,39 @@ def test_changes_any_setting_to_any_other(sales, before, after):
     assert (read_graph(changed).kind, read_graph(changed).marker) == after
     assert changed == graph_code(sales, cells(3), "df", *after, ys=["Sales"])  # just as if made that way
     assert change_graph(changed, *before) == original
+
+
+@pytest.fixture
+def measures(app):
+    model = SheetModel(rows=10, cols=4)
+    model.set_cells({(0, 0): "Species", (0, 1): "Width", (0, 2): "Length", (1, 0): "a", (1, 1): "1",
+                     (1, 2): "2", (2, 0): "b", (2, 1): "3", (2, 2): "5"})
+    return model
+
+
+WITH_REGRESSION = [("line", None), ("scatter", "D"), ("strip", "s"), ("swarm", "D"), ("reg", "o"), ("reg", None),
+                   ("reg", "*")]
+
+
+@pytest.mark.parametrize("col", [None, "Species"])
+@pytest.mark.parametrize("before, after", list(itertools.permutations(WITH_REGRESSION, 2)))
+def test_changes_to_and_from_linear_regressions(measures, before, after, col):
+    original = graph_code(measures, cells(3), "df", *before, x="Width", ys=["Length"], col=col)
+    changed = change_graph(original, *after)
+    assert (read_graph(changed).kind, read_graph(changed).marker) == after
+    assert changed == graph_code(measures, cells(3), "df", *after, x="Width", ys=["Length"], col=col)
+    assert change_graph(changed, *before) == original
+
+
+def test_hand_written_linear_regressions():
+    graph = read_graph("sns.lmplot(data=d, x='a', y='b')")
+    assert (graph.kind, graph.marker, graph.x_label, graph.y_labels) == ("reg", None, "a", ["b"])
+    assert read_graph("sns.lmplot(data=d, x='a', y='b', markers='x')").marker == "x"
+    assert read_graph("sns.lmplot(data=d, x='a', y='b', hue='c', markers=['o', 'x'])") is None  # one per hue
+    assert change_graph("sns.lmplot(data=d, x='a', y='b')", "scatter", "o") == (
+        "sns.relplot(kind='scatter', marker='o', data=d, x='a', y='b')")
+    assert change_graph("sns.relplot(data=d, x='a', y='b', kind='line')", "reg", "s") == (
+        "sns.lmplot(markers='s', data=d, x='a', y='b')")
 
 
 def test_keeps_other_changes_to_the_code(sales):
@@ -268,6 +301,15 @@ def test_col_of_years_in_the_changing_dialog(app):
     assert (dialog.y_box.currentText(), dialog.ys(), dialog.col()) == ("All", ["Sales", "Cost"], "Year")
 
 
+def test_linear_regression_in_the_changing_dialog(app):
+    labels = ["Width", "Length", "Species"]
+    columns = GraphColumns(labels, [True, True, False], [False, False, True])
+    graph = GraphCell("a", "reg", "s", "df", "Width", ["Length"], FrameData(labels, []), columns)
+    dialog = GraphDialog(None, graphs=[graph], current=0)
+    assert dialog.kind_box.currentText() == "Scatter" and dialog.regression_box.isChecked()
+    assert dialog.choice() == GraphChoice("reg", "s", "Width", ["Length"], None, False, None)
+
+
 def test_reads_numbers_up_as_categories():
     code = "chart = sns.catplot(data=df, x='Sales', y='Year', orient='h', kind='swarm')"
     graph = read_graph(code)
@@ -302,6 +344,8 @@ def test_new_chart_that_cant_be_made(app):
                          new_problem="The sheet is empty.")
     assert dialog.summary.text() == "A new chart of the sheet can't be made. The sheet is empty."
     assert not dialog.ok_button.isEnabled() and not dialog.kind_box.isEnabled()
+    dialog.kind_box.setCurrentIndex(1)
+    assert not dialog.regression_box.isEnabled()
     dialog.graph_box.setCurrentIndex(1)  # an existing chart can still be changed
     assert dialog.ok_button.isEnabled() and dialog.kind_box.isEnabled()
 
