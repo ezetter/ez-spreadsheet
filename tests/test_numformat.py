@@ -464,3 +464,10 @@ def test_typed_dates_in_the_sheet(window):
     assert window.format_actions["Date"].isChecked()
     model.set_formats({(0, 0): NumberFormat("number", 0, False)}, "Number")
     assert model.display_text(0, 0) == "39717"  # its day number
+
+
+def test_separator_between_number_formats_and_styles(window):
+    from PySide6.QtWidgets import QToolBar
+    toolbar = window.findChild(QToolBar)
+    labels = ["|" if a.isSeparator() else toolbar.widgetForAction(a).text() for a in toolbar.actions()]
+    assert labels[labels.index("$") - 1:] == ["|", "$", "%", "", "", "123", "|", "B", "I", "|", "DEG"]

@@ -1121,7 +1121,9 @@ class MainWindow(QMainWindow):
 
     def _add_style_buttons(self, toolbar):
         """B and I toolbar buttons for the Format menu's Bold and Italic, drawn
-        in bold and italic; they're pressed when the current cell has the style."""
+        in bold and italic; they're pressed when the current cell has the style.
+        A separator sets them apart from the number format buttons."""
+        toolbar.addSeparator()
         for name, label, tip in (("Bold", "B", "Bold (⌘B)"), ("Italic", "I", "Italic (⌘I)")):
             action = self.format_actions[name]
             action.setIconText(label)
