@@ -1,8 +1,8 @@
 """The Chart dialog: the kind of chart, the columns across, up, coloring
-the points, and splitting a line chart into panels, and the marker drawn on
-each point, for a Seaborn
-chart of selected cells in the notebook, or for changing one of the
-notebook's charts. (The code calls charts graphs.)"""
+the points, and splitting a line or scatter chart into panels, and the
+marker drawn on each point, for a Seaborn chart of selected cells in the
+notebook, or for changing one of the notebook's charts. (The code calls
+charts graphs.)"""
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
@@ -46,10 +46,10 @@ def graph_labels(graphs) -> list[str]:
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, or Categorical scatter, which can be a
     swarm plot), the X axis column, the Y axis column, the Hue column whose
-    values color the points (None by default), for a line chart the Col
-    column splitting it into a panel for each of its values (None by
-    default; a column of numbers, such as years, isn't one of All's lines
-    then), and a marker (None by default). Up takes a column with numbers,
+    values color the points (None by default), for a line or scatter chart
+    the Col column splitting it into a panel for each of its values (None
+    by default; a column of numbers, such as years, isn't one of All's
+    lines then), and a marker (None by default). Up takes a column with numbers,
     except that a categorical
     scatter across a column of numbers can have its categories up, turning
     it sideways: a column of text, or one of numbers (such as years) with
@@ -167,7 +167,7 @@ class GraphDialog(QDialog):
         return None if len(self.ys()) > 1 else self.hue_box.currentData()  # several ys: a series each
 
     def col(self) -> str | None:
-        """The column splitting a line chart into panels, if any."""
+        """The column splitting a line or scatter chart into panels, if any."""
         return self.col_box.currentData() if self.kind() in FACETED else None
 
     def y_categories(self) -> bool:
@@ -311,7 +311,7 @@ class GraphDialog(QDialog):
         self._y_changed()
 
     def _fill_cols(self, col: str | None) -> None:
-        """None, and the columns that can split a line chart into panels,
+        """None, and the columns that can split a chart into panels,
         selecting `col` if it's still one."""
         known = self.columns is not None
         options = self.columns.col_options(self.x(), self._col_ys()) if known else [col] if col else []

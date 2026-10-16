@@ -364,9 +364,18 @@ def test_col_with_every_column_and_a_hue(regions, pyplot):
     assert set(panels(g).values()) == {2} and [t.get_text() for t in g.legend.texts] == ["Jan", "Feb"]
 
 
-def test_col_needs_a_line_chart(regions):
+def test_scatter_chart_with_col(regions, pyplot):
+    code = graph_code(regions, block(0, 0, 6, 3), "df", "scatter", "o", x="Sales", ys=["Cost"], col="Region")
+    assert "col='Region', col_wrap=2," in code and "kind='scatter'," in code
+    assert "marker='o', height=2.5, aspect=1.2," in code
+    g = graph(regions, block(0, 0, 6, 3), "scatter", "o", x="Sales", ys=["Cost"], col="Region")
+    assert [ax.get_title() for ax in g.axes.flat] == ["Region = North", "Region = South", "Region = East"]
+    assert [len(ax.collections[0].get_offsets()) for ax in g.axes.flat] == [2, 2, 2]  # each region's points
+
+
+def test_col_isnt_for_categorical_scatters(regions):
     cells = block(0, 0, 6, 3)
-    for kind, x, col in [("scatter", "Month", "Region"), ("strip", "Month", "Region"),  # line charts only
+    for kind, x, col in [("strip", "Month", "Region"), ("swarm", "Month", "Region"),  # line and scatter only
                          ("line", "Month", "Cost"), ("line", "Region", "Region"), ("line", "Month", "Nope")]:
         with pytest.raises(ValueError):  # (nor x or y)
             graph_code(regions, cells, "df", kind, "o", x=x, ys=["Cost"], col=col)
@@ -586,7 +595,7 @@ def region_columns():
     return GraphColumns(["Region", "Month", "Sales", "Cost"], [False, False, True, True], [True, True, False, False])
 
 
-def test_col_for_line_charts(app):
+def test_col_for_line_and_scatter_charts(app):
     dialog = GraphDialog(None, region_columns())
     assert dialog.form.isRowVisible(dialog.col_box) and dialog.col() is None  # None by default
     assert dialog.x() == "Region" and items(dialog.col_box) == ["None", "Month", "Sales", "Cost"]  # any but x
@@ -598,7 +607,10 @@ def test_col_for_line_charts(app):
     dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Cost"]))
     dialog.y_box.activated.emit(dialog.y_box.currentIndex())
     assert dialog.choice().col == "Region"  # whatever's up
-    dialog.kind_box.setCurrentIndex(1)  # Scatter: no panels
+    dialog.kind_box.setCurrentIndex(1)  # Scatter: panels too
+    assert dialog.form.isRowVisible(dialog.col_box)
+    assert dialog.choice() == GraphChoice("scatter", "o", "Month", ["Cost"], None, False, "Region")
+    dialog.kind_box.setCurrentIndex(2)  # Categorical scatter: no panels
     assert not dialog.form.isRowVisible(dialog.col_box) and dialog.col() is None
     dialog.kind_box.setCurrentIndex(0)
     assert dialog.col() == "Region"  # still chosen, for a line chart
@@ -624,6 +636,15 @@ def test_col_of_numbers_isnt_one_of_alls_lines(app):
     assert dialog.ys() == ["Sales", "Cost"]
     dialog.y_box.setCurrentIndex(dialog.y_box.findData(["Year"]))  # the years up: no panels of them
     assert (dialog.ys(), dialog.col()) == (["Year"], None) and dialog.y_box.itemData(0) == ["Year", "Sales", "Cost"]
+
+
+def test_scatter_with_a_col_of_numbers_has_another_y(app):
+    columns = GraphColumns(["Region", "Year", "Sales"], [False, True, True], [True, False, False])
+    dialog = GraphDialog(None, columns)
+    dialog.col_box.setCurrentIndex(dialog.col_box.findData("Year"))
+    assert dialog.ys() == ["Sales"]  # All, but the years
+    dialog.kind_box.setCurrentIndex(1)
+    assert (dialog.ys(), dialog.col()) == (["Sales"], "Year")  # not the years, the first after Region
 
 
 def test_col_of_the_only_other_column_of_numbers(app):
@@ -1317,10 +1338,15 @@ def test_change_a_graphs_col(window, dialogs):
     window.send_graph_to_notebook()
     assert dialogs.graph_change_prompts[1][0][0].col == "Note"
     assert "col='Note'" in window.notebook.cell(graph_id).source
-    dialogs.graph_change_answer = (0, "scatter", "o")  # Scatter has no panels
+    dialogs.graph_change_answer = (0, "scatter", "o")  # Scatter has panels too: just the kind changes
     window.send_graph_to_notebook()
     source = window.notebook.cell(graph_id).source
-    assert "col=" not in source and "kind='scatter'" in source and "height=4, aspect=1.5" in source
+    assert "col='Note', col_wrap=2," in source and "kind='scatter',  # or 'line'" in source
+    assert "marker='o', height=2.5, aspect=1.2," in source
+    dialogs.graph_change_answer = (0, "strip", "o")  # a categorical scatter has none
+    window.send_graph_to_notebook()
+    source = window.notebook.cell(graph_id).source
+    assert "col=" not in source and "sns.catplot(" in source and "height=4, aspect=1.5" in source
 
 
 def test_change_a_graph_to_sideways(window, dialogs):
