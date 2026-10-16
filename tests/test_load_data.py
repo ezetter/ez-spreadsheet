@@ -89,6 +89,20 @@ def test_writes_for_the_sheet():
         (5, 1): "Mar", (5, 2): "1e-05"}
 
 
+def test_whats_in_the_columns():
+    from py_spread.load_data import columns_request, frame_columns
+    namespace = {"pd": pd, "tips": pd.DataFrame({
+        "bill": [1.5, 2.0], "size": [2, None], "day": pd.Categorical(["Sun", "Sat"]), "paid": [True, False],
+        "note": [1, "a"]}), "unnamed": pd.DataFrame([[1]]), "twice": pd.DataFrame([[1, 2]], columns=["a", "a"])}
+    found = frame_columns(run_helpers(namespace, columns_request(["tips", "unnamed", "twice", "gone"])[1]))
+    tips = found["tips"]
+    assert tips.labels == ["bill", "size", "day", "paid", "note"]
+    assert tips.columns == [[1.5], [1, None], ["text"], [], [1, "text"]]  # numbers (whole?), text, missing
+    assert found["unnamed"] == "Its column names aren't all text."
+    assert found["twice"] == "Two of its columns have the same name."
+    assert found["gone"] == "It's no longer in the notebook's Python."
+
+
 def test_answer_survives_quotes_and_newlines():
     text = json.dumps({"columns": ["it's \"quoted\""], "rows": [["line\nbreak", "\\"]]})
     assert answer(repr(text)) == json.loads(text)

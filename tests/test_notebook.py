@@ -1751,7 +1751,10 @@ def test_real_kernel_chart_comes_into_view(app, sheet, dialogs):
         nb = tall_notebook(window)
         nb.scroll.verticalScrollBar().setValue(0)
         window.view.select_range(0, 0, 3, 1)
-        graph_id = window.send_graph_to_notebook()
+        cells = len(window.notebook.cells)
+        window.send_graph_to_notebook()  # (the notebook has code of its own: Python's asked about it first)
+        assert wait_for(lambda: len(window.notebook.cells) == cells + 2)
+        graph_id = window.notebook.cells[-1].id
         assert wait_for(lambda: graph_id not in nb.running and window.notebook.cell(graph_id).outputs)
         widget = nb.widgets[graph_id]
         assert wait_for(lambda: in_view(nb, widget.output_view), timeout=5)  # the drawn chart

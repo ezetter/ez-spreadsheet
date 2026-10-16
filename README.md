@@ -226,9 +226,10 @@ them:
 ### Charting cells
 
 Chart makes a chart of the selected cells, or, if no more than one cell is
-selected, of the whole sheet (the block holding all its data). It asks what
-kind of chart to make, of which columns, then does the same as DataFrame and
-adds a second cell that charts the DataFrame with Seaborn. Both cells run, so
+selected, of the whole sheet (the block holding all its data), or of one of
+the notebook's DataFrames (see DataFrame, below). It asks what kind of chart
+to make, of which columns, then does the same as DataFrame and adds a second
+cell that charts the DataFrame with Seaborn. Both cells run, so
 the table shows and then the chart, and the notebook scrolls to keep the chart
 in view as it's drawn (as it does for a changed chart, and for DataFrame's
 table):
@@ -245,10 +246,20 @@ chart = sns.relplot(
 
 The Chart dialog has these choices:
 
-- **DataFrame name**, at the top: what to call the new chart's DataFrame,
-  starting at `df` (or `df2`, ...) and following the same rules as the
-  DataFrame dialog's name. For a chart being changed (see below), it shows
-  that chart's DataFrame, and a new name renames it.
+- **DataFrame**, at the top (just below the Chart list, once there is one):
+  what to call the new chart's DataFrame, starting at `df` (or `df2`, ...)
+  and following the same rules as the DataFrame dialog's name; or, from its
+  list, one of the notebook's DataFrames, the same ones the DataFrame dialog
+  lists, your own included (such as "tips: 244 rows × 7 columns"). A chart of
+  one of those is of its data instead of the sheet's: the axes offer its
+  columns, and only the chart's cell is added (`data=tips`), with no new
+  DataFrame cell. For your own DataFrames, EzSheet asks the notebook's Python
+  what's in their columns (numbers or text), running the notebook first if
+  nothing in it has run yet; a DataFrame whose column names aren't all text,
+  or that has two columns of the same name, can't be charted, and the dialog
+  says so. Typing another name goes back to a new DataFrame of the sheet's
+  cells. For a chart being changed (see below), it shows that chart's
+  DataFrame, and a new name renames it.
 - **Chart type:** Line, Scatter, or Categorical scatter. Line and Scatter are
   drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
   a column of categories (text such as species or months) across and spreads

@@ -298,6 +298,28 @@ def find_frames(notebook, found=()) -> list[FrameCell]:
     return sorted(frames, key=lambda frame: order[frame.cell_id])
 
 
+@dataclass
+class ChartFrame:
+    """One of the notebook's DataFrames, for a new chart: its data (for one
+    of your own, a stand-in, from what the notebook's Python says is in its
+    columns), and the columns a chart can use; or why it can't be charted."""
+
+    frame: FrameCell
+    data: FrameData | None = None
+    columns: GraphColumns | None = None
+    problem: str | None = None
+
+    @classmethod
+    def of(cls, frame: FrameCell, data: FrameData | str | None) -> "ChartFrame":
+        """`data`: its data, or why there's none."""
+        if not isinstance(data, FrameData):
+            return cls(frame, problem=data or "Python couldn't say what's in its columns.")
+        try:
+            return cls(frame, data, GraphColumns.of(data))
+        except GraphError as e:
+            return cls(frame, data, problem=str(e))
+
+
 def frame_labels(frames) -> list[str]:
     """How the DataFrame dialog's list names each: "sales: Month, Sales,
     Cost (12 rows)", or for one of your own, "tips: 244 rows × 7 columns",

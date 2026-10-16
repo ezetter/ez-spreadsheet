@@ -35,20 +35,39 @@ class FrameNameField(QWidget):
     can't be one (`problem`), or what it does. For a new DataFrame, a name
     the notebook already sets (one of `taken`) is fine: the new one replaces
     it from there on. Renaming one, a name the notebook uses (one of `used`)
-    isn't. Or the name can just be shown, fixed."""
+    isn't. Or the name can just be shown, fixed.
+
+    With `choices` ([(name, label)], the notebook's DataFrames), it's a box
+    to type in that lists them too: choosing one puts its name in, which
+    means that DataFrame, not a new one of that name (see chosen)."""
 
     changed = Signal()
 
-    def __init__(self, name: str, taken=(), used=(), parent=None):
+    def __init__(self, name: str, taken=(), used=(), parent=None, choices=None):
         super().__init__(parent)
         self.taken, self.used = set(taken), set(used)
         self.renaming = None  # the name being changed, when renaming a DataFrame
+        self.choices = dict(choices or [])  # name -> label
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.edit = QLineEdit(name)
+        self.box = None
+        if choices is not None:
+            self.box = QComboBox()
+            self.box.setEditable(True)
+            self.box.setInsertPolicy(QComboBox.NoInsert)  # a name typed isn't one to choose
+            self.box.setCompleter(None)  # (it would complete names to the labels)
+            for choice, label in self.choices.items():
+                self.box.addItem(label, choice)
+            self.box.setCurrentIndex(-1)
+            self.box.activated.connect(lambda index: self.edit.setText(self.box.itemData(index)))
+            self.edit = self.box.lineEdit()
+            self.edit.setText(name)
+            layout.addWidget(self.box)
+        else:
+            self.edit = QLineEdit(name)
+            layout.addWidget(self.edit)
         self.edit.setToolTip(NAME_TIP)
         self.edit.selectAll()  # typing replaces the name it starts with
-        layout.addWidget(self.edit)
         self.note = QLabel()
         self.note.setWordWrap(True)
         layout.addWidget(self.note)
@@ -59,9 +78,14 @@ class FrameNameField(QWidget):
     def name(self) -> str:
         return self.edit.text().strip()
 
+    def chosen(self) -> str | None:
+        """The DataFrame chosen from the choices (or typed), for a new chart of it; None for a new one."""
+        name = self.name()
+        return name if self.renaming is None and not self.fixed and name in self.choices else None
+
     def problem(self) -> str | None:
         """Why the name typed can't be used, if it can't (a fixed one isn't asked)."""
-        if self.fixed:
+        if self.fixed or self.chosen() is not None:
             return None
         name = self.name()
         problem = frame_name_problem(name)
@@ -83,6 +107,11 @@ class FrameNameField(QWidget):
 
     def _set(self, text: str, fixed: bool, renaming: str | None, tip: str) -> None:
         self.fixed, self.renaming = fixed, renaming
+        if self.box is not None:
+            self.box.setEnabled(not fixed)
+            # A chart's own DataFrame can be renamed, not changed for another.
+            for index in range(self.box.count()):
+                self.box.model().item(index).setEnabled(renaming is None)
         self.edit.setEnabled(not fixed)
         self.edit.setToolTip(tip)
         self.edit.setText(text)
@@ -93,6 +122,8 @@ class FrameNameField(QWidget):
         problem, name = self.problem(), self.name()
         if problem:
             note = problem
+        elif self.chosen() is not None:
+            note = f"Charts the notebook's {self.choices[name]}."
         elif self.renaming is not None and name != self.renaming:
             note = f"Renames {self.renaming} to {name} in the cells that use it."
         elif self.renaming is None and not self.fixed and name in self.taken:

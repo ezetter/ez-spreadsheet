@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, Q
 
 from .appearance import error_color
 from .frame_name_dialog import FrameNameField
+from .graphs import frame_labels
 from .notebook import (
     ALL_SERIES,
     CATEGORICAL,
@@ -81,15 +82,17 @@ class GraphDialog(QDialog):
     from `new_source` (such as "the selected cells, A1:C4"), or can't be
     made, for the reason `new_problem` gives.
 
-    At the top, the DataFrame's name: for a new chart, starting at `frame`,
-    and changeable (a Python name; one of `taken`, which the notebook
-    already sets, is replaced); for one of the graphs, its own, which can
-    be changed to rename it if its cell is written as EzSheet writes it (but
-    not to one of `used`, names the notebook already uses)."""
+    Under the Chart list (at the top, without one), the DataFrame: for a
+    new chart, a new one of `columns` named `frame` to start with (a Python
+    name; one of `taken`, which the notebook already sets, is replaced), or
+    one of the notebook's DataFrames, `chart_frames` (ChartFrames), listed to
+    choose from, which it's then of; for one of the graphs, its own, which
+    can be changed to rename it if its cell is written as EzSheet writes it
+    (but not to one of `used`, names the notebook already uses)."""
 
     def __init__(self, parent=None, columns=None, kind: str = "line", marker: str | None = None,
                  graphs=None, current: int | None = None, new_source: str = "", new_problem: str | None = None,
-                 frame: str = "df", taken=(), used=()):
+                 frame: str = "df", taken=(), used=(), chart_frames=()):
         super().__init__(parent)
         self.setWindowTitle("Chart")
         self.setMinimumWidth(self.fontMetrics().averageCharWidth() * 48)
@@ -103,9 +106,6 @@ class GraphDialog(QDialog):
         layout.addWidget(self.summary)
 
         self.form = form = QFormLayout()
-        self._typed = {None: frame}  # the DataFrame names typed: a new chart's, and graphs' (by index)
-        self.name_field = FrameNameField(frame, taken, used)
-        form.addRow("DataFrame name:", self.name_field)
         self.graph_box = None
         if self.graphs:
             self.graph_box = QComboBox()
@@ -113,6 +113,15 @@ class GraphDialog(QDialog):
             for index, label in enumerate(graph_labels(self.graphs)):
                 self.graph_box.addItem(label, index)
             form.addRow("Chart:", self.graph_box)
+        self.chart_frames = {option.frame.name: option for option in chart_frames}  # (the last of a name)
+        labels = {option.frame.name: label  # (the last of a name, as for chart_frames)
+                  for option, label in zip(chart_frames, frame_labels([option.frame for option in chart_frames]))}
+        self._typed = {None: frame}  # the DataFrame names typed: a new chart's, and graphs' (by index)
+        self._of = None  # the ChartFrame a new chart is of, if it's of one
+        self._showing_new = False  # (filling in New chart's DataFrame: not a choice of one)
+        self.name_field = FrameNameField(frame, taken, used, choices=[
+            (name, labels[name]) for name in self.chart_frames])
+        form.addRow("DataFrame:", self.name_field)
         self.kind_box = QComboBox()
         for key, name in GRAPH_TYPES.items():
             self.kind_box.addItem(name, key)
@@ -227,18 +236,30 @@ class GraphDialog(QDialog):
             self._show_graph(index)
 
     def _show_new(self) -> None:
-        """New chart: its columns from the cells being charted, starting at
-        the defaults; or, if they can't be charted, why not (and no OK)."""
-        columns, kind, marker = self._new
+        """New chart: its columns from the cells being charted, or the
+        DataFrame chosen, starting at the defaults; or, if they can't be
+        charted, why not (and no OK)."""
+        _columns, kind, marker = self._new
+        self._showing_new = True
+        self.name_field.set_name(self._typed[None])
+        self._showing_new = False
+        self._of = self.chart_frames.get(self.name_field.chosen())
+        self._show_source(kind, marker)
+
+    def _show_source(self, kind: str, marker: str | None) -> None:
+        """A new chart's columns, from what it's of: the cells being charted,
+        or one of the notebook's DataFrames."""
+        if self._of is None:
+            columns, problem, source = self._new[0], self.new_problem, self.new_source
+        else:
+            columns, problem, source = self._of.columns, self._of.problem, self._of.frame.name
         self.columns = columns
         self._x_chosen = self._y_chosen = False
         self._older_ys = None
-        problem = self.new_problem
         if problem is not None:
-            self._say(f"A new chart of {self.new_source} can't be made. {problem}", error=True)
+            self._say(f"A new chart of {source} can't be made. {problem}", error=True)
         else:
-            self._say(f"A new chart of {self.new_source}." if self.new_source else "")
-        self.name_field.set_name(self._typed[None])
+            self._say(f"A new chart of {source}." if source else "")
         self._allow(problem is None)
         self._show(kind, marker, None, None, None, False, None)
 
@@ -386,9 +407,10 @@ class GraphDialog(QDialog):
         self.summary.setStyleSheet(f"color: {error_color(self.palette())};" if error else "")
 
     def _allow(self, allowed: bool) -> None:
-        """Whether the type, marker, and name can be chosen, and OK clicked."""
+        """Whether the type and marker can be chosen, and OK clicked. (The
+        DataFrame can always be: another may be chartable.)"""
         self._allowed = allowed
-        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box, self.name_field):
+        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box):
             widget.setEnabled(allowed)
         self._update_ok()
 
@@ -399,6 +421,11 @@ class GraphDialog(QDialog):
     def _name_changed(self) -> None:
         if not self.name_field.fixed:
             self._typed[self.chosen_graph()] = self.name_field.edit.text()  # kept while others are looked at
+        if self.chosen_graph() is None and not self._showing_new:
+            of = self.chart_frames.get(self.name_field.chosen())
+            if of is not self._of:  # another DataFrame, or the cells instead: its own columns
+                self._of = of
+                self._show_source(self.kind(), self.marker())
         self._update_ok()
 
     # --- Following changes ---

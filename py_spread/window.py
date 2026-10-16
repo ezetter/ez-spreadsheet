@@ -43,6 +43,7 @@ from .frame_name_dialog import FrameNameDialog
 from .kernel import KernelRunner
 from .graph_dialog import GraphDialog, graph_labels
 from .graphs import (
+    ChartFrame,
     change_graph,
     find_frames,
     find_graphs,
@@ -51,7 +52,7 @@ from .graphs import (
     update_frame_code,
     used_names,
 )
-from .load_data import answer, data_request, frames, frames_request, sheet_writes
+from .load_data import answer, columns_request, data_request, frame_columns, frames, frames_request, sheet_writes
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
     IMPORTS_CELL,
@@ -1173,11 +1174,13 @@ class MainWindow(QMainWindow):
 
     def _find_frames(self, done) -> None:
         """done(the notebook's DataFrames, as FrameCells): the ones its cells
-        write out, and the others its Python has. If nothing in the notebook
-        has run in this Python process (as when the sheet's just opened), it
-        runs first. Python answers in the background, after the cells
-        running; if it can't, done gets just the ones the cells write out."""
-        if not self._notebook_has_code():
+        write out, and the others its Python has, if it has code of your own
+        that could make them (else the cells say what there is: no need to
+        ask). If nothing in the notebook has run in this Python process (as
+        when the sheet's just opened), it runs first. Python answers in the
+        background, after the cells running; if it can't, done gets just the
+        ones the cells write out."""
+        if not self._notebook_has_own_code():
             done(find_frames(self.notebook))
             return
         self._run_notebook_if_not_run()
@@ -1192,6 +1195,14 @@ class MainWindow(QMainWindow):
     def _notebook_has_code(self) -> bool:
         """Whether the notebook has any code but a new notebook's imports."""
         return any(cell.source.strip() and cell.source.strip() != IMPORTS_CELL for cell in self.notebook.cells)
+
+    def _notebook_has_own_code(self) -> bool:
+        """Whether the notebook has code but the imports, DataFrames, and
+        charts EzSheet writes: yours, which may make DataFrames of its own."""
+        written = ({frame.cell_id for frame in find_frames(self.notebook)}
+                   | {graph.cell_id for graph in find_graphs(self.notebook)})
+        return any(cell.source.strip() and cell.source.strip() != IMPORTS_CELL and cell.id not in written
+                   for cell in self.notebook.cells)
 
     def _run_notebook_if_not_run(self) -> None:
         """Run all the notebook's cells, if none has run (or is running) in
@@ -1276,10 +1287,14 @@ class MainWindow(QMainWindow):
         """Notebook > Chart. With charts in the notebook, the Chart dialog
         lists them, and New chart: change one, or make a new one. Without,
         it's straight to a new one. A new chart is of the selected cells, or
-        (with no more than one cell selected) of the whole sheet's data; it
-        goes in the notebook as a DataFrame cell and a Seaborn chart cell,
-        which run. Returns the chart cell's id, or None if there's nothing
-        that can be charted (an error says why) or the dialog was cancelled."""
+        (with no more than one cell selected) of the whole sheet's data, put
+        in a new DataFrame; or of one of the notebook's DataFrames, chosen in
+        the dialog (its own, or yours: see _find_chart_frames, which may
+        mean the dialog comes once Python answers). It goes in the notebook
+        as a DataFrame cell (unless it's of one already there) and a Seaborn
+        chart cell, which run. Returns the chart cell's id if it's done
+        straight away, else None (as when there's nothing that can be
+        charted, which an error says, or the dialog was cancelled)."""
         self._commit_pending_edit()
         cells, source, problem = self._sheet_data()
         columns = None
@@ -1288,21 +1303,79 @@ class MainWindow(QMainWindow):
                 columns = graph_columns(self.model, cells)
             except GraphError as e:
                 problem = str(e)
+        done = []
+        self._find_chart_frames(
+            lambda chart_frames: done.append(self._chart_dialog(chart_frames, cells, source, columns, problem)))
+        return done[0] if done else None
+
+    def _find_chart_frames(self, done) -> None:
+        """done(the notebook's DataFrames, as ChartFrames): see _find_frames.
+        For your own, Python is asked what's in their columns too."""
+        def found(frame_cells):
+            own = [frame.name for frame in frame_cells if frame.data is None]
+            if not own:
+                done([ChartFrame.of(frame, frame.data) for frame in frame_cells])
+                return
+
+            def answered(value, error):
+                data = frame_columns(value) if value is not None else {}
+                done([ChartFrame.of(frame, frame.data if frame.data is not None
+                                    else data.get(frame.name, f"Python couldn't say what's in it: {error}"))
+                      for frame in frame_cells])
+
+            self._ask_notebook(*columns_request(own), answered)
+
+        self._find_frames(found)
+
+    def _chart_dialog(self, chart_frames, cells, source: str, columns, problem: str | None) -> str | None:
+        """The Chart dialog, and what comes of it (see send_graph_to_notebook)."""
         graphs = find_graphs(self.notebook)
+        of = {option.frame.name: option for option in chart_frames}
+        for graph in graphs:  # a chart of your own DataFrame: its columns, from what Python says
+            option = of.get(graph.frame)
+            if graph.data is None and option is not None and option.columns is not None \
+                    and option.frame.cell_id == graph.frame_cell:
+                graph.data, graph.columns = option.data, option.columns
+        frame = next_frame_name(self.notebook)
         if not graphs:
-            if problem is not None:
+            if problem is not None and not chart_frames:
                 self._show_error(f"Can't make a chart of {source}.", problem)
                 return None
-            choice = self._ask_graph_options(columns, source, next_frame_name(self.notebook))
-            return None if choice is None else self._make_chart(cells, source, choice)
-        answer = self._ask_chart(graphs, self._first_chart(graphs), columns, source, problem,
-                                 next_frame_name(self.notebook))
-        if answer is None:
+            choice = self._ask_graph_options(columns, source, frame, chart_frames, problem)
+            index = None
+        else:
+            answer = self._ask_chart(graphs, self._first_chart(graphs), columns, source, problem, frame,
+                                     chart_frames)
+            if answer is None:
+                return None
+            index, choice = answer
+        if choice is None:
             return None
-        index, choice = answer
-        if index is None:
-            return self._make_chart(cells, source, choice)
-        return self._change_chart(graphs, index, choice)
+        if index is not None:
+            return self._change_chart(graphs, index, choice)
+        if choice.frame in of:
+            return self._chart_frame(of[choice.frame], choice)
+        return self._make_chart(cells, source, choice)
+
+    def _chart_frame(self, option: ChartFrame, choice: GraphChoice) -> str | None:
+        """A chart of one of the notebook's DataFrames, in a new cell at the
+        notebook's end, which runs (after its DataFrame's cell, and the
+        imports, if they haven't run in this Python process). Returns the
+        chart cell's id."""
+        self.graph_kind, self.graph_marker = choice.kind, choice.marker
+        self.show_notebook()
+        pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
+        try:
+            code = frame_graph_code(option.data, option.frame.name, choice.kind, choice.marker, choice.x,
+                                    choice.ys, choice.hue, choice.y_categories, import_pandas=pandas is None,
+                                    import_seaborn=seaborn is None, col=choice.col)
+        except (ValueError, GraphError) as e:
+            self._show_error(f"Couldn't make a chart of {option.frame.name}.", str(e))
+            return None
+        [graph_id] = self._run_in_notebook([code], [pandas, seaborn, option.frame.cell_id])
+        self.notebook_window.reveal(graph_id)  # so the chart can be seen when it's drawn
+        self._show_status(f"Charting {option.frame.name} in a new notebook cell.")
+        return graph_id
 
     def _sheet_data(self) -> tuple[set, str, str | None]:
         """What a new chart or DataFrame is of: the selected cells, or, with
@@ -1397,23 +1470,28 @@ class MainWindow(QMainWindow):
         return graph.cell_id
 
     def _ask_chart(self, graphs, current: int | None, columns, source: str, problem: str | None,
-                   frame: str) -> tuple[int | None, GraphChoice] | None:
+                   frame: str, chart_frames=()) -> tuple[int | None, GraphChoice] | None:
         """The Chart dialog with its list of the notebook's charts and New
         chart (current None): (which, None for a new one; the choices), or
         None if cancelled. `problem` says why a new chart of `source` can't
-        be made; `frame` is what its DataFrame's name starts at."""
+        be made; `frame` is what its DataFrame's name starts at, and
+        `chart_frames` the notebook's DataFrames it can be of instead."""
         dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, graphs=graphs, current=current,
                              new_source=source, new_problem=problem, frame=frame,
-                             taken=assigned_names(self.notebook), used=used_names(self.notebook))
+                             taken=assigned_names(self.notebook), used=used_names(self.notebook),
+                             chart_frames=chart_frames)
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog.chosen_graph(), dialog.choice()
 
-    def _ask_graph_options(self, columns, source: str, frame: str) -> GraphChoice | None:
+    def _ask_graph_options(self, columns, source: str, frame: str, chart_frames=(),
+                           problem: str | None = None) -> GraphChoice | None:
         """The Chart dialog for a new chart of these GraphColumns, its
-        DataFrame's name starting at `frame`: the choices, or None if cancelled."""
+        DataFrame's name starting at `frame`, or of one of `chart_frames`:
+        the choices, or None if cancelled. `problem` says why there's none
+        of `source`."""
         dialog = GraphDialog(self, columns, self.graph_kind, self.graph_marker, new_source=source, frame=frame,
-                             taken=assigned_names(self.notebook))
+                             taken=assigned_names(self.notebook), chart_frames=chart_frames, new_problem=problem)
         return dialog.choice() if dialog.exec() == QDialog.Accepted else None
 
     def _ask_dataframe(self, frames, current: int | None, name: str, source: str,

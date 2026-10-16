@@ -20,7 +20,7 @@ from py_spread.graphs import (
 from py_spread.model import SheetModel
 from py_spread.notebook import FrameData, GraphColumns, Notebook, assigned_names, frame_name_problem
 from py_spread.window import MainWindow
-from tests.test_notebook import FakeKernel
+from tests.test_notebook import FakeKernel, items
 
 
 # --- The names ---
@@ -253,7 +253,7 @@ def columns():
 def test_chart_dialog_name_at_the_top(app):
     dialog = GraphDialog(None, columns(), frame="df2", taken={"df"})
     assert dialog.form.itemAt(0, QFormLayout.FieldRole).widget() is dialog.name_field
-    assert dialog.form.itemAt(0, QFormLayout.LabelRole).widget().text() == "DataFrame name:"
+    assert dialog.form.itemAt(0, QFormLayout.LabelRole).widget().text() == "DataFrame:"
     assert dialog.choice().frame == "df2"
     dialog.name_field.edit.setText("sales")
     assert dialog.choice().frame == "sales" and dialog.ok_button.isEnabled()
@@ -302,7 +302,7 @@ def test_chart_dialog_name_when_a_new_chart_cant_be_made(app):
     graph = GraphCell("a", "line", None, "df", "Month", ["Sales"])
     dialog = GraphDialog(None, None, graphs=[graph], current=None, new_source="the sheet",
                          new_problem="The sheet is empty.")
-    assert not dialog.name_field.isEnabled() and not dialog.ok_button.isEnabled()
+    assert dialog.name_field.isEnabled() and not dialog.ok_button.isEnabled()  # (another DataFrame may do)
     dialog.graph_box.setCurrentIndex(1)
     assert dialog.name_field.isEnabled() and dialog.ok_button.isEnabled()
 
@@ -684,3 +684,73 @@ def test_python_that_cant_answer(window, dialogs):
     window.send_to_notebook()  # FakeKernel can't evaluate: just the DataFrames the cells write out
     window.send_to_notebook()
     assert [frame.name for frame in dialogs.dataframe_prompts[-1][0]] == ["df"]
+
+
+# --- Charting the notebook's DataFrames ---
+
+def tips_option(problem=None):
+    from py_spread.graphs import ChartFrame
+    frame = FrameCell("t", "tips", shape=(244, 3), code="tips = sns.load_dataset('tips')")
+    return ChartFrame.of(frame, problem or FrameData(["total_bill", "tip", "day"], [[1.5], [1.5], ["text"]]))
+
+
+def test_chart_dialog_lists_the_notebooks_dataframes(app):
+    from py_spread.graphs import ChartFrame
+    df = FrameCell("d", "df", FrameData(["Month", "Sales"], [["Jan"], [1]]))
+    dialog = GraphDialog(None, columns(), new_source="the whole sheet, A1:C3", frame="df2",
+                         chart_frames=[ChartFrame.of(df, df.data), tips_option()])
+    box = dialog.name_field.box
+    assert [box.itemText(i) for i in range(box.count())] == ["df: Month, Sales (1 row)", "tips: 244 rows × 3 columns"]
+    assert dialog.name_field.name() == "df2" and dialog.summary.text() == "A new chart of the whole sheet, A1:C3."
+    box.activated.emit(1)  # tips: its columns
+    assert dialog.name_field.name() == "tips" and dialog.choice().frame == "tips"
+    assert dialog.summary.text() == "A new chart of tips." and items(dialog.x_box) == ["total_bill", "tip", "day"]
+    assert dialog.name_field.note.text() == "Charts the notebook's tips: 244 rows × 3 columns."
+    dialog.name_field.edit.setText("costs")  # a new one, of the cells, again
+    assert items(dialog.x_box) == ["Month", "Sales", "Cost"] and "the whole sheet" in dialog.summary.text()
+
+
+def test_chart_dialog_dataframe_below_the_chart_list(app):
+    fixed = GraphCell("b", "line", None, "df", "Month", ["Sales"])
+    dialog = GraphDialog(None, columns(), graphs=[renamable_graph(), fixed], chart_frames=[tips_option()])
+    assert dialog.form.itemAt(0, QFormLayout.FieldRole).widget() is dialog.graph_box
+    assert dialog.form.itemAt(1, QFormLayout.FieldRole).widget() is dialog.name_field
+    dialog.graph_box.setCurrentIndex(1)  # a chart's DataFrame is its own: renamed, not swapped for another
+    assert dialog.name_field.box.isEnabled() and not dialog.name_field.box.model().item(0).isEnabled()
+    dialog.graph_box.setCurrentIndex(2)
+    assert not dialog.name_field.box.isEnabled()  # (it can't be renamed)
+    dialog.graph_box.setCurrentIndex(0)
+    assert dialog.name_field.box.isEnabled() and dialog.name_field.box.model().item(0).isEnabled()
+
+
+def test_chart_dialog_dataframe_that_cant_be_charted(app):
+    dialog = GraphDialog(None, None, new_source="the sheet", new_problem="The sheet is empty.",
+                         chart_frames=[tips_option("Its column names aren't all text.")])
+    assert dialog.name_field.isEnabled() and not dialog.ok_button.isEnabled()
+    dialog.name_field.box.activated.emit(0)
+    assert dialog.summary.text() == "A new chart of tips can't be made. Its column names aren't all text."
+    assert not dialog.ok_button.isEnabled()
+
+
+def test_charting_your_own_dataframe(tips_window, dialogs):
+    window = tips_window
+    cells = len(window.notebook.cells)
+    dialogs.frame_name_answer = "tips"
+    dialogs.graph_answer = ("scatter", "o", "total_bill", ["tip"], "day")
+    graph_id = window.send_graph_to_notebook()
+    [options] = dialogs.chart_frame_prompts
+    assert [(option.frame.name, option.problem) for option in options] == [
+        ("tips", None), ("train", None), ("test", None)]
+    assert options[0].columns.labels == ["total_bill", "tip", "day"] and options[0].columns.text == [False, False, True]
+    assert len(window.notebook.cells) == cells + 1  # just the chart: tips is there already
+    source = window.notebook.cell(graph_id).source
+    assert source.startswith("# tips as a chart: 'tip' against 'total_bill', colored by 'day'.")
+    assert "data=tips, x='total_bill', y='tip', hue='day'" in source
+    assert window.kernel.runs[-1] == graph_id and "chart" in window.kernel.namespace
+    assert window.statusBar().currentMessage() == "Charting tips in a new notebook cell."
+    dialogs.frame_name_answer = None
+    dialogs.graph_change_answer = (0, "scatter", "o", "total_bill", ["tip"], None)  # its columns can change
+    window.send_graph_to_notebook()
+    [(graphs, _current)] = dialogs.graph_change_prompts
+    assert graphs[0].columns is not None and graphs[0].renamable
+    assert "data=tips, x='total_bill', y='tip'," in window.notebook.cell(graph_id).source
