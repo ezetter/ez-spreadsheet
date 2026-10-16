@@ -192,3 +192,18 @@ def test_save_and_open_keeps_styles(window, tmp_path):
     other.open_path(path)
     assert other.model.cell_style(0, 0) == BOLD
     assert other.format_actions["Bold"].isChecked()
+
+
+def test_view_menu_shows_and_hides_the_toolbar(window):
+    view_menu = [m for m in window.menuBar().actions() if m.text() == "View"][0].menu()
+    action = view_menu.actions()[0]
+    assert action is window.toolbar_action and action.text() == "Toolbar" and action.isChecked()
+    assert view_menu.actions()[1].isSeparator()
+    action.trigger()
+    assert not window.toolbar.isVisible() and not action.isChecked()
+    action.trigger()
+    assert window.toolbar.isVisible() and action.isChecked()
+    window.toolbar.hide()  # as unchecking it in the toolbar's own right-click menu does
+    assert not action.isChecked()
+    action.trigger()
+    assert window.toolbar.isVisible()

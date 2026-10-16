@@ -60,6 +60,12 @@ creates the file.
   Sheet…), and Ask Claude…. Clicking
   inside the selection keeps it; clicking elsewhere selects that cell first.
 
+## Toolbar
+
+View > **Toolbar** shows or hides the toolbar; it's checked while the toolbar
+is shown. It's the same as the toolbar's own right-click menu, so a toolbar
+hidden from there comes back from the View menu.
+
 ## Zoom
 
 View > Zoom In (Cmd+Plus, or Cmd+= without Shift), Zoom Out (Cmd+Minus), and

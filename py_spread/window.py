@@ -687,6 +687,7 @@ class MainWindow(QMainWindow):
 
     def _build_view_menu(self):
         menu = self.menuBar().addMenu("View")
+        self.view_menu = menu
         self.zoom = 100  # percent
         self._zoom_base_fonts = None  # each zoomable widget's font at 100%, saved on first zoom
         self.zoom_actions = {}
@@ -1167,6 +1168,13 @@ class MainWindow(QMainWindow):
         toolbar = self.addToolBar("Tools")
         self.toolbar = toolbar
         toolbar.setMovable(False)
+        # View > Toolbar shows or hides it: the same action as the toolbar's own right-click menu, so
+        # it can be brought back once it's hidden.
+        self.toolbar_action = toolbar.toggleViewAction()
+        self.toolbar_action.setText("Toolbar")
+        first = self.view_menu.actions()[0]
+        self.view_menu.insertAction(first, self.toolbar_action)
+        self.view_menu.insertSeparator(first)
         self.autosum_action = QAction(self)
         self.autosum_action.setCheckable(True)  # stays pressed while waiting for a click
         # The system UI font misplaces the marks in x̄ and x̃; Helvetica Neue doesn't.
