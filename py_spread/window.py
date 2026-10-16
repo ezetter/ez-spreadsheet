@@ -2348,13 +2348,14 @@ def _unread_note(unread, name: str) -> str:
 
 
 class _SizeBox(QComboBox):
-    """The font size box: as wide as three digits and its arrow (in its font,
-    so it zooms with the toolbar), not a combo box's usual width."""
+    """The font size box: as wide as two digits, a little room, and its
+    arrow (in its font, so it zooms with the toolbar), not a combo box's
+    usual width. (A three-digit size scrolls as it's typed.)"""
 
     def sizeHint(self):
         option = QStyleOptionComboBox()
         self.initStyleOption(option)
-        text = QSize(self.fontMetrics().horizontalAdvance("000"), self.fontMetrics().height())
+        text = QSize(self.fontMetrics().horizontalAdvance("00") + 2, self.fontMetrics().height())
         return self.style().sizeFromContents(QStyle.CT_ComboBox, option, text, self).expandedTo(
             QSize(0, super().sizeHint().height()))
 

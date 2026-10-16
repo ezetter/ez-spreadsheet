@@ -182,8 +182,8 @@ def test_copy_and_paste_bring_fonts(window):
 
 def test_size_box_is_as_wide_as_its_digits(window):
     box = window.font_size_box
-    digits = box.fontMetrics().horizontalAdvance("000")
-    assert digits < box.sizeHint().width() < digits + 50  # three digits and the arrow, not a combo box's usual
+    digits = box.fontMetrics().horizontalAdvance("00")
+    assert digits < box.sizeHint().width() < digits + 45  # two digits and the arrow, not a combo box's usual
     width = box.sizeHint().width()
     window.set_zoom(200)
     assert box.sizeHint().width() > width  # zoomed with the toolbar
