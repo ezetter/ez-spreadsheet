@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from .custom_format import format_custom, pattern_problem
+from .custom_format import format_custom, parse_pattern, pattern_problem
 
 KINDS = ("general", "text", "number", "percent", "scientific", "accounting", "financial", "currency",
          "date", "time", "datetime", "duration", "custom")
@@ -167,6 +167,34 @@ def parse_date_time(text: str) -> tuple[float, NumberFormat] | None:
         days += (hour * 3600 + minute * 60 + second) / 86400
     kind = "datetime" if has_date and has_time else "date" if has_date else "time"
     return float(days), NumberFormat(kind, 0)
+
+
+_MONTH_DAY = re.compile(r"(\d{1,2})/(\d{1,2})")
+
+
+def complete_date(text: str, year: int | None = None) -> str | None:
+    """A month and day without a year (3/7), which is text until it's in a
+    cell formatted to show dates, as that date in `year` (by default, this
+    one): 3/7/2026. None for anything else."""
+    match = _MONTH_DAY.fullmatch(text.strip())
+    if not match:
+        return None
+    year = year or datetime.date.today().year
+    month, day = int(match[1]), int(match[2])
+    try:
+        datetime.date(year, month, day)
+    except ValueError:
+        return None
+    return f"{month}/{day}/{year}"
+
+
+def shows_dates(fmt: NumberFormat | None) -> bool:
+    """Whether a format shows a date: Date, Date time, or a custom one with a day, month, or year."""
+    if fmt is None:
+        return False
+    if fmt.kind == "custom":
+        return pattern_problem(fmt.pattern) is None and parse_pattern(fmt.pattern).shows_dates
+    return fmt.kind in ("date", "datetime")
 
 
 def format_number(value: float) -> str:

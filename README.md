@@ -98,7 +98,12 @@ fraction of one.
   is in the 2000s (`1/1/29` is 2029), others in the 1900s (`1/1/30` is
   1930), as Google Sheets takes them. A date that doesn't exist, such as
   `2/30/2024`, stays text, and so does a month and day without a year
-  (`1/2`), so fractions aren't taken for dates.
+  (`3/7`), so fractions aren't taken for dates. But in a cell formatted to
+  show dates (Date, Date time, the long dates, or a custom format with a
+  day, month, or year), a month and day is this year's: giving `3/7` the
+  Date format, or typing `3/7` into a Date cell, makes it `3/7/2026` (as
+  the cell's text, so it stays that date next year). Undo takes it back to
+  `3/7` with the format.
 - Times: `15:59`, `15:59:30`, `3:59 PM` (`12:00 AM` is midnight).
 - Both: `9/26/2008 15:59`, `9/26/2008 3:59 PM`, or `2008-09-26T15:59`.
 

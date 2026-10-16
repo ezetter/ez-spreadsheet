@@ -504,3 +504,48 @@ def test_long_date_formats(window):
     window.format_actions["Friday, September 26"].trigger()
     assert model.display_text(0, 0) == "Friday, September 26"
     assert window.format_actions["Friday, September 26"].isChecked()
+
+
+# --- A month and day, in a cell formatted to show dates ---
+
+def this_year() -> int:
+    import datetime
+    return datetime.date.today().year
+
+
+def test_month_and_day_alone_is_text(window):
+    window.model.set_cells({(0, 0): "3/7", (1, 0): "3/7/2026"})
+    assert window.model.value(0, 0) == "3/7"  # (not a date, unless it's formatted as one)
+    assert isinstance(window.model.value(1, 0), float)
+
+
+def test_date_format_gives_a_month_and_day_this_year(window):
+    model = window.model
+    model.set_cells({(0, 0): "3/7", (1, 0): "2/30", (2, 0): "hello", (3, 0): "12/31"})
+    window.view.select_range(0, 0, 3, 0)
+    window.format_actions["Date"].trigger()
+    year = this_year()
+    assert [model.get_cell(r, 0) for r in range(4)] == [f"3/7/{year}", "2/30", "hello", f"12/31/{year}"]
+    assert model.display_text(0, 0) == f"3/7/{year}" and isinstance(model.value(0, 0), float)
+    window.undo_action.trigger()  # one step: the format and the year
+    assert model.get_cell(0, 0) == "3/7" and model.cell_format(0, 0) is None
+
+
+def test_typing_a_month_and_day_in_a_date_cell(window):
+    model = window.model
+    model.set_formats({(0, 0): NumberFormat("custom", pattern="dddd, mmmm d, yyyy"),
+                       (1, 0): NumberFormat("time", 0), (2, 0): NumberFormat("datetime", 0)}, "Formats")
+    for row in range(3):
+        model.set_cell(row, 0, "3/7")
+    year = this_year()
+    assert model.get_cell(0, 0) == f"3/7/{year}" and model.display_text(0, 0).endswith(f"March 7, {year}")
+    assert model.get_cell(1, 0) == "3/7"  # a time isn't a date
+    assert model.get_cell(2, 0) == f"3/7/{year}"
+
+
+def test_complete_date():
+    from py_spread.numformat import complete_date
+    assert complete_date("3/7", 2026) == "3/7/2026" and complete_date(" 03/07 ", 2026) == "3/7/2026"
+    assert complete_date("2/29", 2024) == "2/29/2024" and complete_date("2/29", 2026) is None
+    assert complete_date("3/7/2026", 2026) is None and complete_date("13/1", 2026) is None
+    assert complete_date("1/2/3") is None

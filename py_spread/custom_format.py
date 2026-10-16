@@ -78,6 +78,11 @@ class CustomFormat:
     pattern: str
     sections: list
 
+    @property
+    def shows_dates(self) -> bool:
+        """Whether it shows a date (a day, month, or year), not just a time or a number."""
+        return any(kind == "date" and part[0] in "ymd" for kind, part in self.sections[0].tokens)
+
     def format(self, value) -> tuple[str, str | None]:
         """(the text, the color, if any) showing a number, or text (from the
         text section, if there is one; else as it is)."""
