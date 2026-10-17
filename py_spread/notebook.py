@@ -185,7 +185,7 @@ def next_frame_name(notebook: Notebook) -> str:
     return f"df{number}"
 
 
-_USED_NAMES = {**dict.fromkeys(("pd", "sns", "chart", "data", "long"), "EzSheet's code uses it"),
+_USED_NAMES = {**dict.fromkeys(("pd", "sns", "chart", "data", "long"), "EZ Sheet's code uses it"),
                **dict.fromkeys(("In", "Out", "get_ipython", "display"), "the notebook's Python uses it")}
 
 

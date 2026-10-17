@@ -52,7 +52,7 @@ class GraphCell:
 
     @property
     def renamable(self) -> bool:
-        """Whether its DataFrame can be renamed: its cell is found, written as EzSheet writes it."""
+        """Whether its DataFrame can be renamed: its cell is found, written as EZ Sheet writes it."""
         return self.frame_cell is not None and self.data is not None
 
     @property
@@ -266,7 +266,7 @@ def find_frames(notebook, found=()) -> list[FrameCell]:
     notebook's Python has (`found`: (name, rows, columns) each, as
     load_data.frames reads them), the last cell setting one afresh in your
     own code. (Not ones no cell makes, such as a deleted cell's, nor ones
-    whose name EzSheet's code uses itself, such as a chart's `data`.)"""
+    whose name EZ Sheet's code uses itself, such as a chart's `data`.)"""
     trees = []
     for cell in notebook.cells:
         try:

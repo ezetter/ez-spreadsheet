@@ -33,7 +33,7 @@ def test_good_names(name):
 @pytest.mark.parametrize("name, problem", [
     ("", "needs a name"), ("2024", "can't start with a digit"), ("my sales", "letters, digits, and _"),
     ("sales-2", "letters, digits, and _"), ("class", "keywords"), ("_sales", "starting with _"),
-    ("pd", "EzSheet's code uses it"), ("data", "EzSheet's code uses it"), ("chart", "EzSheet's code uses it"),
+    ("pd", "EZ Sheet's code uses it"), ("data", "EZ Sheet's code uses it"), ("chart", "EZ Sheet's code uses it"),
     ("Out", "the notebook's Python uses it"), ("list", "built-in"), ("sum", "built-in"),
 ])
 def test_names_that_wont_do(name, problem):
@@ -258,7 +258,7 @@ def test_chart_dialog_name_at_the_top(app):
     dialog.name_field.edit.setText("sales")
     assert dialog.choice().frame == "sales" and dialog.ok_button.isEnabled()
     dialog.name_field.edit.setText("data")
-    assert not dialog.ok_button.isEnabled() and "EzSheet's code uses it" in dialog.name_field.note.text()
+    assert not dialog.ok_button.isEnabled() and "EZ Sheet's code uses it" in dialog.name_field.note.text()
 
 
 def renamable_graph(frame="sales"):
@@ -284,7 +284,7 @@ def test_chart_dialog_renaming_a_charts_dataframe(app):
 
 def test_chart_dialog_name_for_a_chart_that_cant_be_renamed(app):
     graph = renamable_graph()
-    graph.data = None  # its DataFrame's cell isn't written as EzSheet writes it
+    graph.data = None  # its DataFrame's cell isn't written as EZ Sheet writes it
     dialog = GraphDialog(None, columns(), graphs=[graph], current=None, frame="df", taken={"sales"})
     dialog.name_field.edit.setText("costs")
     dialog.graph_box.setCurrentIndex(1)  # the chart: its own DataFrame, shown

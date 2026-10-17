@@ -22,7 +22,7 @@ ZOOM_LEVELS = (50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300)  # pe
 
 def settings() -> QSettings:
     """Where app preferences are kept (not per sheet)."""
-    return QSettings("EzSheet", "EzSheet")
+    return QSettings("EzSheet", "EzSheet")  # (its old name: where the preferences were, and still are)
 
 
 def saved_appearance() -> str:

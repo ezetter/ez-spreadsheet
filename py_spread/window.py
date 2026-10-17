@@ -103,7 +103,7 @@ from .textstyle import BORDER_STYLES, MAX_SIZE, MIN_SIZE, PLAIN, SIZES, Border
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
-FILE_FILTER = f"EzSheet Sheets (*{EXTENSION})"
+FILE_FILTER = f"EZ Sheet Sheets (*{EXTENSION})"
 CUSTOM_FORMAT = "Custom number format…"  # the Number menu's last item
 DEFAULT_FONT = "Default"  # the font box's first item: the sheet's own font
 TOOLS = (  # what the toolbar's right-click menu shows and hides, in the toolbar's order
@@ -1861,7 +1861,7 @@ class MainWindow(QMainWindow):
 
     def _notebook_has_own_code(self) -> bool:
         """Whether the notebook has code but the imports, DataFrames, and
-        charts EzSheet writes: yours, which may make DataFrames of its own."""
+        charts EZ Sheet writes: yours, which may make DataFrames of its own."""
         written = ({frame.cell_id for frame in find_frames(self.notebook)}
                    | {graph.cell_id for graph in find_graphs(self.notebook)})
         return any(cell.source.strip() and cell.source.strip() != IMPORTS_CELL and cell.id not in written
@@ -2638,7 +2638,7 @@ class MainWindow(QMainWindow):
         self.file_path = path
         self.setWindowFilePath(path or "")
         name = os.path.basename(path) if path else "Untitled"
-        self.setWindowTitle(f"{name}[*] — EzSheet")
+        self.setWindowTitle(f"{name}[*] — EZ Sheet")
         self.kernel.working_dir = kernel_folder(path)  # notebook code's relative paths start here
         if self.notebook_window is not None:
             self.notebook_window.set_sheet_name(name)

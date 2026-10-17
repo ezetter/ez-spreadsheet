@@ -1,4 +1,4 @@
-"""Naming a DataFrame that EzSheet puts in the notebook: the field the
+"""Naming a DataFrame that EZ Sheet puts in the notebook: the field the
 DataFrame and Chart dialogs share, and the DataFrame dialog (Notebook >
 DataFrame), which also renames the notebook's DataFrames and updates their
 data."""
@@ -27,7 +27,7 @@ FRAME_RENAME_TIP = ("The DataFrame's name. A new name renames it in its cell, an
                     "use it.")
 NEW_FRAME = "New DataFrame"
 FIXED_TIP = ("The DataFrame this chart draws. It can't be renamed here: the cell making it wasn't found, or "
-             "isn't written as EzSheet writes it.")
+             "isn't written as EZ Sheet writes it.")
 
 
 class FrameNameField(QWidget):

@@ -1,4 +1,4 @@
-# EzSheet
+# EZ Sheet
 
 A desktop spreadsheet written in Python with PySide6 (Qt), using NumPy for
 calculations. Each sheet has a Jupyter-style notebook for working with its
@@ -92,7 +92,7 @@ Color, Borders, Merge Cells, and the angle unit); choose one to show or hide it.
 (Edit > Fill and Formulas > Angles still have them), until you choose your
 own. **Show All Tools** brings them all back.
 A separator shows only between tools that are shown. The tools you hide stay
-hidden the next time EzSheet opens (a preference, not part of the sheet), and
+hidden the next time EZ Sheet opens (a preference, not part of the sheet), and
 hiding Bold, Italic, or Strikethrough from the toolbar leaves them in the
 Format menu.
 
@@ -115,9 +115,9 @@ each keep their own zoom level.
 
 ## Dark mode
 
-EzSheet follows the Mac's light or dark appearance. To override it, choose
+EZ Sheet follows the Mac's light or dark appearance. To override it, choose
 View > Appearance > Light or Dark (or Match System to follow the Mac again);
-the choice is remembered the next time you open EzSheet. Everything
+the choice is remembered the next time you open EZ Sheet. Everything
 switches: the grid (with soft grid lines in either mode), toolbar, menus,
 dialogs, the notebook (code colors included), and the Ask Claude window.
 
@@ -333,7 +333,7 @@ import pandas as pd
 import seaborn as sns
 ```
 
-The cells EzSheet adds for DataFrames and charts rely on it rather than
+The cells EZ Sheet adds for DataFrames and charts rely on it rather than
 repeating the imports, and whenever they run, the imports cell runs first if
 Python hasn't run it yet (after a restart, or in a sheet just opened). A
 notebook made before this, without an imports cell, keeps getting the imports
@@ -376,7 +376,7 @@ df
   the notebook already sets `df`; type another, such as `sales`, to use that
   instead. It has to be a Python name: letters, digits, and `_`, not starting
   with a digit or `_`, and not one of Python's keywords or built-in names
-  (such as `list`), or one that EzSheet's code or the notebook's Python uses
+  (such as `list`), or one that EZ Sheet's code or the notebook's Python uses
   (`pd`, `sns`, `chart`, `data`, `long`, `In`, `Out`, `display`,
   `get_ipython`). Until it is, the dialog says why under it, and OK is
   unavailable. A name the notebook already sets is fine; the dialog says so,
@@ -384,15 +384,15 @@ df
 
 Once the notebook has DataFrames, the DataFrame dialog has a **DataFrame**
 list at the top: **New DataFrame**, then each of them, in the notebook's
-order. They're the ones EzSheet wrote (a chart's included), such as "sales:
+order. They're the ones EZ Sheet wrote (a chart's included), such as "sales:
 Month, Sales, Cost (12 rows)", and the ones your own code makes, such as
 `tips = sns.load_dataset('tips')`, listed as "tips: 244 rows × 7 columns".
-To find those, EzSheet asks the notebook's Python which DataFrames it has, so
+To find those, EZ Sheet asks the notebook's Python which DataFrames it has, so
 the dialog comes once any cells running have finished. If nothing in the
 notebook has run yet (say, the sheet was just opened), the notebook runs
 first, top to bottom. Each is matched to the last cell setting it afresh
 (not `tips = tips.dropna()`, which is still the same one); ones no cell sets,
-and ones called what EzSheet's chart code uses (`data`, `long`), aren't
+and ones called what EZ Sheet's chart code uses (`data`, `long`), aren't
 listed. The list starts at New DataFrame, unless no more than one cell is
 selected and the notebook's current cell makes one of them. Choosing one of
 them:
@@ -456,7 +456,7 @@ The Chart dialog has these choices:
   lists, your own included (such as "tips: 244 rows × 7 columns"). A chart of
   one of those is of its data instead of the sheet's: the axes offer its
   columns, and only the chart's cell is added (`data=tips`), with no new
-  DataFrame cell. For your own DataFrames, EzSheet asks the notebook's Python
+  DataFrame cell. For your own DataFrames, EZ Sheet asks the notebook's Python
   what's in their columns (numbers or text), running the notebook first if
   nothing in it has run yet; a DataFrame whose column names aren't all text,
   or that has two columns of the same name, can't be charted, and the dialog
@@ -524,7 +524,7 @@ yourself, and the Y axis follows the X axis until you choose it. Choosing a
 new X axis clears the Hue or Col if it was that column.
 
 The type (including Swarm plot) and marker start from your last choices
-while EzSheet is open. Cancel adds nothing. If the cells can't be charted (the
+while EZ Sheet is open. Cancel adds nothing. If the cells can't be charted (the
 selection or the sheet is empty, or has just one column, or no numbers), an
 error says why, before the dialog appears. (With charts already in the
 notebook, the dialog's Chart list says it instead; see below.)
@@ -562,7 +562,7 @@ OK:
 - Changing the axes, the hue, or the col writes the chart's cell afresh, from
   the data in its DataFrame's cell, so changes you made to the chart's cell by
   hand are replaced. The columns can be changed only if that cell is found,
-  written as EzSheet writes it; otherwise they're shown but greyed out.
+  written as EZ Sheet writes it; otherwise they're shown but greyed out.
 - A chart made before the Y axis took one column may chart several, a series
   each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
   each series has its own color; choosing one column instead redraws it with
@@ -578,7 +578,7 @@ OK:
   so Python has it by its new name, then the chart's. Cells Python can't read,
   such as ones with a `%magic`, aren't changed; the status bar says how many
   still use the old name. The name can be changed only if the DataFrame's
-  cell is found, written as EzSheet writes it; otherwise it's greyed out.
+  cell is found, written as EZ Sheet writes it; otherwise it's greyed out.
 - Either way, it's an edit in the cell (in each cell, for a rename), so
   Cmd+Z there brings back the old code. The cell runs again to redraw the
   chart. If Python has restarted since its DataFrame was made (or the sheet
@@ -595,7 +595,7 @@ OK:
 ### Loading data into the sheet
 
 Notebook > Load Data to Sheet… puts one of the notebook's pandas DataFrames
-in the sheet, such as a result worked out in the notebook. EzSheet asks the
+in the sheet, such as a result worked out in the notebook. EZ Sheet asks the
 notebook's Python which DataFrames it has (quietly: nothing shows in the
 notebook, and no run numbers are used) and lists them with their sizes, such
 as "by_month: 12 rows × 2 columns". Choose one, and its data goes into the
@@ -640,7 +640,7 @@ View > Notebook opens the notebook at any time.
   Python afresh, forgetting every variable.
 - Variables last from cell to cell while the sheet is open. Python starts the
   first time a cell runs (in about a second) as a separate process, so code
-  that hangs or crashes can't take EzSheet down with it. It starts in the
+  that hangs or crashes can't take EZ Sheet down with it. It starts in the
   sheet's folder (Documents for a new sheet), so code can read files next to
   the sheet by name.
 
@@ -673,7 +673,7 @@ the work it has done.
   "Fill a row with degrees 0 to 360 in steps of 10, with their cosines, sines,
   and cosines squared in the rows below." Unless you say where, it starts at
   the top-left of your selection. When values follow from other cells it
-  writes EzSheet formulas (such as `=COS(A1)`), so the sheet stays live. It
+  writes EZ Sheet formulas (such as `=COS(A1)`), so the sheet stays live. It
   can read any part of the sheet first, and is told not to overwrite data you
   haven't asked it to. Each fill is one step that Undo reverses ("Undo Claude
   Fill"), and the filled cells are selected so you can see them.
@@ -684,7 +684,7 @@ the work it has done.
   window; charts are deleted from Anthropic's storage once downloaded. Stop
   cancels an answer in progress.
 - It needs a Claude API key, which is billed by Anthropic. Set
-  `ANTHROPIC_API_KEY` in the terminal before starting EzSheet (for example
+  `ANTHROPIC_API_KEY` in the terminal before starting EZ Sheet (for example
   in `~/.zshrc`), or log in with Anthropic's `ant` tool (`ant auth login`).
   Without one, the window explains how to set it up.
 
@@ -712,8 +712,8 @@ File > Open Recent lists the last 10 sheets you opened or saved, newest
 first. Hovering over one shows where it is, and two sheets with the same name
 show their folders. A sheet that's been moved, renamed, or deleted is taken
 off the list when you choose it, and Clear Menu empties the list. The list is
-kept with EzSheet's preferences, so it's there the next time you start
-EzSheet. A new sheet joins it when it's first saved.
+kept with EZ Sheet's preferences, so it's there the next time you start
+EZ Sheet. A new sheet joins it when it's first saved.
 
 Sheets are saved as `.ezs` files: JSON holding each cell's raw text
 (formulas, not their results) under its cell name, the angle unit for `SIN`,
@@ -926,7 +926,7 @@ is copied elsewhere. The cell bar shows a named cell as, for example, `B2 (r)`.
   `Pi`).
 - A name can look like a cell reference, such as `A1`. Then a bare `A1` in a
   formula means the name, and the cell is written with a `$`: `$A1`, `A$1`,
-  or `$A$1`. Ranges (`A1:A9`) always mean cells. When EzSheet writes a cell
+  or `$A$1`. Ranges (`A1:A9`) always mean cells. When EZ Sheet writes a cell
   reference for you (pasting, inserting or deleting cells, clicking a cell
   while typing a formula, AutoSum) and it would be spelled like a name, it
   adds the `$` so the reference still means the cell.

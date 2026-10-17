@@ -128,13 +128,13 @@ def load_sheet(path: str) -> SheetData:
     except OSError as e:
         raise SheetFileError(f"Couldn't open {path}: {e.strerror or e}") from e
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise SheetFileError(f"{path} isn't an EzSheet sheet (it isn't valid JSON).") from e
+        raise SheetFileError(f"{path} isn't an EZ Sheet sheet (it isn't valid JSON).") from e
 
     if not isinstance(document, dict) or document.get("format") != FORMAT:
-        raise SheetFileError(f"{path} isn't an EzSheet sheet.")
+        raise SheetFileError(f"{path} isn't an EZ Sheet sheet.")
     version = document.get("version")
     if not isinstance(version, int) or version > VERSION:
-        raise SheetFileError(f"{path} was saved by a newer version of EzSheet.")
+        raise SheetFileError(f"{path} was saved by a newer version of EZ Sheet.")
 
     rows = document.get("rows")
     cols = document.get("columns")

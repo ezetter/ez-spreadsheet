@@ -90,7 +90,7 @@ def test_damaged_sheet_stays_listed(window, tmp_path, dialogs):
     path.write_text("not json")
     add_recent_file(str(path))
     assert not window.open_recent(str(path))
-    assert "isn't an EzSheet sheet" in dialogs.errors[-1] and recent_files() == [str(path)]
+    assert "isn't an EZ Sheet sheet" in dialogs.errors[-1] and recent_files() == [str(path)]
 
 
 def test_clear_menu(window, tmp_path):

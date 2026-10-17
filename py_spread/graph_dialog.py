@@ -87,7 +87,7 @@ class GraphDialog(QDialog):
     name; one of `taken`, which the notebook already sets, is replaced), or
     one of the notebook's DataFrames, `chart_frames` (ChartFrames), listed to
     choose from, which it's then of; for one of the graphs, its own, which
-    can be changed to rename it if its cell is written as EzSheet writes it
+    can be changed to rename it if its cell is written as EZ Sheet writes it
     (but not to one of `used`, names the notebook already uses)."""
 
     def __init__(self, parent=None, columns=None, kind: str = "line", marker: str | None = None,

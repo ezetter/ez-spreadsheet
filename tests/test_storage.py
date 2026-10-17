@@ -98,7 +98,7 @@ def test_window_save_and_open(window, tmp_path):
     assert window.isWindowModified()
     assert window.save_to(path)
     assert not window.isWindowModified()
-    assert window.windowTitle() == "budget.ezs[*] — EzSheet"
+    assert window.windowTitle() == "budget.ezs[*] — EZ Sheet"
 
     other = MainWindow()
     assert other.open_path(path)
@@ -145,7 +145,7 @@ def test_open_bad_file_reports_error_and_keeps_sheet(window, tmp_path, dialogs):
     path.write_text("garbage", encoding="utf-8")
     window.model.set_cell(0, 0, "keep")
     assert not window.open_path(str(path))
-    assert dialogs.errors and "isn't an EzSheet sheet" in dialogs.errors[0]
+    assert dialogs.errors and "isn't an EZ Sheet sheet" in dialogs.errors[0]
     assert window.model.get_cell(0, 0) == "keep"
 
 
@@ -224,7 +224,7 @@ def test_open_or_create_missing_file_starts_named_sheet(window, tmp_path, dialog
     assert window.open_or_create(str(path))
     assert dialogs.errors == []
     assert window.file_path == str(path)
-    assert window.windowTitle() == "budget.ezs[*] — EzSheet"
+    assert window.windowTitle() == "budget.ezs[*] — EZ Sheet"
     assert not path.exists()  # nothing is written until saved
     window.model.set_cell(0, 0, "rent")
     assert window.save()  # saves straight to the path, no dialog
@@ -254,17 +254,17 @@ def test_the_format_is_ezsheet(tmp_path, app):
     from py_spread.storage import EXTENSION, FORMAT
     from py_spread.window import FILE_FILTER
     assert (EXTENSION, FORMAT) == (".ezs", "ezsheet")
-    assert FILE_FILTER == "EzSheet Sheets (*.ezs)"
+    assert FILE_FILTER == "EZ Sheet Sheets (*.ezs)"
 
 
 def test_old_py_spread_files_are_not_supported(tmp_path):
     path = tmp_path / "old.pysheet"
     path.write_text(json.dumps({"format": "py-spread", "version": 6, "rows": 10, "columns": 5, "cells": {}}))
-    with pytest.raises(SheetFileError, match="isn't an EzSheet sheet"):
+    with pytest.raises(SheetFileError, match="isn't an EZ Sheet sheet"):
         load_sheet(str(path))
 
 
 def test_window_title_uses_new_name(window, tmp_path):
-    assert window.windowTitle() == "Untitled[*] — EzSheet"
+    assert window.windowTitle() == "Untitled[*] — EZ Sheet"
     window.save_to(str(tmp_path / "budget.ezs"))
-    assert window.windowTitle() == "budget.ezs[*] — EzSheet"
+    assert window.windowTitle() == "budget.ezs[*] — EZ Sheet"
