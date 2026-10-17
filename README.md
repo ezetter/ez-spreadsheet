@@ -36,6 +36,22 @@ To open a saved sheet directly:
 If the file doesn't exist yet, you get an empty sheet with that name, and Save
 creates the file.
 
+### As a Mac app
+
+EZ Sheet has its own icon, a spreadsheet's grid, and its own name, EZ Sheet,
+in the menu bar. Run as above, though, the Dock still calls it python (it's
+Python's process). For the name in the Dock too, and an app to keep there or
+open from the Finder, build **EZ Sheet.app**:
+
+```bash
+.venv/bin/python scripts/make_app.py
+```
+
+It's built in `dist/` (or give a folder, such as `~/Applications`); drag it to
+the Dock. It runs this project's EZ Sheet, where it is, with its `.venv`, so
+build it again if the project moves. `scripts/make_icon.py` draws the icon
+(`py_spread/resources/ezsheet.png`, and `ezsheet.icns` for the app).
+
 ## Using the grid
 
 - Click a cell and start typing to replace its contents.
