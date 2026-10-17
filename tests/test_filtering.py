@@ -1,7 +1,9 @@
 import json
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt
+from PySide6.QtGui import QRegion
+from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 
 from ezsheet.filter_menu import BLANKS, FilterMenu
@@ -308,3 +310,33 @@ def test_opened_sheet_hides_its_rows(window, tmp_path):
     assert filter_action(other).text() == REMOVE_FILTER
     other.setWindowModified(False)
     other.close()
+
+
+class PaintSpy(QObject):
+    """The parts of a widget repainted."""
+
+    def __init__(self, widget):
+        super().__init__()
+        self.region = QRegion()
+        widget.installEventFilter(self)
+
+    def eventFilter(self, _obj, event):
+        if event.type() == QEvent.Paint:
+            self.region += event.region()
+        return False
+
+
+@pytest.mark.parametrize("change", [
+    lambda window: window.toggle_filter(),  # create
+    lambda window: (window.toggle_filter(), QApplication.processEvents(), window.toggle_filter()),  # remove
+    lambda window: (window.toggle_filter(), QApplication.processEvents(),
+                    window._filter_column(2, ColumnFilter(frozenset({"900"})))),  # a button turns green
+])
+def test_header_buttons_repainted(window, change):
+    window.view.setCurrentIndex(window.model.index(3, 1))
+    QApplication.processEvents()
+    spy = PaintSpy(window.view.viewport())
+    change(window)
+    QApplication.processEvents()
+    for col in range(3):
+        assert spy.region.contains(window.view.filter_button_rect(0, col)), col

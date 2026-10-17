@@ -1069,6 +1069,7 @@ class MainWindow(QMainWindow):
         self.filter_action.triggered.connect(lambda _checked=False: self.toggle_filter())
         menu.addAction(self.filter_action)
         self.model.filter_changed.connect(self._show_filter)
+        self.model.filter_changed.connect(self.view.viewport().update)  # (its header's buttons come, go, or turn green)
         self.model.dataChanged.connect(self._show_filter)
         self.model.modelReset.connect(self._show_filter)
         self.view.filter_button_clicked.connect(self._show_filter_menu)
