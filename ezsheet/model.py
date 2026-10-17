@@ -226,6 +226,10 @@ class SheetModel(QAbstractTableModel):
         """The raw text as entered."""
         return self._cells.get((row, col), "")
 
+    def text_cells(self) -> list[tuple[int, int]]:
+        """The cells with text in them (formulas too)."""
+        return list(self._cells)
+
     def set_cell(self, row: int, col: int, value, description: str = "Edit") -> None:
         self.set_cells({(row, col): value}, description)
 

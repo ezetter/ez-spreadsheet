@@ -114,6 +114,8 @@ from .sort_dialog import SortDialog
 from .sorting import ARROWS, ASCENDING, DESCENDING, has_header, sorted_rows
 from .filter_menu import FilterMenu
 from .filtering import SheetFilter
+from .find_dialog import FindDialog
+from .search import cells_in_order
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
 from .textstyle import BORDER_STYLES, MAX_SIZE, MIN_SIZE, PLAIN, SIZES, Border
 from .references import cell_name, column_name
@@ -796,6 +798,157 @@ class MainWindow(QMainWindow):
         self.delete_cells_action = QAction("Delete Cells…", self)
         self.delete_cells_action.triggered.connect(lambda _checked=False: self.delete_cells())
         menu.addAction(self.delete_cells_action)
+        menu.addSeparator()
+        self.find_dialog = None  # made when first wanted
+        self.find_action = QAction("Find and Replace…", self)
+        self.find_action.setShortcuts([QKeySequence(QKeySequence.Find), QKeySequence("Ctrl+Shift+H")])
+        self.find_action.triggered.connect(lambda _checked=False: self.find_and_replace())
+        menu.addAction(self.find_action)
+        for name, shortcut, backward in (("Find Next", QKeySequence.FindNext, False),
+                                         ("Find Previous", QKeySequence.FindPrevious, True)):
+            action = QAction(name, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, b=backward: self.find_next(b))
+            menu.addAction(action)
+
+    # --- Find and replace ---
+
+    def find_and_replace(self) -> FindDialog:
+        """Edit > Find and Replace…: its window, searching the selected cells if
+        more than one is selected, else all of them (or, if it's open
+        already, what it was searching)."""
+        self._commit_pending_edit()
+        cells = self._selected_cells()
+        if self.find_dialog is not None and self.find_dialog.isVisible() and len(cells) <= 1:
+            self.find_dialog.start()
+            return self.find_dialog
+        if self.find_dialog is None:
+            self.find_dialog = FindDialog(self)
+            self.find_dialog.find.connect(self.find_next)
+            self.find_dialog.replace.connect(self.replace_next)
+            self.find_dialog.replace_all.connect(self.replace_all)
+        self._search_range = self.view.selection_bounds() if len(cells) > 1 else None
+        self.find_dialog.set_range(_block_name([self._search_range[:2], self._search_range[2:]])
+                                   if self._search_range else None)
+        self.find_dialog.start()
+        return self.find_dialog
+
+    def _searched_cells(self) -> list[tuple[int, int]]:
+        """The cells to search: with text, in the range if it's chosen, and not in rows the filter hides."""
+        block = self._search_range if self.find_dialog.in_range() else None
+        hidden = self.model.hidden_rows()
+        return [(row, col) for row, col in self.model.text_cells() if row not in hidden and (
+            block is None or block[0] <= row <= block[2] and block[1] <= col <= block[3])]
+
+    def _matches(self, search) -> list[tuple[int, int]]:
+        model = self.model
+        return sorted(cell for cell in self._searched_cells()
+                      if search.matches(model.get_cell(*cell), model.display_text(*cell)))
+
+    def _search_problem(self, search, replacing: bool = False) -> str | None:
+        problem = search.problem(replacing)
+        if problem:
+            self._find_message(problem)
+        return problem
+
+    def _find_message(self, text: str) -> None:
+        self._show_status(text)
+        if self.find_dialog is not None:
+            self.find_dialog.show_message(text)
+
+    def _where(self) -> str:
+        """" in A1:C9", searching just that range."""
+        if self.find_dialog.in_range():
+            return " in " + _block_name([self._search_range[:2], self._search_range[2:]])
+        return ""
+
+    def find_next(self, backward: bool = False) -> tuple[int, int] | None:
+        """Edit > Find Next (or Previous), or Find: go to the next match after
+        the current cell (or before it), wrapping round."""
+        if self.find_dialog is None or not self.find_dialog.find_edit.text():
+            self.find_and_replace()
+            return None
+        self._commit_pending_edit()
+        search = self.find_dialog.search()
+        if self._search_problem(search):
+            return None
+        matches = self._matches(search)
+        if not matches:
+            self._find_message(f"Couldn't find “{search.find}”{self._where()}.")
+            return None
+        current = self.view.currentIndex()
+        cell = cells_in_order(matches, (current.row(), current.column()), backward)[0]
+        self._go_to_match(cell)
+        self._find_message(f"Found “{search.find}” in {cell_name(*cell)} "
+                           f"({matches.index(cell) + 1} of {len(matches)}).")
+        return cell
+
+    def _go_to_match(self, cell) -> None:
+        """Select the cell found (the window still searches the range it was given)."""
+        index = self.model.index(*cell)
+        self.view.setCurrentIndex(index)
+        self.view.scrollTo(index)
+
+    def replace_next(self) -> bool:
+        """Replace: change the current cell if it's a match, then find the
+        next (or, if it isn't, just find the next)."""
+        self._commit_pending_edit()
+        search = self.find_dialog.search()
+        if self._search_problem(search, replacing=True):
+            return False
+        current = self.view.currentIndex()
+        cell = (current.row(), current.column())
+        if cell not in self._matches(search):
+            self.find_next()
+            return False
+        raw = self.model.get_cell(*cell)
+        if not search.replaceable(raw):
+            found = self.find_next()
+            self._find_message(f"{cell_name(*cell)} shows “{search.find}” from its formula, so it can't be "
+                               "replaced there. Check Also search within formulas to change formulas."
+                               + (f" Next: {cell_name(*found)}." if found and found != cell else ""))
+            return False
+        self.model.set_cell(*cell, search.replaced(raw)[0], "Replace")
+        message = f"Replaced “{search.find}” in {cell_name(*cell)}."
+        matches = [match for match in self._matches(search) if match != cell]
+        if matches:
+            following = cells_in_order(matches, cell)[0]
+            self._go_to_match(following)
+            message += f" Next: {cell_name(*following)}."
+        else:
+            message += " There are no more."
+        self._find_message(message)
+        return True
+
+    def replace_all(self) -> int:
+        """Replace all: every match, as one step; how many times it was replaced."""
+        self._commit_pending_edit()
+        search = self.find_dialog.search()
+        if self._search_problem(search, replacing=True):
+            return 0
+        matches = self._matches(search)
+        writes, count, skipped = {}, 0, 0
+        for cell in matches:
+            raw = self.model.get_cell(*cell)
+            if not search.replaceable(raw):
+                skipped += 1
+                continue
+            writes[cell], found = search.replaced(raw)
+            count += found
+        if not matches:
+            self._find_message(f"Couldn't find “{search.find}”{self._where()}.")
+            return 0
+        message = ""
+        if writes:
+            self.model.set_cells(writes, "Replace All")
+            times = "1 instance" if count == 1 else f"{count} instances"
+            message = (f"Replaced {times} of “{search.find}” with “{search.replace}” "
+                       f"in {_cells(len(writes))}{self._where()}.")
+        if skipped:
+            message += (f" {_cells(skipped)} showed it from {'a formula' if skipped == 1 else 'formulas'}; "
+                        "check Also search within formulas to change formulas.")
+        self._find_message(message.strip())
+        return count
 
     def _build_context_menu(self):
         """The grid's secondary-click menu, made of the Edit menu's actions."""

@@ -741,6 +741,38 @@ the work it has done.
   in `~/.zshrc`), or log in with Anthropic's `ant` tool (`ant auth login`).
   Without one, the window explains how to set it up.
 
+## Find and replace
+
+**Edit > Find and Replace…** (Cmd+F, or Cmd+Shift+H as in Google Sheets)
+opens a window that stays open while you work in the sheet:
+
+- **Find** and **Replace with**.
+- **Search**: **All cells**, or **Selected range (A1:C9)** when more than one
+  cell was selected as it opened. That range is chosen to start with.
+- **Match case**. Otherwise case is ignored.
+- **Match entire cell contents**: a cell's whole text, not just part of it.
+- **Search using regular expressions**, such as `^\d+$`. In Replace with,
+  `$1` is the first group in `( )`, so finding `(\w+), (\w+)` and replacing
+  it with `$2 $1` turns "Smith, Ann" into "Ann Smith".
+- **Also search within formulas**.
+
+**Find** (or Return) goes to the next match, row by row from the current cell,
+wrapping round at the end. The window and the status bar say where it is
+("Found “east” in A4 (2 of 3)."). **Edit > Find Next** (Cmd+G) and **Find
+Previous** (Cmd+Shift+G) do the same with the window closed.
+
+**Replace** changes the current cell if it's a match, then goes to the next
+one. If the current cell isn't a match, it finds one first. **Replace all**
+changes every match as one step, and says how many it replaced. Undo takes
+back either. **Done** closes the window.
+
+A cell is searched as you'd edit it: by the text you typed, so `1200` finds a
+cell showing $1,200.00. A formula's cell is searched by what it shows, and
+Replace leaves its formula alone (it says so). With **Also search within
+formulas**, the formula's own text is searched and replaced instead, so
+`*2` → `*3` changes `=B2*2` to `=B2*3`. Rows the filter hides aren't
+searched.
+
 ## Undo and redo
 
 Undo (Cmd+Z) and Redo (Cmd+Shift+Z) are in the Edit menu. Every change to
