@@ -2442,6 +2442,19 @@ class MainWindow(QMainWindow):
         self._remember_recent(path)
         return True
 
+    def open_document(self, path: str) -> bool:
+        """A sheet the Finder opens here (a .ezs double-clicked, or dropped on
+        the app): in this window, as File > Open does, once its changes are
+        saved or discarded. The sheet it has open already is just brought
+        to the front."""
+        self.raise_()
+        self.activateWindow()
+        if self.file_path and os.path.exists(path) and os.path.samefile(self.file_path, path):
+            return True
+        if not self.maybe_save():
+            return False
+        return self.open_path(path)
+
     def open_recent(self, path: str) -> bool:
         """Open a sheet from File > Open Recent. One that's no longer there is
         taken off the list."""

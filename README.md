@@ -49,7 +49,14 @@ open from the Finder, build **EZ Sheet.app**:
 
 It's built in `dist/` (or give a folder, such as `~/Applications`); drag it to
 the Dock. It runs this project's EZ Sheet, where it is, with its `.venv`, so
-build it again if the project moves. `scripts/make_icon.py` draws the icon
+build it again if the project moves.
+
+The app is registered with the Mac as the app for `.ezs` sheets (they show
+its icon), so double-clicking one in the Finder, or dropping it on the app,
+opens it: in the app's window, as File > Open does, once any changes there
+are saved or discarded (a sheet that's open already just comes to the
+front). If the Finder offers another app for them, choose EZ Sheet in Get
+Info > Open with. `scripts/make_icon.py` draws the icon
 (`py_spread/resources/ezsheet.png`, and `ezsheet.icns` for the app).
 
 ## Using the grid

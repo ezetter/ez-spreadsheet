@@ -1,6 +1,7 @@
 """Build EZ Sheet.app, so the Dock, the Finder, and the menu bar show EZ
-Sheet's name and icon: a Mac app bundle that runs this project's EZ Sheet
-(with its .venv's Python), in dist/ by default.
+Sheet's name and icon, and double-clicking a .ezs sheet opens it: a Mac app
+bundle that runs this project's EZ Sheet (with its .venv's Python), in dist/
+by default. It's registered with the Mac as the app for .ezs files.
 
     .venv/bin/python scripts/make_app.py              # dist/EZ Sheet.app
     .venv/bin/python scripts/make_app.py ~/Applications
@@ -14,12 +15,16 @@ import os
 import plistlib
 import shutil
 import stat
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.normpath(os.path.join(HERE, os.pardir))
 NAME = "EZ Sheet"
 ICON = os.path.join(PROJECT, "py_spread", "resources", "ezsheet.icns")
+SHEET_TYPE = "com.ezsheet.sheet"  # .ezs files' type, as the app declares it
+LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
+              "Support/lsregister")
 
 
 def build(folder: str) -> str:
@@ -41,6 +46,22 @@ def build(folder: str) -> str:
             "CFBundleVersion": "1",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
+            # .ezs sheets: a type of their own (JSON inside), which this app opens and saves.
+            "UTExportedTypeDeclarations": [{
+                "UTTypeIdentifier": SHEET_TYPE,
+                "UTTypeDescription": "EZ Sheet sheet",
+                "UTTypeConformsTo": ["public.data", "public.content"],
+                "UTTypeIconFile": "ezsheet",
+                "UTTypeTagSpecification": {"public.filename-extension": ["ezs"]},
+            }],
+            "CFBundleDocumentTypes": [{
+                "CFBundleTypeName": "EZ Sheet sheet",
+                "CFBundleTypeRole": "Editor",
+                "LSHandlerRank": "Owner",
+                "LSItemContentTypes": [SHEET_TYPE],
+                "CFBundleTypeExtensions": ["ezs"],
+                "CFBundleTypeIconFile": "ezsheet",
+            }],
         }, f)
     shutil.copy(ICON, os.path.join(contents, "Resources", "ezsheet.icns"))
     python = os.path.join(PROJECT, ".venv", "bin", "python")
@@ -54,14 +75,26 @@ def build(folder: str) -> str:
     return app
 
 
+def register(app: str) -> bool:
+    """Tell the Mac about the app (and so its .ezs files) now, not when the
+    Finder next notices it; whether it could."""
+    if not os.path.exists(LSREGISTER):
+        return False
+    return subprocess.run([LSREGISTER, "-f", app], capture_output=True).returncode == 0
+
+
 def _quoted(path: str) -> str:
     return "'" + path.replace("'", "'\\''") + "'"
 
 
 def main() -> int:
-    folder = os.path.expanduser(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(PROJECT, "dist")
+    folders = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+    folder = os.path.expanduser(folders[0]) if folders else os.path.join(PROJECT, "dist")
     os.makedirs(folder, exist_ok=True)
-    print("built", build(folder))
+    app = build(folder)
+    print("built", app)
+    if "--no-register" not in sys.argv and register(app):
+        print("registered it as the app for .ezs files")
     return 0
 
 
