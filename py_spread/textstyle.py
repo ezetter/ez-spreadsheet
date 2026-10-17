@@ -1,10 +1,10 @@
-"""Text styles: bold, italic, the font (its family and size), and colors:
-the text's and the cell's fill."""
+"""Text styles: bold, italic, strikethrough, the font (its family and
+size), and colors: the text's and the cell's fill."""
 
 import re
 from dataclasses import dataclass
 
-ATTRIBUTES = ("bold", "italic")
+ATTRIBUTES = ("bold", "italic", "strikethrough")
 MIN_SIZE, MAX_SIZE = 1, 400  # font sizes, in points
 SIZES = (6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 24, 36, 48, 72)  # the size box's list, as Google Sheets has
 _COLOR = re.compile(r"#[0-9a-f]{6}")  # colors are written #rrggbb, in lowercase
@@ -18,6 +18,7 @@ class CellStyle:
     size: float | None = None  # in points (at 100% zoom); None is the sheet's own
     color: str | None = None  # the text's color, #rrggbb; None is the sheet's own
     fill: str | None = None  # the cell's background, #rrggbb; None is none
+    strikethrough: bool = False
 
 
 PLAIN = CellStyle()
@@ -56,4 +57,5 @@ def from_json(data) -> CellStyle | None:
     if any(name in data and not is_color(data[name]) for name in ("color", "fill")):
         return None
     return CellStyle(data.get("bold", False), data.get("italic", False), font,
-                     float(size) if size is not None else None, data.get("color"), data.get("fill"))
+                     float(size) if size is not None else None, data.get("color"), data.get("fill"),
+                     data.get("strikethrough", False))

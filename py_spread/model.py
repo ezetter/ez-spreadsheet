@@ -147,6 +147,7 @@ class SheetModel(QAbstractTableModel):
                 font.setFamily(style.font)
             font.setBold(style.bold)
             font.setItalic(style.italic)
+            font.setStrikeOut(style.strikethrough)
             return font
         if role == Qt.TextAlignmentRole:
             if isinstance(self.value(row, col), float):

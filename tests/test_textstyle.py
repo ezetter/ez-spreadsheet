@@ -207,3 +207,39 @@ def test_view_menu_shows_and_hides_the_toolbar(window):
     assert not action.isChecked()
     action.trigger()
     assert window.toolbar.isVisible()
+
+
+# --- Strikethrough ---
+
+def test_strikethrough_json():
+    style = CellStyle(bold=True, strikethrough=True)
+    assert to_json(style) == {"bold": True, "strikethrough": True}
+    assert from_json(to_json(style)) == style
+    assert from_json({"strikethrough": "yes"}) is None
+
+
+def test_strikethrough_font(app):
+    model = SheetModel(rows=3, cols=3)
+    model.set_styles({(0, 0): CellStyle(strikethrough=True)}, "Strikethrough")
+    assert model.data(model.index(0, 0), Qt.FontRole).strikeOut()
+
+
+def test_strikethrough_button_and_menu(window):
+    model = window.model
+    window.view.select_range(0, 0, 1, 0)
+    button = toolbar_button(window, "S")
+    assert button.font().strikeOut() and button.defaultAction() is window.format_actions["Strikethrough"]
+    QTest.mouseClick(button, Qt.LeftButton)
+    assert model.cell_style(0, 0).strikethrough and model.cell_style(1, 0).strikethrough
+    assert window.format_actions["Strikethrough"].isChecked() and button.isChecked()
+    assert window.undo_action.text() == "Undo Strikethrough"
+    window.format_actions["Strikethrough"].trigger()  # the current cell has it: off again
+    assert model.cell_style(0, 0) == PLAIN
+    assert window.format_actions["Strikethrough"].shortcut() == QKeySequence("Ctrl+Shift+X")  # ⇧⌘X
+
+
+def test_strikethrough_keeps_other_styles(window):
+    window.model.set_styles({(0, 0): CellStyle(bold=True, font="Georgia")}, "Styles")
+    window.view.select_range(0, 0, 0, 0)
+    window.format_actions["Strikethrough"].trigger()
+    assert window.model.cell_style(0, 0) == CellStyle(bold=True, font="Georgia", strikethrough=True)

@@ -108,7 +108,8 @@ TOOLS = (  # what the toolbar's right-click menu shows and hides, in the toolbar
     ("autosum", "Σ AutoSum"), ("fill", "Fill"), ("notebook", "Notebook"), ("currency", "Currency ($)"),
     ("percent", "Percent (%)"), ("fewer", "Decrease Decimal Places (.0)"),
     ("more", "Increase Decimal Places (.00)"), ("formats", "More Formats (123)"), ("font", "Font"),
-    ("size", "Font Size"), ("bold", "Bold"), ("italic", "Italic"), ("text color", "Text Color"),
+    ("size", "Font Size"), ("bold", "Bold"), ("italic", "Italic"), ("strikethrough", "Strikethrough"),
+    ("text color", "Text Color"),
     ("fill color", "Fill Color"), ("angle", "Angle Unit (DEG or RAD)"),
 )
 HIDDEN_TOOLS_KEY = "toolbar/hidden"  # the tools hidden, a preference
@@ -856,7 +857,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         # Checked when the current cell has the style.
         for name, attribute, shortcut in (("Bold", "bold", QKeySequence.Bold),
-                                          ("Italic", "italic", QKeySequence.Italic)):
+                                          ("Italic", "italic", QKeySequence.Italic),
+                                          ("Strikethrough", "strikethrough", QKeySequence("Ctrl+Shift+X"))):
             action = QAction(name, self)
             action.setCheckable(True)
             action.setShortcut(shortcut)
@@ -1073,6 +1075,7 @@ class MainWindow(QMainWindow):
         style = self.model.cell_style(current.row(), current.column()) if current.isValid() else PLAIN
         self.format_actions["Bold"].setChecked(style.bold)
         self.format_actions["Italic"].setChecked(style.italic)
+        self.format_actions["Strikethrough"].setChecked(style.strikethrough)
         self._paint_color_icons()
         if getattr(self, "font_box", None) is not None:
             self.font_box.blockSignals(True)
@@ -1240,6 +1243,7 @@ class MainWindow(QMainWindow):
             "font": [self.font_box],
             "size": [self.font_size_buttons["smaller"], self.font_size_box, self.font_size_buttons["bigger"]],
             "bold": [self.style_buttons["Bold"]], "italic": [self.style_buttons["Italic"]],
+            "strikethrough": [self.style_buttons["Strikethrough"]],
             "text color": [self.color_buttons["color"]], "fill color": [self.color_buttons["fill"]],
         }
         owner = {id(widget): key for key, group in widgets.items() for widget in group}
@@ -1387,12 +1391,14 @@ class MainWindow(QMainWindow):
             self._paint_color_icons()
 
     def _add_style_buttons(self, toolbar):
-        """B and I toolbar buttons for the Format menu's Bold and Italic, drawn
-        in bold and italic; they're pressed when the current cell has the style.
-        A separator sets them apart from the number format buttons."""
+        """B, I, and S toolbar buttons for the Format menu's Bold, Italic, and
+        Strikethrough, drawn in bold, italic, and struck through; they're
+        pressed when the current cell has the style. A separator sets them
+        apart from the font boxes."""
         toolbar.addSeparator()
         self.style_buttons = {}
-        for name, label, tip in (("Bold", "B", "Bold (⌘B)"), ("Italic", "I", "Italic (⌘I)")):
+        for name, label, tip in (("Bold", "B", "Bold (⌘B)"), ("Italic", "I", "Italic (⌘I)"),
+                                 ("Strikethrough", "S", "Strikethrough (⇧⌘X)")):
             action = self.format_actions[name]
             action.setIconText(label)
             action.setToolTip(tip)
@@ -1404,6 +1410,7 @@ class MainWindow(QMainWindow):
             font.setPointSize(15)
             font.setBold(name == "Bold")
             font.setItalic(name == "Italic")
+            font.setStrikeOut(name == "Strikethrough")
             button.setFont(font)
         self._add_color_buttons(toolbar)
 

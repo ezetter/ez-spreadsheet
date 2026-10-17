@@ -55,7 +55,8 @@ def test_hiding_and_showing_tools(window, preferences):
 def test_separators_only_between_tools_shown(window):
     full = shown_layout(window)
     assert full == ["autosum", "fill", "notebook", "|", "currency", "percent", "fewer", "more", "formats", "|",
-                    "font", "|", "size", "|", "bold", "italic", "text color", "fill color", "|", "angle"]
+                    "font", "|", "size", "|", "bold", "italic", "strikethrough", "text color", "fill color", "|",
+                    "angle"]
     window._show_tools({"font": False})
     assert shown_layout(window)[full.index("font") - 1:][:3] == ["|", "size", "|"]  # no two separators together
     window._show_tools({key: False for key in ("currency", "percent", "fewer", "more", "formats", "angle")})

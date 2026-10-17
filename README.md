@@ -64,11 +64,12 @@ creates the file.
 
 Right-click the toolbar to choose its tools: each is listed, checked if it's
 shown (Σ AutoSum, Fill, Notebook, Currency, Percent, the decimal places, More
-Formats, Font, Font Size, Bold, Italic, Text Color, Fill Color, and the angle
-unit); choose one to show or hide it. **Show All Tools** brings them all back.
+Formats, Font, Font Size, Bold, Italic, Strikethrough, Text Color, Fill
+Color, and the angle unit); choose one to show or hide it. **Show All Tools** brings them all back.
 A separator shows only between tools that are shown. The tools you hide stay
 hidden the next time EzSheet opens (a preference, not part of the sheet), and
-hiding Bold or Italic from the toolbar leaves them in the Format menu.
+hiding Bold, Italic, or Strikethrough from the toolbar leaves them in the
+Format menu.
 
 **Hide Toolbar**, in that menu, hides the whole toolbar; View > **Toolbar**
 shows or hides it, and is checked while it's shown.
@@ -211,12 +212,14 @@ dollars. Formats are saved with the sheet, travel with copy and paste, can be
 undone, and are given by Fill to the cells it fills. Fill also continues
 numbers in the style they were typed: `$1.00, $1.50` continues `$2.00, $2.50`.
 
-## Bold and italic
+## Bold, italic, and strikethrough
 
-Format > Bold (Cmd+B) and Format > Italic (Cmd+I), also the **B** and *I*
-toolbar buttons, style the selected cells. If the current cell already has
+Format > Bold (Cmd+B), Format > Italic (Cmd+I), and Format > Strikethrough
+(Shift+Cmd+X, as in Google Sheets), also the **B**, *I*, and ~~S~~ toolbar
+buttons, style the selected cells. If the current cell already has
 the style, it's removed from the selection; otherwise it's added. The buttons
-and menu items show whether the current cell is bold or italic. Styles are
+and menu items show whether the current cell is bold, italic, or struck
+through. Styles are
 kept when you retype or clear a cell, are saved with the sheet, travel with
 copy and paste, can be undone, and are given by Fill to the cells it fills.
 
