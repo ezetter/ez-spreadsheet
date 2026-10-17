@@ -39,7 +39,22 @@ def test_every_tool_is_found(window):
 def test_right_click_menu(window):
     items = menu_items(window)
     assert list(items) == [label for _key, label in TOOLS] + ["Show All Tools", "Hide Toolbar"]
-    assert all(items[label].isChecked() for _key, label in TOOLS)
+    assert [label for _key, label in TOOLS if not items[label].isChecked()] == [
+        "Fill", "Angle Unit (DEG or RAD)"]  # hidden until shown
+
+
+def test_fill_and_angle_unit_hidden_at_first(window):
+    assert not window.tool_shown("fill") and not window.tool_shown("angle")
+    assert all(window.tool_shown(key) for key, _label in TOOLS if key not in ("fill", "angle"))
+    assert shown_layout(window)[-1] != "|"  # (no separator left at the end, before the hidden DEG)
+    assert window.edit_menu.actions() and window.fill_menu.actions()  # (Edit > Fill has it still)
+
+
+def test_showing_them_all_is_remembered_too(window):
+    menu_items(window)["Show All Tools"].trigger()
+    other = MainWindow()
+    assert all(other.tool_shown(key) for key, _label in TOOLS)  # not the first-time defaults again
+    other.close()
 
 
 def test_hiding_and_showing_tools(window, preferences):
@@ -53,6 +68,7 @@ def test_hiding_and_showing_tools(window, preferences):
 
 
 def test_separators_only_between_tools_shown(window):
+    window._show_tools({key: True for key, _label in TOOLS})
     full = shown_layout(window)
     assert full == ["autosum", "fill", "notebook", "|", "currency", "percent", "fewer", "more", "formats", "|",
                     "font", "|", "size", "|", "bold", "italic", "strikethrough", "text color", "fill color", "|",
@@ -68,13 +84,13 @@ def test_separators_only_between_tools_shown(window):
 
 
 def test_hidden_tools_are_remembered(window):
-    menu_items(window)["Fill"].setChecked(False)
-    menu_items(window)["Angle Unit (DEG or RAD)"].setChecked(False)
+    menu_items(window)["Fill"].setChecked(True)
+    menu_items(window)["Notebook"].setChecked(False)
     other = MainWindow()
-    assert not other.tool_shown("fill") and not other.tool_shown("angle") and other.tool_shown("notebook")
+    assert other.tool_shown("fill") and not other.tool_shown("notebook") and not other.tool_shown("angle")
     menu_items(other)["Show All Tools"].trigger()
     assert all(other.tool_shown(key) for key, _label in TOOLS)
-    assert MainWindow().tool_shown("fill")  # remembered too
+    assert MainWindow().tool_shown("angle")  # remembered too
     other.close()
 
 

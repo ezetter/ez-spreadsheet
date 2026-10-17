@@ -65,7 +65,9 @@ creates the file.
 Right-click the toolbar to choose its tools: each is listed, checked if it's
 shown (Σ AutoSum, Fill, Notebook, Currency, Percent, the decimal places, More
 Formats, Font, Font Size, Bold, Italic, Strikethrough, Text Color, Fill
-Color, and the angle unit); choose one to show or hide it. **Show All Tools** brings them all back.
+Color, and the angle unit); choose one to show or hide it. Fill and the angle unit start hidden
+(Edit > Fill and Formulas > Angles still have them), until you choose your
+own. **Show All Tools** brings them all back.
 A separator shows only between tools that are shown. The tools you hide stay
 hidden the next time EzSheet opens (a preference, not part of the sheet), and
 hiding Bold, Italic, or Strikethrough from the toolbar leaves them in the

@@ -113,6 +113,7 @@ TOOLS = (  # what the toolbar's right-click menu shows and hides, in the toolbar
     ("fill color", "Fill Color"), ("angle", "Angle Unit (DEG or RAD)"),
 )
 HIDDEN_TOOLS_KEY = "toolbar/hidden"  # the tools hidden, a preference
+DEFAULT_HIDDEN_TOOLS = ("fill", "angle")  # hidden until shown (Edit > Fill and Formulas > Angles have them)
 COLUMN_WIDTH = 100  # default sizes at 100% zoom
 ROW_HEIGHT = 24
 CSV_FILTER = "CSV Files (*.csv);;Text Files (*.txt *.tsv);;All Files (*)"
@@ -1236,7 +1237,8 @@ class MainWindow(QMainWindow):
 
     def _collect_tools(self) -> None:
         """Each tool's toolbar items, by its key, for showing and hiding
-        them; then those hidden before, hidden again."""
+        them; then those hidden before, hidden again (or, before any are
+        chosen, Fill and the angle unit)."""
         widgets = {
             "autosum": [self.autosum_button], "fill": [self.fill_button], "notebook": [self.notebook_button],
             **{key: [button] for key, button in self.number_buttons.items()},
@@ -1255,7 +1257,9 @@ class MainWindow(QMainWindow):
                 key = owner.get(id(self.toolbar.widgetForAction(action)))
                 if key is not None:
                     self.tool_actions[key].append(action)
-        saved = appearance.settings().value(HIDDEN_TOOLS_KEY, "")
+        saved = appearance.settings().value(HIDDEN_TOOLS_KEY)
+        if saved is None:  # never chosen
+            saved = DEFAULT_HIDDEN_TOOLS
         saved = saved.split(",") if isinstance(saved, str) else saved or []  # (QSettings may give a list)
         hidden = [key for key in saved if key in self.tool_actions]
         self._show_tools({key: key not in hidden for key in self.tool_actions}, save=False)
