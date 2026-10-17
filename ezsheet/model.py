@@ -17,10 +17,12 @@ from .formula import (
     parse,
     parse_number,
     references,
+    shift_references,
 )
 from .functions import DEGREES
 from . import names
 from .custom_format import COLORS
+from .sorting import sorted_rows
 from .numformat import (
     DATE_KINDS,
     NumberFormat,
@@ -597,6 +599,38 @@ class SheetModel(QAbstractTableModel):
             columns,
             merges=filter(None, (_moved_block(block, move) for block in self._merges)),
         )
+
+    # --- Sorting ---
+
+    def data_block(self) -> tuple[int, int, int, int] | None:
+        """(top, left, bottom, right) of everything in the sheet: text,
+        number formats, and styles (a fill, say), or None if there's none."""
+        occupied = self._occupied()
+        if not occupied:
+            return None
+        rows, cols = [row for row, _ in occupied], [col for _, col in occupied]
+        return min(rows), min(cols), max(rows), max(cols)
+
+    def sort_rows(self, top: int, left: int, bottom: int, right: int, keys, description: str = "Sort") -> bool:
+        """Sort the block's rows by the columns in `keys` ((col, ascending)
+        pairs: see sorting.sorted_rows), as one undoable step: each row's
+        cells (text, number format, and style) move together, a formula's
+        relative references moving with it. Whether anything moved."""
+        order = sorted_rows(range(top, bottom + 1), self.value, keys)
+        if order == list(range(top, bottom + 1)):
+            return False
+        names_now = self.name_set()
+        writes, formats, styles = {}, {}, {}
+        for target, source in enumerate(order, start=top):
+            for col in range(left, right + 1):
+                text = self._cells.get((source, col), "")
+                if is_formula(text) and target != source:
+                    text = shift_references(text, target - source, 0, names_now)
+                writes[(target, col)] = text
+                formats[(target, col)] = self._formats.get((source, col))
+                styles[(target, col)] = self._styles.get((source, col))
+        self.set_cells(writes, description, formats, styles)
+        return True
 
     # --- Merged cells ---
 

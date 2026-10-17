@@ -319,6 +319,33 @@ column of the selection), **Merge horizontally** (each row), and
 - Merged cells are saved with the sheet and can be undone. Inserting rows or
   columns within a merged cell widens it; deleting some narrows it.
 
+## Sorting
+
+Sort rows by their columns' values from the **Data** menu, or by
+right-clicking a column's header (**Sort Sheet A → Z** or **Z → A**):
+
+- **Sort Sheet by Column B (A → Z)**, or **(Z → A)**: all the sheet's rows,
+  by the current cell's column (the menu names it).
+- **Sort Range by Column B**: just the selected cells' rows and columns (the
+  other columns stay as they are), by the current cell's column if it's in
+  the selection, else its first.
+- **Sort Range…**: the selected cells (or, with no more than one selected,
+  the whole sheet's data) by one column and then others among ties, each A
+  → Z or Z → A, with **Data has header row** to keep the first row on top
+  (the dialog names the columns by it).
+
+A → Z puts numbers first (smallest first, dates among them), then text
+(ignoring case), then errors; Z → A the other way round. Empty cells go last
+either way, and ties keep their order. Rows move whole: each cell's text,
+number format, and style (fills and borders too). A formula's relative
+references move with it, as when it's copied, so `=B2*2` in a row that moves
+to row 7 is `=B7*2` (`$`-anchored ones stay). The quick sorts keep a first
+row on top when it's plainly a header: all text, over numbers (Month over
+1200), or bold over plain rows; a plain list of names is sorted whole (use
+Sort Range… to say otherwise). The status bar says what was sorted, and Undo
+puts it back in one step. Sorting can't move merged cells; unmerge them
+first.
+
 ## Notebook
 
 Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by

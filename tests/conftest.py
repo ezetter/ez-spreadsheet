@@ -48,6 +48,8 @@ class Dialogs:
         self.custom_format_answer = None  # the Custom number format dialog's pattern; None cancels
         self.color_answer = None  # the color dialog's color, #rrggbb; None cancels
         self.merge_answer = True  # whether to merge though values would be lost
+        self.sort_answer = None  # the Sort Range dialog's (sort columns, header row); None cancels
+        self.sort_prompts = []  # (the range, its columns, the header row's guess, the first column) each time
         self.merge_prompts = 0
         self.color_prompts = []  # (the color it started at, its title) each time
         self.custom_format_prompts = []  # (the pattern it started with, its sample) each time
@@ -116,6 +118,12 @@ def dialogs(monkeypatch):
         return dialogs.merge_answer
 
     monkeypatch.setattr(MainWindow, "_ask_merge_anyway", ask_merge_anyway)
+
+    def ask_sort(window, where, left, right, labels, header, col):
+        dialogs.sort_prompts.append((where, [labels(c) for c in range(left, right + 1)], header, col))
+        return dialogs.sort_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_sort", ask_sort)
 
     def new_chart(columns, problem, frame, chart_frames, answer):
         """A new chart's choices, as the dialog makes them: of the cells, or a DataFrame named in it."""

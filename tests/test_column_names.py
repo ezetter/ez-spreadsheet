@@ -224,7 +224,8 @@ def test_window_names_a_column(app, monkeypatch):
     assert window.model.column_names() == {"t": C}
     assert window.cell_label.text() == "C5 (t5)"
     window._show_header_menu(QPoint(window.view.columnViewportPosition(3) + 5, 5))
-    assert [a.text() for a in window.header_menu.actions()] == ["Insert Column", "Delete Column", "", "Name Column…"]
+    assert [a.text() for a in window.header_menu.actions()] == ["Insert Column", "Delete Column", "", "Name Column…",
+                                                                "", "Sort Sheet A → Z", "Sort Sheet Z → A"]
     assert {i.column() for i in window.view.selectedIndexes()} == {3}
     window.header_menu.hide()
     window.setWindowModified(False)

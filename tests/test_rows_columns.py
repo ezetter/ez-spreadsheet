@@ -194,7 +194,8 @@ def test_column_header_menu(window):
     select_columns(window, 1, 2)
     window._show_header_menu(QPoint(window.view.columnViewportPosition(2) + 5, 5))
     assert [a.text() for a in window.header_menu.actions()] == ["Insert Columns", "Delete Columns", "",
-                                                                "Name Column…"]
+                                                                "Name Column…", "", "Sort Sheet A → Z",
+                                                                "Sort Sheet Z → A"]
     assert window.view.whole_lines() == ("columns", [1, 2])  # clicked inside the selection: kept
     window.header_menu.hide()
     window._show_header_menu(QPoint(window.view.columnViewportPosition(4) + 5, 5))

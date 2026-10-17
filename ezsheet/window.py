@@ -98,9 +98,11 @@ from .colors import ColorMenu, fill_color_icon, text_color_icon
 from .borders import BORDER_KINDS, MERGE_KINDS, border_icon, border_style_icon, border_styles, covered, merged
 from .borders import merge_icon
 from .custom_format_dialog import CustomFormatDialog
+from .sort_dialog import SortDialog
+from .sorting import ARROWS, ASCENDING, DESCENDING, has_header
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
 from .textstyle import BORDER_STYLES, MAX_SIZE, MIN_SIZE, PLAIN, SIZES, Border
-from .references import cell_name
+from .references import cell_name, column_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
 FILE_FILTER = f"EZ Sheet Sheets (*{EXTENSION})"
@@ -614,6 +616,7 @@ class MainWindow(QMainWindow):
         self._build_edit_menu()
         self._build_insert_menu()
         self._build_format_menu()
+        self._build_data_menu()
         self._build_formulas_menu()
         self._build_claude_menu()
         self._build_view_menu()
@@ -965,6 +968,128 @@ class MainWindow(QMainWindow):
         menu.addMenu(self._borders_menu(in_toolbar=False))
         menu.addMenu(self._merge_menu())
 
+    def _build_data_menu(self):
+        """Data: sort the sheet, or the selected range, by the current cell's
+        column, A → Z or Z → A, or by several columns (Sort Range…)."""
+        menu = self.menuBar().addMenu("Data")
+        self.sort_actions = {}
+        for key, ascending in (("sheet", ASCENDING), ("sheet", DESCENDING), ("range", ASCENDING),
+                               ("range", DESCENDING)):
+            if key == "range" and ascending:
+                menu.addSeparator()
+            action = QAction(self)
+            action.triggered.connect(lambda _checked=False, k=key, a=ascending: self._sort_by_current(k, a))
+            menu.addAction(action)
+            self.sort_actions[(key, ascending)] = action
+        action = QAction("Sort Range…", self)
+        action.triggered.connect(lambda _checked=False: self.sort_range_dialog())
+        menu.addAction(action)
+        self.sort_actions["dialog"] = action
+        self.view.selectionModel().currentChanged.connect(self._name_sort_actions)
+        self.view.selectionModel().selectionChanged.connect(self._name_sort_actions)
+        self._name_sort_actions()
+
+    def _name_sort_actions(self, *_args) -> None:
+        """The Data menu's sorts name the current cell's column."""
+        current = self.view.currentIndex()
+        letter = column_name(current.column() if current.isValid() else 0)
+        multiple = len(self._selected_cells()) > 1
+        for (key, ascending), action in ((k, a) for k, a in self.sort_actions.items() if k != "dialog"):
+            what = "Sheet" if key == "sheet" else "Range"
+            action.setText(f"Sort {what} by Column {letter} ({ARROWS[ascending]})")
+            if key == "range":
+                action.setEnabled(multiple)
+
+    def _sort_by_current(self, key: str, ascending: bool) -> None:
+        current = self.view.currentIndex()
+        col = current.column() if current.isValid() else 0
+        if key == "sheet":
+            self.sort_sheet(col, ascending)
+        else:
+            self.sort_range(col, ascending)
+
+    def _header_guess(self, top, left, bottom, right) -> bool:
+        return has_header(self.model.value, lambda r, c: self.model.cell_style(r, c).bold, top, left, bottom, right)
+
+    def sort_sheet(self, col: int, ascending: bool) -> bool:
+        """Sort all the sheet's rows by a column (keeping a header row on
+        top, if there plainly is one: see sorting.has_header)."""
+        block = self.model.data_block()
+        if block is None:
+            self._show_status("There's nothing to sort.")
+            return False
+        top, left, bottom, right = block
+        return self._sort((top, left, bottom, right), [(col, ascending)], self._header_guess(*block), "Sort Sheet")
+
+    def sort_range(self, col: int, ascending: bool) -> bool:
+        """Sort the selected cells' rows by a column (the current cell's, if
+        it's in the selection), moving only the selected columns."""
+        top, left, bottom, right = self._sort_block()
+        col = col if left <= col <= right else left
+        block = (top, left, bottom, right)
+        return self._sort(block, [(col, ascending)], self._header_guess(*block), "Sort Range")
+
+    def sort_range_dialog(self) -> bool:
+        """Data > Sort Range…: the selected cells (or the whole sheet's data,
+        with no more than one selected), by one or more columns, with or
+        without a header row."""
+        if len(self._selected_cells()) > 1:
+            block = self._sort_block()
+        else:
+            block = self.model.data_block()
+            if block is None:
+                self._show_status("There's nothing to sort.")
+                return False
+        top, left, bottom, right = block
+        current = self.view.currentIndex()
+        col = current.column() if current.isValid() and left <= current.column() <= right else left
+        answer = self._ask_sort(f"{cell_name(top, left)}:{cell_name(bottom, right)}", left, right,
+                                lambda c: str(self.model.value(top, c) or ""), self._header_guess(*block), col)
+        if answer is None:
+            return False
+        keys, header = answer
+        return self._sort(block, keys, header, "Sort Range")
+
+    def _sort_block(self) -> tuple[int, int, int, int]:
+        """The selection, but no lower than the sheet's data (whole columns, say)."""
+        self._commit_pending_edit()
+        top, left, bottom, right = self.view.selection_bounds()
+        data = self.model.data_block()
+        if data is not None:
+            bottom = max(top, min(bottom, data[2]))
+        return top, left, bottom, right
+
+    def _ask_sort(self, where: str, left: int, right: int, labels, header: bool, col: int):
+        """The Sort Range dialog: (the sort columns, whether there's a header row), or None if cancelled."""
+        dialog = SortDialog(self, where, left, right, labels, header, col)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.sort_keys(), dialog.has_header()
+
+    def _sort(self, block, keys, header: bool, description: str) -> bool:
+        """Sort a block's rows (all but a header row, if it has one), saying how in the status bar."""
+        self._commit_pending_edit()
+        top, left, bottom, right = block
+        if header:
+            top += 1
+        if top >= bottom:
+            self._show_status("There's only one row to sort.")
+            return False
+        merged_here = [m for m in self.model.merges()
+                       if m[0] <= bottom and top <= m[2] and m[1] <= right and left <= m[3]]
+        if merged_here:
+            m_top, m_left, m_bottom, m_right = merged_here[0]
+            self._show_error("Couldn't sort.", f"Sorting can't move merged cells. Unmerge "
+                             f"{cell_name(m_top, m_left)}:{cell_name(m_bottom, m_right)} first.")
+            return False
+        by = ", then ".join(f"column {column_name(col)} ({ARROWS[ascending]})" for col, ascending in keys)
+        kept = f", keeping row {top} as the header" if header else ""
+        if not self.model.sort_rows(top, left, bottom, right, keys, description):
+            self._show_status(f"Rows {top + 1}–{bottom + 1} are sorted by {by} already{kept}.")
+            return False
+        self._show_status(f"Sorted rows {top + 1}–{bottom + 1} by {by}{kept}.")
+        return True
+
     def _build_formulas_menu(self):
         menu = self.menuBar().addMenu("Formulas")
         group = QActionGroup(self)  # one of them is checked: the sheet's angle unit
@@ -1043,6 +1168,9 @@ class MainWindow(QMainWindow):
         menu.addAction(self.delete_cells_action)
         menu.addSeparator()
         menu.addAction("Name Column…", lambda: self.name_column(col))
+        menu.addSeparator()
+        for ascending in (ASCENDING, DESCENDING):
+            menu.addAction(f"Sort Sheet {ARROWS[ascending]}", lambda a=ascending: self.sort_sheet(col, a))
         menu.popup(self.view.horizontalHeader().mapToGlobal(pos))
         self.header_menu = menu  # kept alive while it's shown
 
