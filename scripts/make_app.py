@@ -21,7 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.normpath(os.path.join(HERE, os.pardir))
 NAME = "EZ Sheet"
-ICON = os.path.join(PROJECT, "py_spread", "resources", "ezsheet.icns")
+ICON = os.path.join(PROJECT, "ezsheet", "resources", "ezsheet.icns")
 SHEET_TYPE = "com.ezsheet.sheet"  # .ezs files' type, as the app declares it
 LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
               "Support/lsregister")
@@ -70,7 +70,7 @@ def build(folder: str) -> str:
         f.write("#!/bin/sh\n"
                 f"# Runs EZ Sheet from {PROJECT}.\n"
                 f"cd {_quoted(PROJECT)} || exit 1\n"
-                f'exec {_quoted(python)} -m py_spread "$@"\n')
+                f'exec {_quoted(python)} -m ezsheet "$@"\n')
     os.chmod(launcher, os.stat(launcher).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return app
 

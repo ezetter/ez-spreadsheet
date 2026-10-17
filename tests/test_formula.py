@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from py_spread.formula import (
+from ezsheet.formula import (
     CellError,
     FormulaError,
     evaluate,
@@ -12,9 +12,9 @@ from py_spread.formula import (
     replace_function,
     shift_references,
 )
-from py_spread.references import column_index
-from py_spread.functions import DEGREES
-from py_spread.model import SheetModel
+from ezsheet.references import column_index
+from ezsheet.functions import DEGREES
+from ezsheet.model import SheetModel
 
 
 class EmptySheet:

@@ -146,7 +146,7 @@ CREDENTIALS_HELP = (
     "EZ Sheet couldn't find Claude API credentials.\n\n"
     "Set your API key in the terminal before starting EZ Sheet, for example by adding "
     "`export ANTHROPIC_API_KEY=...` to `~/.zshrc`, then open a new terminal and run "
-    "`.venv/bin/python -m py_spread`. Or install Anthropic's `ant` command-line tool and "
+    "`.venv/bin/python -m ezsheet`. Or install Anthropic's `ant` command-line tool and "
     "run `ant auth login`. You can create an API key at platform.claude.com."
 )
 

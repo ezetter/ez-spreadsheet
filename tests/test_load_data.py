@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QLabel
 
-from py_spread.load_data import (
+from ezsheet.load_data import (
     KERNEL_HELPERS,
     MAX_CELLS,
     answer,
@@ -16,8 +16,8 @@ from py_spread.load_data import (
     frames_request,
     sheet_writes,
 )
-from py_spread.load_data_dialog import LoadDataDialog
-from py_spread.window import MainWindow
+from ezsheet.load_data_dialog import LoadDataDialog
+from ezsheet.window import MainWindow
 
 
 def run_helpers(namespace: dict, expression: str) -> str:
@@ -90,7 +90,7 @@ def test_writes_for_the_sheet():
 
 
 def test_whats_in_the_columns():
-    from py_spread.load_data import columns_request, frame_columns
+    from ezsheet.load_data import columns_request, frame_columns
     namespace = {"pd": pd, "tips": pd.DataFrame({
         "bill": [1.5, 2.0], "size": [2, None], "day": pd.Categorical(["Sun", "Sat"]), "paid": [True, False],
         "note": [1, "a"]}), "unnamed": pd.DataFrame([[1]]), "twice": pd.DataFrame([[1, 2]], columns=["a", "a"])}
@@ -282,7 +282,7 @@ def test_real_kernel_loads_data(app, dialogs):
 
 
 def test_real_kernel_evaluate_without_a_kernel(app):
-    from py_spread.kernel import KernelRunner
+    from ezsheet.kernel import KernelRunner
     runner = KernelRunner()
     answers = []
     runner.evaluated.connect(lambda request_id, value, error: answers.append((request_id, value, error)))

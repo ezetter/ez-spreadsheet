@@ -1,6 +1,6 @@
 """EZ Sheet's name for macOS, as the menu bar and the Dock show it: the app's
 bundle name, set before the QApplication is made. (Run as python -m
-py_spread, the process is Python's, so it would otherwise say python3.)
+ezsheet, the process is Python's, so it would otherwise say python3.)
 
 This talks to the Objective-C runtime through ctypes, as PySide doesn't wrap
 AppKit; off a Mac it does nothing.

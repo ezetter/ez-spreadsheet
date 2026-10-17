@@ -4,8 +4,8 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QStyleOptionViewItem
 
-from py_spread.textstyle import CellStyle
-from py_spread.window import COLUMN_WIDTH, ROW_HEIGHT, MainWindow
+from ezsheet.textstyle import CellStyle
+from ezsheet.window import COLUMN_WIDTH, ROW_HEIGHT, MainWindow
 
 
 @pytest.fixture

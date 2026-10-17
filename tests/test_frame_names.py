@@ -4,9 +4,9 @@ import seaborn as sns
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFormLayout
 
-from py_spread.frame_name_dialog import FrameNameDialog, FrameNameField
-from py_spread.graph_dialog import GraphDialog
-from py_spread.graphs import (
+from ezsheet.frame_name_dialog import FrameNameDialog, FrameNameField
+from ezsheet.graph_dialog import GraphDialog
+from ezsheet.graphs import (
     FrameCell,
     GraphCell,
     find_frames,
@@ -17,9 +17,9 @@ from py_spread.graphs import (
     update_frame_code,
     used_names,
 )
-from py_spread.model import SheetModel
-from py_spread.notebook import FrameData, GraphColumns, Notebook, assigned_names, frame_name_problem
-from py_spread.window import MainWindow
+from ezsheet.model import SheetModel
+from ezsheet.notebook import FrameData, GraphColumns, Notebook, assigned_names, frame_name_problem
+from ezsheet.window import MainWindow
 from tests.test_notebook import FakeKernel, items
 
 
@@ -689,13 +689,13 @@ def test_python_that_cant_answer(window, dialogs):
 # --- Charting the notebook's DataFrames ---
 
 def tips_option(problem=None):
-    from py_spread.graphs import ChartFrame
+    from ezsheet.graphs import ChartFrame
     frame = FrameCell("t", "tips", shape=(244, 3), code="tips = sns.load_dataset('tips')")
     return ChartFrame.of(frame, problem or FrameData(["total_bill", "tip", "day"], [[1.5], [1.5], ["text"]]))
 
 
 def test_chart_dialog_lists_the_notebooks_dataframes(app):
-    from py_spread.graphs import ChartFrame
+    from ezsheet.graphs import ChartFrame
     df = FrameCell("d", "df", FrameData(["Month", "Sales"], [["Jan"], [1]]))
     dialog = GraphDialog(None, columns(), new_source="the whole sheet, A1:C3", frame="df2",
                          chart_frames=[ChartFrame.of(df, df.data), tips_option()])

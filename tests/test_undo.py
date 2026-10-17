@@ -3,10 +3,10 @@ from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit
 
-from py_spread.fill import SequenceFill
-from py_spread.model import SheetModel
-from py_spread.storage import SheetData
-from py_spread.window import MainWindow
+from ezsheet.fill import SequenceFill
+from ezsheet.model import SheetModel
+from ezsheet.storage import SheetData
+from ezsheet.window import MainWindow
 
 UNDO = (Qt.Key_Z, Qt.ControlModifier)  # Cmd+Z on macOS
 REDO = (Qt.Key_Z, Qt.ControlModifier | Qt.ShiftModifier)
@@ -216,7 +216,7 @@ def test_cmd_z_while_typing_undoes_text_not_cells(window, app):
 
 
 def test_open_clears_history(window, tmp_path):
-    from py_spread.storage import save_sheet
+    from ezsheet.storage import save_sheet
     path = str(tmp_path / "s.ezs")
     save_sheet(path, SheetData(1000, 52, {(0, 0): "file"}))
     window.model.set_cell(0, 0, "x")

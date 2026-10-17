@@ -3,11 +3,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 
-from py_spread.colors import PALETTE, ColorMenu
-from py_spread.model import SheetModel
-from py_spread.numformat import NumberFormat
-from py_spread.textstyle import PLAIN, CellStyle, from_json, to_json
-from py_spread.window import MainWindow
+from ezsheet.colors import PALETTE, ColorMenu
+from ezsheet.model import SheetModel
+from ezsheet.numformat import NumberFormat
+from ezsheet.textstyle import PLAIN, CellStyle, from_json, to_json
+from ezsheet.window import MainWindow
 
 
 def test_json():

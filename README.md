@@ -21,16 +21,16 @@ the Anthropic SDK);
 ## Run
 
 ```bash
-.venv/bin/python -m py_spread
+.venv/bin/python -m ezsheet
 ```
 
 Or activate the environment first (`source .venv/bin/activate`), after which
-`python -m py_spread` works.
+`python -m ezsheet` works.
 
 To open a saved sheet directly:
 
 ```bash
-.venv/bin/python -m py_spread budget.ezs
+.venv/bin/python -m ezsheet budget.ezs
 ```
 
 If the file doesn't exist yet, you get an empty sheet with that name, and Save
@@ -57,7 +57,7 @@ opens it: in the app's window, as File > Open does, once any changes there
 are saved or discarded (a sheet that's open already just comes to the
 front). If the Finder offers another app for them, choose EZ Sheet in Get
 Info > Open with. `scripts/make_icon.py` draws the icon
-(`py_spread/resources/ezsheet.png`, and `ezsheet.icns` for the app).
+(`ezsheet/resources/ezsheet.png`, and `ezsheet.icns` for the app).
 
 ## Using the grid
 

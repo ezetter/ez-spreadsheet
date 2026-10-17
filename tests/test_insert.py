@@ -1,11 +1,11 @@
 import pytest
 
-from py_spread.formula import move_references
-from py_spread.shift_dialog import InsertCellsDialog
-from py_spread.model import SheetModel
-from py_spread.numformat import NumberFormat
-from py_spread.textstyle import CellStyle
-from py_spread.window import MainWindow
+from ezsheet.formula import move_references
+from ezsheet.shift_dialog import InsertCellsDialog
+from ezsheet.model import SheetModel
+from ezsheet.numformat import NumberFormat
+from ezsheet.textstyle import CellStyle
+from ezsheet.window import MainWindow
 
 
 def grid(model, rows):

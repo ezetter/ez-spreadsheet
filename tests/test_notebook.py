@@ -10,8 +10,8 @@ from PySide6.QtGui import QImage, QTextDocument, QTextTable
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QToolBar, QToolButton, QWidget
 
-from py_spread.model import SheetModel
-from py_spread.notebook import (
+from ezsheet.model import SheetModel
+from ezsheet.notebook import (
     Notebook,
     NotebookFormatError,
     IMPORTS_CELL,
@@ -26,10 +26,10 @@ from py_spread.notebook import (
     importing_cell,
     next_frame_name,
 )
-from py_spread.graph_dialog import MARKERS, GraphDialog
-from py_spread.notebook_window import NotebookWindow, OutputView
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.window import MainWindow
+from ezsheet.graph_dialog import MARKERS, GraphDialog
+from ezsheet.notebook_window import NotebookWindow, OutputView
+from ezsheet.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.window import MainWindow
 
 
 def block(top, left, bottom, right):
@@ -1627,7 +1627,7 @@ def test_zoomed_plots_grow(app):
 
 
 def test_zoom_steps():
-    from py_spread.appearance import next_zoom
+    from ezsheet.appearance import next_zoom
     assert (next_zoom(100, 1), next_zoom(100, -1)) == (110, 90)
     assert (next_zoom(300, 1), next_zoom(50, -1)) == (300, 50)
     assert next_zoom(105, 1) == 110 and next_zoom(105, -1) == 100
@@ -1765,7 +1765,7 @@ def test_real_kernel_chart_comes_into_view(app, sheet, dialogs):
 
 
 def test_real_kernel_errors_interrupt_and_restart(app):
-    from py_spread.kernel import KernelRunner
+    from ezsheet.kernel import KernelRunner
     runner = KernelRunner()
     notebook = Notebook()
     nb = NotebookWindow(notebook, runner)

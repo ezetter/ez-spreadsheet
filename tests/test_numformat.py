@@ -3,13 +3,13 @@ import json
 import pytest
 from PySide6.QtCore import Qt
 
-from py_spread.fill import SequenceFill
-from py_spread.formula import parse_number
-from py_spread.model import SheetModel
-from py_spread.errors import CellError
-from py_spread.numformat import GENERAL, NumberFormat, format_value, from_json, parse_formatted, to_json
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.window import MainWindow
+from ezsheet.fill import SequenceFill
+from ezsheet.formula import parse_number
+from ezsheet.model import SheetModel
+from ezsheet.errors import CellError
+from ezsheet.numformat import GENERAL, NumberFormat, format_value, from_json, parse_formatted, to_json
+from ezsheet.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.window import MainWindow
 
 CURRENCY = NumberFormat("currency")
 NUMBER = NumberFormat("number")
@@ -354,7 +354,7 @@ def test_google_sheets_formats(kind, decimals, value, shown):
 
 
 def test_menu_examples_are_what_the_formats_show():
-    from py_spread.numformat import MENU_FORMATS
+    from ezsheet.numformat import MENU_FORMATS
     samples = {"Number": 1000.12, "Percent": 0.1012, "Scientific": 1012, "Fraction": 1000.12, "Accounting": -1000.12,
                "Financial": -1000.12, "Currency": 1000.12, "Currency rounded": 1000.12, "Date": 39717,
                "Time": 0.6659722222, "Date time": 39717.6659722222, "Duration": 1.000694444}
@@ -556,7 +556,7 @@ def test_typing_a_month_and_day_in_a_date_cell(window):
 
 
 def test_complete_date():
-    from py_spread.numformat import complete_date
+    from ezsheet.numformat import complete_date
     assert complete_date("3/7", 2026) == "3/7/2026" and complete_date(" 03/07 ", 2026) == "3/7/2026"
     assert complete_date("2/29", 2024) == "2/29/2024" and complete_date("2/29", 2026) is None
     assert complete_date("3/7/2026", 2026) is None and complete_date("13/1", 2026) is None
@@ -591,14 +591,14 @@ def test_typing_a_fraction_in_a_number_cell(window):
 
 
 def test_custom_formats_of_dates_and_times_arent_number_formats():
-    from py_spread.numformat import shows_numbers
+    from ezsheet.numformat import shows_numbers
     assert shows_numbers(NumberFormat("custom", pattern="#,##0.00")) and shows_numbers(NumberFormat("percent"))
     assert not shows_numbers(NumberFormat("custom", pattern="h:mm")) and not shows_numbers(GENERAL)
     assert not shows_numbers(NumberFormat("custom", pattern="[Purple]0"))
 
 
 def test_fraction_formula():
-    from py_spread.numformat import fraction_formula
+    from ezsheet.numformat import fraction_formula
     assert [fraction_formula(t) for t in ("3/7", "-22/7", "+1/2", "1 1/4", "-1 1/2", "007/08", "3/0", "3/7/2026",
                                           "1/2/3", "a/b")] == [
         "=3/7", "=-22/7", "=1/2", "=1+1/4", "=-(1+1/2)", "=7/8", None, None, None, None]

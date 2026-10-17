@@ -3,9 +3,9 @@ import os
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
-from py_spread.recent import MAX_RECENT, add_recent_file, menu_labels, recent_files
-from py_spread.storage import SheetData, save_sheet
-from py_spread.window import MainWindow
+from ezsheet.recent import MAX_RECENT, add_recent_file, menu_labels, recent_files
+from ezsheet.storage import SheetData, save_sheet
+from ezsheet.window import MainWindow
 
 
 @pytest.fixture

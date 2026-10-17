@@ -3,10 +3,10 @@ import itertools
 
 import pytest
 
-from py_spread.graph_dialog import GraphDialog, graph_labels
-from py_spread.graphs import GraphCell, change_graph, find_graphs, frame_cell, frame_data, read_graph
-from py_spread.model import SheetModel
-from py_spread.notebook import FrameData, GraphChoice, GraphColumns, Notebook, dataframe_code, graph_code
+from ezsheet.graph_dialog import GraphDialog, graph_labels
+from ezsheet.graphs import GraphCell, change_graph, find_graphs, frame_cell, frame_data, read_graph
+from ezsheet.model import SheetModel
+from ezsheet.notebook import FrameData, GraphChoice, GraphColumns, Notebook, dataframe_code, graph_code
 
 
 @pytest.fixture

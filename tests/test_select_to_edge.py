@@ -2,7 +2,7 @@ import pytest
 from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtTest import QTest
 
-from py_spread.window import MainWindow
+from ezsheet.window import MainWindow
 
 SHIFT_CMD = Qt.ShiftModifier | Qt.ControlModifier  # Cmd is Control to Qt on macOS
 

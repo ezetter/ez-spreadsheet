@@ -8,8 +8,8 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QUrl
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
-from py_spread import claude
-from py_spread.claude import (
+from ezsheet import claude
+from ezsheet.claude import (
     CREDENTIALS_HELP,
     READ_TOOL,
     WRITE_TOOL,
@@ -19,7 +19,7 @@ from py_spread.claude import (
     describe_error,
     selection_csv,
 )
-from py_spread.model import SheetModel
+from ezsheet.model import SheetModel
 
 
 # --- A fake client ---
@@ -285,7 +285,7 @@ def png_bytes(width=900, height=300) -> bytes:
 
 @pytest.fixture
 def main_window(app):
-    from py_spread.window import MainWindow
+    from ezsheet.window import MainWindow
     window = MainWindow()
     window.model.set_cells({(0, 0): "x", (0, 1): "y", (1, 0): "1", (1, 1): "2"})
     window.show()
@@ -297,7 +297,7 @@ def main_window(app):
 
 
 def open_claude_window(main_window, client):
-    from py_spread.claude_window import ClaudeWindow
+    from ezsheet.claude_window import ClaudeWindow
     main_window.view.select_range(0, 0, 1, 1)
     window = ClaudeWindow(main_window.model, set(main_window._selected_cells()),
                           client_factory=lambda: client, parent=main_window)
@@ -357,7 +357,7 @@ def test_window_saves_files(main_window, tmp_path, monkeypatch):
     window = open_claude_window(main_window, client)
     ask(window, "q")
     target = tmp_path / "out.txt"
-    monkeypatch.setattr("py_spread.claude_window.QFileDialog.getSaveFileName",
+    monkeypatch.setattr("ezsheet.claude_window.QFileDialog.getSaveFileName",
                         lambda *args, **kwargs: (str(target), ""))
     window._on_link(QUrl("save:data.txt"))
     assert target.read_bytes() == b"hello"

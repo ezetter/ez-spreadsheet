@@ -1,8 +1,8 @@
 import pytest
 
-from py_spread.csvfile import read_csv, write_csv
-from py_spread.storage import SheetFileError
-from py_spread.window import MainWindow
+from ezsheet.csvfile import read_csv, write_csv
+from ezsheet.storage import SheetFileError
+from ezsheet.window import MainWindow
 
 
 def write_bytes(tmp_path, data, name="data.csv"):
@@ -141,7 +141,7 @@ def test_import_grows_sheet(window, tmp_path):
 
 
 def test_import_then_save_keeps_bigger_size(window, tmp_path):
-    from py_spread.storage import load_sheet
+    from ezsheet.storage import load_sheet
     data = b"\n".join(b"x" for _ in range(1500)) + b"\n"
     window.import_csv_from(write_bytes(tmp_path, data))
     sheet_path = str(tmp_path / "big.ezs")

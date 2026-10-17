@@ -9,10 +9,10 @@ from PySide6.QtGui import QIcon, QImage
 from PySide6.QtGui import QFileOpenEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from py_spread.__main__ import ICON, FileOpener
-from py_spread.storage import SheetData, save_sheet
-from py_spread.window import MainWindow
-from py_spread.macapp import APP_NAME, set_app_name
+from ezsheet.__main__ import ICON, FileOpener
+from ezsheet.storage import SheetData, save_sheet
+from ezsheet.window import MainWindow
+from ezsheet.macapp import APP_NAME, set_app_name
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(HERE, os.pardir, "scripts")
@@ -41,7 +41,7 @@ def test_app_bundle(tmp_path):
     launcher = contents / "MacOS" / info["CFBundleExecutable"]
     assert os.access(launcher, os.X_OK)
     text = launcher.read_text()
-    assert text.startswith("#!/bin/sh\n") and '-m py_spread "$@"' in text and ".venv/bin/python" in text
+    assert text.startswith("#!/bin/sh\n") and '-m ezsheet "$@"' in text and ".venv/bin/python" in text
     [document] = info["CFBundleDocumentTypes"]  # .ezs sheets: this app's to open
     assert document["CFBundleTypeExtensions"] == ["ezs"] and document["LSHandlerRank"] == "Owner"
     [sheet_type] = info["UTExportedTypeDeclarations"]

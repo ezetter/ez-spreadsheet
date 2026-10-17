@@ -31,7 +31,7 @@ class FileOpener(QObject):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="py_spread", description="A Python spreadsheet.")
+    parser = argparse.ArgumentParser(prog="ezsheet", description="A Python spreadsheet.")
     parser.add_argument("file", nargs="?", help="a .ezs file to open, or to create when first saved")
     args = parser.parse_args()
 

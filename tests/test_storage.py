@@ -7,8 +7,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QMessageBox
 
-from py_spread.storage import VERSION, SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.window import MainWindow
+from ezsheet.storage import VERSION, SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.window import MainWindow
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_failed_save_keeps_old_file(tmp_path, monkeypatch):
     def broken_replace(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr("py_spread.storage.os.replace", broken_replace)
+    monkeypatch.setattr("ezsheet.storage.os.replace", broken_replace)
     with pytest.raises(SheetFileError):
         save_sheet(str(path), SheetData(10, 5, {(0, 0): "new"}))
     assert load_sheet(str(path)).cells == {(0, 0): "original"}
@@ -251,13 +251,13 @@ def test_open_or_create_in_missing_folder_is_an_error(window, tmp_path, dialogs)
 
 
 def test_the_format_is_ezsheet(tmp_path, app):
-    from py_spread.storage import EXTENSION, FORMAT
-    from py_spread.window import FILE_FILTER
+    from ezsheet.storage import EXTENSION, FORMAT
+    from ezsheet.window import FILE_FILTER
     assert (EXTENSION, FORMAT) == (".ezs", "ezsheet")
     assert FILE_FILTER == "EZ Sheet Sheets (*.ezs)"
 
 
-def test_old_py_spread_files_are_not_supported(tmp_path):
+def test_old_ezsheet_files_are_not_supported(tmp_path):
     path = tmp_path / "old.pysheet"
     path.write_text(json.dumps({"format": "py-spread", "version": 6, "rows": 10, "columns": 5, "cells": {}}))
     with pytest.raises(SheetFileError, match="isn't an EZ Sheet sheet"):

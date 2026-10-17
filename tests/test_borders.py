@@ -3,11 +3,11 @@ import json
 import pytest
 from PySide6.QtCore import Qt
 
-from py_spread.borders import border_styles, covered, merged
-from py_spread.model import SheetModel
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.textstyle import PLAIN, Border, CellStyle, from_json, to_json
-from py_spread.window import MainWindow
+from ezsheet.borders import border_styles, covered, merged
+from ezsheet.model import SheetModel
+from ezsheet.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.textstyle import PLAIN, Border, CellStyle, from_json, to_json
+from ezsheet.window import MainWindow
 
 THIN, THICK = Border(), Border("thick", "#cc0000")
 

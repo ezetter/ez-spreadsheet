@@ -1,10 +1,10 @@
 import pytest
 
-from py_spread.model import SheetModel
-from py_spread.numformat import NumberFormat
-from py_spread.shift_dialog import DeleteCellsDialog
-from py_spread.textstyle import CellStyle
-from py_spread.window import MainWindow
+from ezsheet.model import SheetModel
+from ezsheet.numformat import NumberFormat
+from ezsheet.shift_dialog import DeleteCellsDialog
+from ezsheet.textstyle import CellStyle
+from ezsheet.window import MainWindow
 
 DATA = [["a1", "b1", "c1"], ["a2", "b2", "c2"], ["a3", "b3", "c3"]]
 

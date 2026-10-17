@@ -3,9 +3,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit
 
-from py_spread.model import SheetModel
-from py_spread.references import cell_name, column_index, column_name, parse_cell_name
-from py_spread.window import MainWindow
+from ezsheet.model import SheetModel
+from ezsheet.references import cell_name, column_index, column_name, parse_cell_name
+from ezsheet.window import MainWindow
 
 
 @pytest.mark.parametrize("col, name", [(0, "A"), (25, "Z"), (26, "AA"), (51, "AZ"), (701, "ZZ"), (702, "AAA")])

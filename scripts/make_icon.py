@@ -1,4 +1,4 @@
-"""Draw EZ Sheet's icon, a spreadsheet's grid, as py_spread/resources/ezsheet.png
+"""Draw EZ Sheet's icon, a spreadsheet's grid, as ezsheet/resources/ezsheet.png
 (1024 pixels), and, on a Mac, ezsheet.icns for the app bundle (see make_app.py).
 
 Run it again after changing the drawing:  .venv/bin/python scripts/make_icon.py
@@ -16,7 +16,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QLinearGradient, QPainter, QPainterPath, QPen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RESOURCES = os.path.join(HERE, os.pardir, "py_spread", "resources")
+RESOURCES = os.path.join(HERE, os.pardir, "ezsheet", "resources")
 GREEN, DARK_GREEN, LIGHT_GREEN = QColor("#1e9e5a"), QColor("#137a43"), QColor("#d7f0e1")
 
 

@@ -3,13 +3,13 @@ import json
 import pytest
 from PySide6.QtCore import QPoint, Qt
 
-from py_spread.fill import UniformFill
-from py_spread.formula import move_references, shift_references
-from py_spread.model import SheetModel
-from py_spread.names import Names, column_syntax_problem, conflict
-from py_spread.names_dialog import NameColumnDialog, NamesDialog
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.window import MainWindow
+from ezsheet.fill import UniformFill
+from ezsheet.formula import move_references, shift_references
+from ezsheet.model import SheetModel
+from ezsheet.names import Names, column_syntax_problem, conflict
+from ezsheet.names_dialog import NameColumnDialog, NamesDialog
+from ezsheet.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.window import MainWindow
 
 C = 2  # column C
 
@@ -161,7 +161,7 @@ def test_dialog_says_what_names_will_mean_afterwards(model):
     dialog = NameColumnDialog(model, C)
     dialog.name.setText("")
     assert "will then mean cells T1, T2" in dialog.note.text()
-    from py_spread.names_dialog import NameCellDialog
+    from ezsheet.names_dialog import NameCellDialog
     cell_dialog = NameCellDialog(model, 0, 1)  # B1, named x
     cell_dialog.name.setText("")
     assert "will then mean #NAME?" in cell_dialog.note.text()

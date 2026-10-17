@@ -2,10 +2,10 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from py_spread.custom_format import format_custom, parse_pattern, pattern_problem
-from py_spread.custom_format_dialog import PRESETS, CustomFormatDialog
-from py_spread.numformat import MENU_FORMATS, NumberFormat, format_value, from_json, pattern_of, to_json
-from py_spread.window import CUSTOM_FORMAT, MainWindow
+from ezsheet.custom_format import format_custom, parse_pattern, pattern_problem
+from ezsheet.custom_format_dialog import PRESETS, CustomFormatDialog
+from ezsheet.numformat import MENU_FORMATS, NumberFormat, format_value, from_json, pattern_of, to_json
+from ezsheet.window import CUSTOM_FORMAT, MainWindow
 
 
 # --- Patterns ---

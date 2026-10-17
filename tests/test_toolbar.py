@@ -1,7 +1,7 @@
 import pytest
 from PySide6.QtWidgets import QToolBar
 
-from py_spread.window import TOOLS, MainWindow
+from ezsheet.window import TOOLS, MainWindow
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ def test_hide_toolbar_from_its_menu(window):
 
 
 def test_bold_button_still_follows_the_current_cell(window):
-    from py_spread.textstyle import CellStyle
+    from ezsheet.textstyle import CellStyle
     window.model.set_styles({(0, 0): CellStyle(bold=True)}, "Bold")
     window.view.setCurrentIndex(window.model.index(0, 0))
     assert window.style_buttons["Bold"].isChecked() and window.style_buttons["Bold"].text() == "B"

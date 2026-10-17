@@ -6,10 +6,10 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QToolBar
 
-from py_spread.model import SheetModel
-from py_spread.storage import VERSION, SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.textstyle import PLAIN, CellStyle, from_json, to_json
-from py_spread.window import MainWindow
+from ezsheet.model import SheetModel
+from ezsheet.storage import VERSION, SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.textstyle import PLAIN, CellStyle, from_json, to_json
+from ezsheet.window import MainWindow
 
 BOLD = CellStyle(bold=True)
 ITALIC = CellStyle(italic=True)

@@ -2,7 +2,7 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
-from py_spread.window import MainWindow
+from ezsheet.window import MainWindow
 
 
 @pytest.fixture

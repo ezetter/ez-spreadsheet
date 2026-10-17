@@ -3,8 +3,8 @@ from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from py_spread.clipboard import from_tsv, to_tsv
-from py_spread.window import MainWindow
+from ezsheet.clipboard import from_tsv, to_tsv
+from ezsheet.window import MainWindow
 
 COPY = (Qt.Key_C, Qt.ControlModifier)  # Qt maps Control to Cmd on macOS
 CUT = (Qt.Key_X, Qt.ControlModifier)

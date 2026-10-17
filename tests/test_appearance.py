@@ -3,9 +3,9 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QPalette
 from PySide6.QtWidgets import QStyle
 
-from py_spread import appearance
-from py_spread.appearance import GridStyle, blend, error_color, is_dark
-from py_spread.window import MainWindow
+from ezsheet import appearance
+from ezsheet.appearance import GridStyle, blend, error_color, is_dark
+from ezsheet.window import MainWindow
 
 
 def palette(window, base, text):
@@ -52,7 +52,7 @@ def test_choice_is_remembered(app, monkeypatch, preferences):
     QSettings(preferences, QSettings.IniFormat).setValue("appearance", "light")
     calls = []
     monkeypatch.setattr(appearance, "apply_appearance", lambda key, save=True: calls.append((key, save)))
-    monkeypatch.setattr("py_spread.window.apply_appearance", appearance.apply_appearance)
+    monkeypatch.setattr("ezsheet.window.apply_appearance", appearance.apply_appearance)
     window = MainWindow()
     assert calls == [("light", False)]
     assert window.appearance_actions["light"].isChecked()
@@ -89,7 +89,7 @@ def test_sheet_uses_grid_style(window):
 
 
 def test_fill_dialog_error_color(app):
-    from py_spread.fill_dialogs import RandomDialog
+    from ezsheet.fill_dialogs import RandomDialog
     dialog = RandomDialog()
     dialog.setPalette(palette(*DARK))
     dialog.lower.setText("5")

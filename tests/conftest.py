@@ -5,8 +5,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from py_spread.notebook import FACETED, GraphChoice
-from py_spread.window import MainWindow
+from ezsheet.notebook import FACETED, GraphChoice
+from ezsheet.window import MainWindow
 
 
 @pytest.fixture(scope="session")
@@ -59,7 +59,7 @@ def preferences(monkeypatch, tmp_path):
     """Keep tests away from the user's real saved preferences."""
     from PySide6.QtCore import QSettings
 
-    from py_spread import appearance
+    from ezsheet import appearance
 
     path = str(tmp_path / "preferences.ini")
     monkeypatch.setattr(appearance, "settings", lambda: QSettings(path, QSettings.IniFormat))

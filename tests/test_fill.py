@@ -3,7 +3,7 @@ import pytest
 from PySide6.QtCore import QItemSelection, QItemSelectionModel
 from PySide6.QtWidgets import QDialogButtonBox, QToolBar, QToolButton
 
-from py_spread.fill import (
+from ezsheet.fill import (
     FILL_MODES,
     LetterSequence,
     RandomLetters,
@@ -23,8 +23,8 @@ from py_spread.fill import (
     sequence_values,
     written_as_float,
 )
-from py_spread.fill_dialogs import RandomDialog, SequenceDialog, UniformDialog
-from py_spread.window import MainWindow
+from ezsheet.fill_dialogs import RandomDialog, SequenceDialog, UniformDialog
+from ezsheet.window import MainWindow
 
 MODES = {m.key: m for m in FILL_MODES}
 

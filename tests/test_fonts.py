@@ -4,10 +4,10 @@ from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QStyleOptionViewItem
 
-from py_spread.model import SheetModel
-from py_spread.storage import SheetData, load_sheet, save_sheet
-from py_spread.textstyle import PLAIN, CellStyle, from_json, to_json
-from py_spread.window import MainWindow
+from ezsheet.model import SheetModel
+from ezsheet.storage import SheetData, load_sheet, save_sheet
+from ezsheet.textstyle import PLAIN, CellStyle, from_json, to_json
+from ezsheet.window import MainWindow
 
 
 # --- Styles with fonts ---

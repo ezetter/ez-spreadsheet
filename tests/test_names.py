@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from py_spread import names
-from py_spread.model import SheetModel
-from py_spread.names_dialog import DELETED, NameCellDialog, NamesDialog
-from py_spread.storage import SheetData, SheetFileError, load_sheet, save_sheet
-from py_spread.window import MainWindow
+from ezsheet import names
+from ezsheet.model import SheetModel
+from ezsheet.names_dialog import DELETED, NameCellDialog, NamesDialog
+from ezsheet.storage import SheetData, SheetFileError, load_sheet, save_sheet
+from ezsheet.window import MainWindow
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ def test_names_are_case_sensitive(model):
 
 
 def test_name_is_a_fixed_reference_when_copied(app):
-    from py_spread.window import MainWindow
+    from ezsheet.window import MainWindow
     window = MainWindow()
     model = window.model
     model.set_cells({(1, 1): "3", (0, 0): "=r*2"})
@@ -323,6 +323,6 @@ def test_clicking_a_shadowed_cell_inserts_it_with_a_dollar(app):
 
 
 def test_autosum_single_cell_escapes_collision(a1_named):
-    from py_spread.autosum import aggregate_formula
+    from ezsheet.autosum import aggregate_formula
     assert aggregate_formula("SUM", [(0, 0, 0, 0)], a1_named.name_set()) == "=SUM($A1)"
     assert aggregate_formula("SUM", [(0, 0, 2, 0)], a1_named.name_set()) == "=SUM(A1:A3)"

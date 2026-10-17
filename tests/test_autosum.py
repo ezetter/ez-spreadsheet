@@ -3,9 +3,9 @@ from PySide6.QtCore import QItemSelection, QItemSelectionModel, QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit, QToolBar, QToolButton
 
-from py_spread.autosum import AGGREGATES, aggregate_formula, cell_ranges, run_above, run_left
-from py_spread.model import SheetModel
-from py_spread.window import MainWindow
+from ezsheet.autosum import AGGREGATES, aggregate_formula, cell_ranges, run_above, run_left
+from ezsheet.model import SheetModel
+from ezsheet.window import MainWindow
 
 
 @pytest.mark.parametrize("cells, expected", [
