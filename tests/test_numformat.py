@@ -180,7 +180,7 @@ def test_format_menu(window):
     names = [a.text() for a in menu.actions() if a.text()]
     assert names == ["Number", "Increase Decimals", "Decrease Decimals", "Bold", "Italic", "Strikethrough",
                      "Increase Font Size",
-                     "Decrease Font Size", "Default Font", "Text Color…", "Fill Color…"]
+                     "Decrease Font Size", "Default Font", "Text Color…", "Fill Color…", "Borders", "Merge Cells"]
     assert menu.actions()[0].menu() is window.number_menu  # Format > Number, as Google Sheets has it
     assert [a.text() for a in window.number_menu.actions() if a.text()] == [
         "Automatic", "Plain text", "Number  (1,000.12)", "Percent  (10.12%)", "Scientific  (1.01E+03)",
@@ -326,7 +326,7 @@ def test_currency_toolbar_button(window):
     buttons = toolbar_buttons(window)
     assert buttons[:2] == [window.autosum_button, window.fill_button]
     assert [label(b) for b in buttons[2:]] == ["Notebook", "$", "%", "", "", "123", "font", "−", "size", "+",
-                                               "B", "I", "S", "", "", "DEG"]
+                                               "B", "I", "S", "", "", "", "", "DEG"]
     currency = buttons[3]
     assert currency is window.number_buttons["currency"]
     window.model.set_cell(0, 0, "1234.5")
@@ -485,7 +485,7 @@ def test_separator_between_number_formats_and_styles(window):
     toolbar = window.findChild(QToolBar)
     labels = ["|" if a.isSeparator() else label(toolbar.widgetForAction(a)) for a in toolbar.actions()]
     assert labels[labels.index("$") - 1:] == ["|", "$", "%", "", "", "123", "|", "font", "|", "−", "size", "+",
-                                              "|", "B", "I", "S", "", "", "|", "DEG"]
+                                              "|", "B", "I", "S", "", "", "|", "", "", "|", "DEG"]
 
 
 def test_fraction_format(window, tmp_path):

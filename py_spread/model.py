@@ -41,10 +41,26 @@ DEFAULT_COLS = 52
 UNDO_LIMIT = 1000
 
 
+def _moved_block(block, move):
+    """A merged block once its cells move (move(row, col) is a cell's new
+    place, or None if it's deleted): around where they are, so inserting
+    rows or columns within it widens it, and deleting some narrows it; None
+    if it's down to one cell."""
+    top, left, bottom, right = block
+    moved = [move(row, col) for row in range(top, bottom + 1) for col in range(left, right + 1)]
+    moved = [cell for cell in moved if cell is not None]
+    if not moved:
+        return None
+    rows, cols = [row for row, _ in moved], [col for _, col in moved]
+    new = (min(rows), min(cols), max(rows), max(cols))
+    return new if new[0] != new[2] or new[1] != new[3] else None
+
+
 class _CellsCommand(QUndoCommand):
     """One undoable change: the raw text, number formats, and text styles of
-    some cells, and cell and column names, before and after, each as a
-    (texts, formats, styles, names, columns) tuple of dicts."""
+    some cells, cell and column names, and merged cells, before and after,
+    each as a (texts, formats, styles, names, columns, merges) tuple: dicts,
+    and the whole set of merges (None if they don't change)."""
 
     def __init__(self, model, before: tuple, after: tuple, description: str):
         super().__init__(description)
@@ -95,6 +111,8 @@ class SheetModel(QAbstractTableModel):
     history_applied = Signal(list)
     # Emitted with the angle unit when it's switched or a sheet is loaded.
     angle_unit_changed = Signal(str)
+    # Emitted when cells are merged or unmerged (or a sheet is loaded).
+    merges_changed = Signal()
 
     def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
         super().__init__(parent)
@@ -110,6 +128,8 @@ class SheetModel(QAbstractTableModel):
         self._formats: dict[tuple[int, int], NumberFormat] = {}
         # Bold and italic, for cells that aren't plain.
         self._styles: dict[tuple[int, int], CellStyle] = {}
+        # Merged cells: (top, left, bottom, right) blocks, each shown as one cell, the top-left one.
+        self._merges: set[tuple[int, int, int, int]] = set()
         # Cell names, by names.key(name): (the name as typed, the (row, col) it
         # names, or None if that cell was deleted).
         self._names: dict[str, tuple[str, tuple[int, int] | None]] = {}
@@ -203,11 +223,13 @@ class SheetModel(QAbstractTableModel):
                   formats: dict[tuple[int, int], NumberFormat | None] | None = None,
                   styles: dict[tuple[int, int], CellStyle | None] | None = None,
                   names: dict[str, tuple | None] | None = None,
-                  columns: dict[str, int | None] | None = None) -> None:
+                  columns: dict[str, int | None] | None = None,
+                  merges=None) -> None:
         """Set many cells' text, and optionally their number formats and text
         styles, and cell names (each keyed by names.key(name), as (name,
         cell) entries), and column names (name -> column index), where None
-        removes one, as one undoable step,
+        removes one, and the merged cells (all of them: (top, left, bottom,
+        right) blocks), as one undoable step,
         recalculating and notifying views a single time. `description` names
         the step in the Undo menu.
 
@@ -228,10 +250,14 @@ class SheetModel(QAbstractTableModel):
             key: None if style == PLAIN else style for key, style in (styles or {}).items()})
         names_before, names_after = _changes(self._names, names)
         columns_before, columns_after = _changes(self._column_names, columns)
-        if after or formats_after or styles_after or names_after or columns_after:
+        merges_before = merges_after = None
+        merges = None if merges is None else frozenset(merges)  # (once: it may be a generator)
+        if merges is not None and merges != frozenset(self._merges):
+            merges_before, merges_after = frozenset(self._merges), merges
+        if after or formats_after or styles_after or names_after or columns_after or merges_after is not None:
             self.undo_stack.push(_CellsCommand(
-                self, (before, formats_before, styles_before, names_before, columns_before),
-                (after, formats_after, styles_after, names_after, columns_after), description))
+                self, (before, formats_before, styles_before, names_before, columns_before, merges_before),
+                (after, formats_after, styles_after, names_after, columns_after, merges_after), description))
 
     def _completed(self, writes: dict, formats: dict) -> dict:
         """The writes, with fractions written as text (3/7) made numbers
@@ -262,6 +288,10 @@ class SheetModel(QAbstractTableModel):
     def cell_style(self, row: int, col: int) -> CellStyle:
         return self._styles.get((row, col), PLAIN)
 
+    def bordered_cells(self) -> dict[tuple[int, int], dict]:
+        """Each cell with borders, and its borders: side -> Border."""
+        return {key: style.borders for key, style in self._styles.items() if style.borders}
+
     def row_font_sizes(self) -> dict[int, float]:
         """The largest font size (in points) set in each row that has one."""
         sizes = {}
@@ -291,9 +321,14 @@ class SheetModel(QAbstractTableModel):
         if self._formula_keys:
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
 
-    def _apply(self, texts: dict, formats: dict, styles: dict, names: dict, columns: dict,
+    def _apply(self, texts: dict, formats: dict, styles: dict, names: dict, columns: dict, merges=None,
                from_history: bool = False) -> None:
         changed = {key for key, text in texts.items() if self._store(key, text)}
+        if merges is not None:
+            for block in self._merges ^ set(merges):  # (the cells merged or unmerged, for selecting)
+                changed.add(block[:2])
+            self._merges = set(merges)
+            self.merges_changed.emit()
         for table, updates in ((self._formats, formats), (self._styles, styles)):
             for key, value in updates.items():
                 if table.get(key) != value:
@@ -370,7 +405,7 @@ class SheetModel(QAbstractTableModel):
         return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats),
                          dict(self._styles), self._angle_unit,
                          {name: cell for name, cell in self._names.values()},
-                         dict(self._column_names))
+                         dict(self._column_names), merges=sorted(self._merges))
 
     def load_sheet_data(self, sheet: SheetData) -> None:
         """Replace the whole sheet, including its size."""
@@ -384,6 +419,7 @@ class SheetModel(QAbstractTableModel):
         self._angle_unit = sheet.angle_unit
         self._names = {names.key(name): (name, cell) for name, cell in sheet.names.items()}
         self._column_names = dict(sheet.column_names)
+        self._merges = set(sheet.merges)
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
@@ -391,6 +427,7 @@ class SheetModel(QAbstractTableModel):
         self.endResetModel()
         self.angle_unit_changed.emit(self._angle_unit)
         self.names_changed.emit()
+        self.merges_changed.emit()
 
     def insert_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
         """Why blank cells can't be inserted in place of a block with this
@@ -558,7 +595,24 @@ class SheetModel(QAbstractTableModel):
             {key: styles.get(key) for key in keys},
             moved_names,
             columns,
+            merges=filter(None, (_moved_block(block, move) for block in self._merges)),
         )
+
+    # --- Merged cells ---
+
+    def merges(self) -> list[tuple[int, int, int, int]]:
+        """The merged blocks, (top, left, bottom, right), top to bottom."""
+        return sorted(self._merges)
+
+    def merge_at(self, row: int, col: int) -> tuple[int, int, int, int] | None:
+        """The merged block the cell's in, if it's in one."""
+        return next((block for block in self._merges
+                     if block[0] <= row <= block[2] and block[1] <= col <= block[3]), None)
+
+    def set_merges(self, merges, writes: dict | None = None, description: str = "Merge Cells") -> None:
+        """All the merged blocks, and cells' text (as merging clears all but
+        the top-left one's), as one undoable step."""
+        self.set_cells(writes or {}, description, merges=merges)
 
     # --- Cell names ---
 

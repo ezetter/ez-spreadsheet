@@ -95,9 +95,11 @@ from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, as
 from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
 from .colors import ICON_SIZE as COLOR_ICON_SIZE
 from .colors import ColorMenu, fill_color_icon, text_color_icon
+from .borders import BORDER_KINDS, MERGE_KINDS, border_icon, border_style_icon, border_styles, covered, merged
+from .borders import merge_icon
 from .custom_format_dialog import CustomFormatDialog
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
-from .textstyle import MAX_SIZE, MIN_SIZE, PLAIN, SIZES
+from .textstyle import BORDER_STYLES, MAX_SIZE, MIN_SIZE, PLAIN, SIZES, Border
 from .references import cell_name
 from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
 
@@ -110,7 +112,8 @@ TOOLS = (  # what the toolbar's right-click menu shows and hides, in the toolbar
     ("more", "Increase Decimal Places (.00)"), ("formats", "More Formats (123)"), ("font", "Font"),
     ("size", "Font Size"), ("bold", "Bold"), ("italic", "Italic"), ("strikethrough", "Strikethrough"),
     ("text color", "Text Color"),
-    ("fill color", "Fill Color"), ("angle", "Angle Unit (DEG or RAD)"),
+    ("fill color", "Fill Color"), ("borders", "Borders"), ("merge", "Merge Cells"),
+    ("angle", "Angle Unit (DEG or RAD)"),
 )
 HIDDEN_TOOLS_KEY = "toolbar/hidden"  # the tools hidden, a preference
 DEFAULT_HIDDEN_TOOLS = ("fill", "angle")  # hidden until shown (Edit > Fill and Formulas > Angles have them)
@@ -436,10 +439,82 @@ class SheetView(QTableView):
         self.scrollTo(corner)
 
     def move_current(self, d_row: int, d_col: int) -> None:
+        """Move the current cell; a merged block is one cell, its top-left one."""
         current = self.currentIndex()
-        row = min(max(current.row() + d_row, 0), self.model().rowCount() - 1)
-        col = min(max(current.column() + d_col, 0), self.model().columnCount() - 1)
+        row, col = current.row(), current.column()
+        block = self.model().merge_at(row, col)
+        if block is not None:  # from its far side
+            row = block[2] if d_row > 0 else block[0] if d_row < 0 else row
+            col = block[3] if d_col > 0 else block[1] if d_col < 0 else col
+        row = min(max(row + d_row, 0), self.model().rowCount() - 1)
+        col = min(max(col + d_col, 0), self.model().columnCount() - 1)
+        block = self.model().merge_at(row, col)
+        if block is not None:
+            row, col = block[:2]
         self.setCurrentIndex(self.model().index(row, col))
+
+    def show_merges(self) -> None:
+        """Show the model's merged blocks as one cell each."""
+        self.clearSpans()
+        for top, left, bottom, right in self.model().merges():
+            self.setSpan(top, left, bottom - top + 1, right - left + 1)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        bordered = self.model().bordered_cells()
+        if bordered:
+            painter = QPainter(self.viewport())
+            self._paint_borders(painter, bordered)
+            painter.end()
+
+    def _paint_borders(self, painter: QPainter, bordered: dict) -> None:
+        """Cells' borders, on the grid lines around them (over the grid),
+        but not between the cells of a merged block."""
+        viewport = self.viewport().rect()
+        first_row, first_col = max(self.rowAt(0), 0), max(self.columnAt(0), 0)
+        last_row = self.rowAt(viewport.height() - 1)
+        last_col = self.columnAt(viewport.width() - 1)
+        last_row = self.model().rowCount() - 1 if last_row < 0 else last_row
+        last_col = self.model().columnCount() - 1 if last_col < 0 else last_col
+        model = self.model()
+        for (row, col), borders in bordered.items():
+            if not (first_row - 1 <= row <= last_row + 1 and first_col - 1 <= col <= last_col + 1):
+                continue
+            x0, y0 = self.columnViewportPosition(col), self.rowViewportPosition(row)
+            x1, y1 = x0 + self.columnWidth(col) - 1, y0 + self.rowHeight(row) - 1
+            block = model.merge_at(row, col)
+            for side, border in borders.items():
+                if block is not None and _inside_block(block, row, col, side):
+                    continue
+                line = {"top": (x0 - 1, y0 - 1, x1, y0 - 1), "bottom": (x0 - 1, y1, x1, y1),
+                        "left": (x0 - 1, y0 - 1, x0 - 1, y1), "right": (x1, y0 - 1, x1, y1)}[side]
+                _draw_border(painter, border, *line, side in ("top", "bottom"), self.zoom)
+
+
+_BORDER_WIDTHS = {"thin": 1, "medium": 2, "thick": 3, "dashed": 1, "dotted": 1, "double": 1}
+
+
+def _inside_block(block, row: int, col: int, side: str) -> bool:
+    """Whether a cell's side is between two cells of its merged block."""
+    top, left, bottom, right = block
+    return {"top": row > top, "bottom": row < bottom, "left": col > left, "right": col < right}[side]
+
+
+def _draw_border(painter: QPainter, border, x0: int, y0: int, x1: int, y1: int, across: bool,
+                 zoom: int) -> None:
+    """One side's line, in its style and color, zoomed as the grid is."""
+    width = max(1, round(_BORDER_WIDTHS[border.style] * zoom / 100))
+    pen = QPen(QColor(border.color), width)
+    pen.setCapStyle(Qt.FlatCap)
+    pen.setStyle({"dashed": Qt.DashLine, "dotted": Qt.DotLine}.get(border.style, Qt.SolidLine))
+    painter.setPen(pen)
+    if border.style == "double":  # two thin lines, one each side of the grid line
+        gap = max(1, round(zoom / 100))
+        dx, dy = (0, gap) if across else (gap, 0)
+        painter.drawLine(x0 - dx, y0 - dy, x1 - dx, y1 - dy)
+        painter.drawLine(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+    else:
+        painter.drawLine(x0, y0, x1, y1)
 
 
 def runs(indexes: list[int]) -> list[tuple[int, int]]:
@@ -558,6 +633,7 @@ class MainWindow(QMainWindow):
         self.model.modelReset.connect(self._rows_moved)
         self.model.rowsInserted.connect(self._rows_moved)
         self.model.rowsRemoved.connect(self._rows_moved)
+        self.model.merges_changed.connect(self.view.show_merges)
         self.view.cell_delegate.editor_created.connect(self._on_editor_created)
         self.view.editor_closed.connect(self._on_editor_closed)
         self.model.dataChanged.connect(self._on_data_changed)
@@ -884,6 +960,10 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked=False, k=key: self._custom_color(k))
             menu.addAction(action)
             self.format_actions[name] = action
+        menu.addSeparator()
+        self.border_style, self.border_color = "thin", "#000000"  # what the next borders are drawn in
+        menu.addMenu(self._borders_menu(in_toolbar=False))
+        menu.addMenu(self._merge_menu())
 
     def _build_formulas_menu(self):
         menu = self.menuBar().addMenu("Formulas")
@@ -1247,6 +1327,7 @@ class MainWindow(QMainWindow):
             "bold": [self.style_buttons["Bold"]], "italic": [self.style_buttons["Italic"]],
             "strikethrough": [self.style_buttons["Strikethrough"]],
             "text color": [self.color_buttons["color"]], "fill color": [self.color_buttons["fill"]],
+            "borders": [self.borders_button], "merge": [self.merge_button],
         }
         owner = {id(widget): key for key, group in widgets.items() for widget in group}
         self.tool_actions = {key: [] for key, _label in TOOLS}
@@ -1393,6 +1474,7 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.PaletteChange and getattr(self, "number_buttons", None):
             self._paint_decimal_icons()  # light to dark, or back
             self._paint_color_icons()
+            self._paint_border_icons()
 
     def _add_style_buttons(self, toolbar):
         """B, I, and S toolbar buttons for the Format menu's Bold, Italic, and
@@ -1417,6 +1499,153 @@ class MainWindow(QMainWindow):
             font.setStrikeOut(name == "Strikethrough")
             button.setFont(font)
         self._add_color_buttons(toolbar)
+        self._add_border_buttons(toolbar)
+
+    def _add_border_buttons(self, toolbar):
+        """Borders (the borders menu, with its color and style) and Merge
+        cells (merges the selection, or unmerges a merged cell; its arrow
+        has Merge all, vertically, horizontally, and Unmerge), as Google
+        Sheets has them."""
+        toolbar.addSeparator()
+        self.borders_button = QToolButton()
+        self.borders_button.setToolTip("Borders")
+        self.borders_button.setMenu(self._borders_menu(in_toolbar=True))
+        self.borders_button.setPopupMode(QToolButton.MenuButtonPopup)
+        self.borders_button.clicked.connect(lambda _checked=False: self.borders_button.showMenu())
+        toolbar.addWidget(self.borders_button)
+        self.merge_button = QToolButton()
+        self.merge_button.setToolTip("Merge cells")
+        self.merge_button.setMenu(self._merge_menu())
+        self.merge_button.setPopupMode(QToolButton.MenuButtonPopup)
+        self.merge_button.clicked.connect(lambda _checked=False: self._merge_or_unmerge())
+        toolbar.addWidget(self.merge_button)
+        self._paint_border_icons()
+
+    def _paint_border_icons(self) -> None:
+        """The border and merge icons, in the toolbar's text color (and the menus' choices)."""
+        ink, ratio = self.palette().color(QPalette.ButtonText), max(self.devicePixelRatioF(), 2.0)
+        self.borders_button.setIcon(border_icon("all", ink, ratio))
+        self.merge_button.setIcon(merge_icon(ink, ratio))
+        for action in self.border_actions:
+            kind = action.data()
+            action.setIcon(border_icon(kind, ink, ratio) if kind in dict(BORDER_KINDS) else
+                           border_style_icon(kind, ink, ratio))
+
+    def _borders_menu(self, in_toolbar: bool) -> QMenu:
+        """The borders menu: Google Sheets' ten choices, and the color and
+        style they draw in. (The toolbar's has the palette for the color;
+        the Format menu's, which is the Mac's own menu, a color dialog.)"""
+        if not hasattr(self, "border_actions"):
+            self.border_actions = []
+            self.border_style_actions = {}
+        menu = QMenu("Borders", self)
+        for key, name in BORDER_KINDS:
+            action = menu.addAction(name)
+            action.setData(key)
+            action.triggered.connect(lambda _checked=False, k=key: self._apply_borders(k))
+            self.border_actions.append(action)
+            if key == "outer":
+                menu.addSeparator()
+        menu.addSeparator()
+        if in_toolbar:
+            colors = ColorMenu("Black", self)
+            colors.setTitle("Border color")
+            colors.chosen.connect(lambda color: self._set_border_color(color or "#000000"))
+            colors.custom.connect(self._custom_border_color)
+            menu.addMenu(colors)
+        else:
+            menu.addAction("Border Color…").triggered.connect(lambda _checked=False: self._custom_border_color())
+        styles = menu.addMenu("Border style")
+        group = QActionGroup(styles)
+        for style in BORDER_STYLES:
+            action = styles.addAction(style.capitalize())
+            action.setData(style)
+            action.setCheckable(True)
+            action.setChecked(style == self.border_style)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, s=style: self._set_border_style(s))
+            self.border_actions.append(action)
+            self.border_style_actions.setdefault(style, []).append(action)
+        if hasattr(self, "merge_button"):  # (the toolbar's made: its icons are painted then)
+            self._paint_border_icons()
+        return menu
+
+    def _merge_menu(self) -> QMenu:
+        menu = QMenu("Merge Cells", self)
+        for key, name in MERGE_KINDS:
+            if key == "unmerge":
+                menu.addSeparator()
+            menu.addAction(name).triggered.connect(lambda _checked=False, k=key: self._merge(k))
+        return menu
+
+    def _selected_block(self) -> tuple[int, int, int, int]:
+        """The selection's bounds, grown to take in any merged cells it touches."""
+        top, left, bottom, right = self.view.selection_bounds()
+        grown = True
+        while grown:
+            grown = False
+            for m_top, m_left, m_bottom, m_right in self.model.merges():
+                if m_top <= bottom and top <= m_bottom and m_left <= right and left <= m_right:
+                    new = (min(top, m_top), min(left, m_left), max(bottom, m_bottom), max(right, m_right))
+                    if new != (top, left, bottom, right):
+                        top, left, bottom, right = new
+                        grown = True
+        return top, left, bottom, right
+
+    def _apply_borders(self, kind: str) -> None:
+        """A borders menu choice, for the selection, in the border color and style."""
+        self._commit_pending_edit()
+        styles = border_styles(self.model.cell_style, self._selected_block(), kind,
+                               Border(self.border_style, self.border_color),
+                               self.model.rowCount(), self.model.columnCount())
+        self.model.set_styles(styles, "Clear Borders" if kind == "clear" else "Borders")
+
+    def _set_border_style(self, style: str) -> None:
+        self.border_style = style
+        for each, actions in self.border_style_actions.items():
+            for action in actions:
+                action.setChecked(each == style)
+
+    def _set_border_color(self, color: str) -> None:
+        self.border_color = color
+
+    def _custom_border_color(self) -> None:
+        color = self._ask_color(self.border_color, "Border Color")
+        if color is not None:
+            self._set_border_color(color)
+
+    def _merge_or_unmerge(self) -> None:
+        """The merge button: unmerge the current merged cell, else merge the selection."""
+        current = self.view.currentIndex()
+        top, left, bottom, right = self.view.selection_bounds()
+        block = self.model.merge_at(current.row(), current.column())
+        if block is not None and block[0] <= top and block[1] <= left and bottom <= block[2] and right <= block[3]:
+            self._merge("unmerge")
+        else:
+            self._merge("all")
+
+    def _merge(self, how: str) -> None:
+        """Merge the selection (how: all, vertically, horizontally) or
+        unmerge it. Merging keeps each merged block's top-left value; if
+        others would be lost, it asks first."""
+        self._commit_pending_edit()
+        block = self._selected_block()
+        merges = merged(self.model.merges(), block, how)
+        if how != "unmerge" and merges == set(self.model.merges()):
+            self._show_status("Select more than one cell to merge them.")
+            return
+        lost = {key for key in covered(merges) - covered(self.model.merges()) if self.model.get_cell(*key)}
+        if lost and not self._ask_merge_anyway():
+            return
+        self.model.set_merges(merges, {key: "" for key in lost}, "Unmerge Cells" if how == "unmerge" else
+                              "Merge Cells")
+        self.view.setCurrentIndex(self.model.index(*block[:2]))  # the merged cell, or the first unmerged one
+
+    def _ask_merge_anyway(self) -> bool:
+        """Whether to merge though only the top-left values will be kept."""
+        answer = QMessageBox.question(self, "Merge Cells", "Merging cells keeps only the top-left value of each "
+                                      "merged block. Merge anyway?", QMessageBox.Ok | QMessageBox.Cancel)
+        return answer == QMessageBox.Ok
 
     def _add_color_buttons(self, toolbar):
         """Text color (an A) and fill color (a paint bucket), each showing

@@ -65,7 +65,7 @@ creates the file.
 Right-click the toolbar to choose its tools: each is listed, checked if it's
 shown (Σ AutoSum, Fill, Notebook, Currency, Percent, the decimal places, More
 Formats, Font, Font Size, Bold, Italic, Strikethrough, Text Color, Fill
-Color, and the angle unit); choose one to show or hide it. Fill and the angle unit start hidden
+Color, Borders, Merge Cells, and the angle unit); choose one to show or hide it. Fill and the angle unit start hidden
 (Edit > Fill and Formulas > Angles still have them), until you choose your
 own. **Show All Tools** brings them all back.
 A separator shows only between tools that are shown. The tools you hide stay
@@ -262,6 +262,39 @@ Format > **Text Color…** and **Fill Color…** choose any color too.
   color, as in Google Sheets.
 - Colors are kept, saved, copied, undone, and filled like the other styles,
   and Default Font leaves them as they are.
+
+## Borders and merged cells
+
+After the color buttons, the toolbar has Google Sheets' **borders** and
+**merge cells** buttons; Format > **Borders** and **Merge Cells** have the
+same choices.
+
+**Borders**, for the selected cells:
+
+- **All**, **Inner**, **Horizontal** (between rows), **Vertical** (between
+  columns), **Outer** (around them), **Left**, **Top**, **Right**, or
+  **Bottom** borders, or **Clear borders** (inside and around them).
+- **Border color** (the palette, or any color) and **Border style** (thin,
+  medium, thick, dashed, dotted, or double) are what the next borders are
+  drawn in: black and thin to start with.
+- As in Google Sheets, a border is a cell's own side, so it's kept when you
+  retype the cell, and copied, saved, and undone with its other styles. An
+  edge between two cells is only ever one line: drawing it takes away the
+  other cell's border there.
+- Borders are drawn over the grid lines, zoomed with the grid; a merged
+  cell's are around it, not between the cells it's made of.
+
+**Merge cells** merges the selection into one cell, or unmerges the current
+cell if it's merged; its arrow has **Merge all**, **Merge vertically** (each
+column of the selection), **Merge horizontally** (each row), and
+**Unmerge**.
+
+- A merged cell is shown, edited, and moved through as one cell: its
+  top-left one. Merging keeps only that cell's value, so if others would be
+  lost, it asks first. Merging cells that are partly merged already unmerges
+  those first.
+- Merged cells are saved with the sheet and can be undone. Inserting rows or
+  columns within a merged cell widens it; deleting some narrows it.
 
 ## Notebook
 

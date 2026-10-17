@@ -33,8 +33,8 @@ from .textstyle import CellStyle
 from .references import cell_name, column_index, column_name, parse_cell_name
 
 FORMAT = "ezsheet"
-VERSION = 7  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
-# 6 column names; 7 the notebook
+VERSION = 8  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
+# 6 column names; 7 the notebook; 8 merged cells
 EXTENSION = ".ezs"
 
 
@@ -53,6 +53,7 @@ class SheetData:
     names: dict[str, tuple[int, int] | None] = field(default_factory=dict)  # name -> cell
     column_names: dict[str, int] = field(default_factory=dict)  # name -> column index
     notebook: dict | None = None  # a Jupyter notebook (.ipynb) document, if there are notebook cells
+    merges: list[tuple[int, int, int, int]] = field(default_factory=list)  # merged cells' blocks
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -83,6 +84,9 @@ def save_sheet(path: str, sheet: SheetData) -> None:
             name: column_name(col)
             for name, col in sorted(sheet.column_names.items(), key=lambda item: item[0].upper())
         }
+    if sheet.merges:
+        document["merges"] = [f"{cell_name(top, left)}:{cell_name(bottom, right)}"
+                              for top, left, bottom, right in sorted(sheet.merges)]
     if sheet.notebook:
         document["notebook"] = sheet.notebook  # last, as it can be long
     write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
@@ -182,6 +186,20 @@ def load_sheet(path: str) -> SheetData:
     problem = cell_names.conflict(sheet.names, sheet.column_names)
     if problem:
         raise SheetFileError(f"{path} is damaged: its names don't work together. {problem}")
+    merges = document.get("merges", [])  # absent before version 8
+    if not isinstance(merges, list):
+        raise SheetFileError(f"{path} is damaged: bad merged cells.")
+    for block in merges:
+        corners = block.split(":") if isinstance(block, str) else []
+        if len(corners) != 2:
+            raise SheetFileError(f"{path} is damaged: {block!r} isn't a block of merged cells.")
+        (top, left), (bottom, right) = (_cell_key(path, corner) for corner in corners)
+        if top > bottom or left > right or (top, left) == (bottom, right):
+            raise SheetFileError(f"{path} is damaged: {block!r} isn't a block of merged cells.")
+        if any(top <= b and t <= bottom and left <= r and l <= right for t, l, b, r in sheet.merges):
+            raise SheetFileError(f"{path} is damaged: merged cells {block} overlap others.")
+        sheet.merges.append((top, left, bottom, right))
+        _grow_to_fit(sheet, bottom, right)
     if "notebook" in document:  # absent before version 7, or with no notebook cells
         try:
             cells_from_json(document["notebook"])

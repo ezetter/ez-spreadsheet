@@ -47,6 +47,8 @@ class Dialogs:
         self.chart_frame_prompts = []  # the notebook's DataFrames (ChartFrames) the Chart dialog offered
         self.custom_format_answer = None  # the Custom number format dialog's pattern; None cancels
         self.color_answer = None  # the color dialog's color, #rrggbb; None cancels
+        self.merge_answer = True  # whether to merge though values would be lost
+        self.merge_prompts = 0
         self.color_prompts = []  # (the color it started at, its title) each time
         self.custom_format_prompts = []  # (the pattern it started with, its sample) each time
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
@@ -108,6 +110,12 @@ def dialogs(monkeypatch):
         return dialogs.color_answer
 
     monkeypatch.setattr(MainWindow, "_ask_color", ask_color)
+
+    def ask_merge_anyway(window):
+        dialogs.merge_prompts += 1
+        return dialogs.merge_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_merge_anyway", ask_merge_anyway)
 
     def new_chart(columns, problem, frame, chart_frames, answer):
         """A new chart's choices, as the dialog makes them: of the cells, or a DataFrame named in it."""
