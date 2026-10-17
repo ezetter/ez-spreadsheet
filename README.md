@@ -346,6 +346,32 @@ Sort Range… to say otherwise). The status bar says what was sorted, and Undo
 puts it back in one step. Sorting can't move merged cells; unmerge them
 first.
 
+## Filtering
+
+**Data > Create a Filter** puts a filter on the selected cells (or, with no
+more than one selected, the whole sheet's data). The first row is its
+header, and each header cell gets a filter button (a funnel). Click one to:
+
+- **Sort A → Z** or **Z → A**: sort the filter's rows (not its header) by
+  that column.
+- **Filter by condition**: show only cells that are empty or not, whose
+  text contains, starts with, ends with, or is exactly something (ignoring
+  case, except for "exactly"), or that are greater than, less than, or
+  equal to a number.
+- **Filter by values**: uncheck the values to hide. Values are listed as
+  the cells show them, with **(Blanks)** for empty cells. **Search** narrows
+  the list, and **Select all** and **Clear** act on the values it shows.
+
+Click **OK** to apply. A row shows only if every filtered column shows it,
+and a filtered column's button turns green. The status bar says how many
+rows show ("Showing 3 of 5 rows."). The filter covers rows down to the last
+row of the sheet's data, so new rows are filtered too. Rows are rechecked
+whenever their cells change. The arrow keys skip hidden rows.
+
+The filter moves with its cells when rows or columns are inserted or
+deleted. It's saved with the sheet. **Data > Remove Filter** takes it away
+and shows every row. Undo takes back each step.
+
 ## Notebook
 
 Each sheet has a notebook: Python code cells, like a Jupyter notebook's, run by
@@ -744,20 +770,22 @@ EZ Sheet. A new sheet joins it when it's first saved.
 
 Sheets are saved as `.ezs` files: JSON holding each cell's raw text
 (formulas, not their results) under its cell name, the angle unit for `SIN`,
-`COS`, and `TAN`, and any number formats, bold/italic styles, cell and column
-names, and the notebook (as a Jupyter notebook document, under `"notebook"`),
-e.g.
+`COS`, and `TAN`, and any number formats, styles, cell and column names,
+merged cells, the filter, and the notebook (as a Jupyter notebook document,
+under `"notebook"`), e.g.
 
 ```json
 {
   "format": "ezsheet",
-  "version": 7,
+  "version": 9,
   "rows": 1000,
   "columns": 52,
   "angles": "degrees",
   "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
   "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}},
   "styles": {"A1": {"bold": true}, "B1": {"bold": true}},
+  "merges": ["C1:D1"],
+  "filter": {"header": "A1:B1", "columns": {"A": {"hidden": ["Pens"]}}},
   "notebook": {
     "cells": [{"cell_type": "code", "id": "3f2a9c1e", "metadata": {},
                "source": "df.describe()", "outputs": [], "execution_count": null}],

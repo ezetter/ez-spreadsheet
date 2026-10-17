@@ -115,7 +115,7 @@ def test_data_menu_names_the_current_column(window):
     window.view.setCurrentIndex(window.model.index(0, 1))
     assert list(data_menu(window)) == [
         "Sort Sheet by Column B (A → Z)", "Sort Sheet by Column B (Z → A)", "Sort Range by Column B (A → Z)",
-        "Sort Range by Column B (Z → A)", "Sort Range…"]
+        "Sort Range by Column B (Z → A)", "Sort Range…", "Create a Filter"]
     assert not data_menu(window)["Sort Range by Column B (A → Z)"].isEnabled()  # (no range selected)
     window.view.select_range(0, 0, 3, 1)
     assert data_menu(window)["Sort Range by Column A (A → Z)"].isEnabled()

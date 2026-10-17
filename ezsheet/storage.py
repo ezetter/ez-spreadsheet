@@ -25,7 +25,7 @@ import tempfile
 from dataclasses import dataclass, field
 
 from . import names as cell_names
-from . import numformat, textstyle
+from . import filtering, numformat, textstyle
 from .functions import ANGLE_UNITS, DEGREES
 from .notebook import NotebookFormatError, cells_from_json
 from .numformat import NumberFormat
@@ -33,8 +33,8 @@ from .textstyle import CellStyle
 from .references import cell_name, column_index, column_name, parse_cell_name
 
 FORMAT = "ezsheet"
-VERSION = 8  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
-# 6 column names; 7 the notebook; 8 merged cells
+VERSION = 9  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
+# 6 column names; 7 the notebook; 8 merged cells; 9 the filter
 EXTENSION = ".ezs"
 
 
@@ -54,6 +54,7 @@ class SheetData:
     column_names: dict[str, int] = field(default_factory=dict)  # name -> column index
     notebook: dict | None = None  # a Jupyter notebook (.ipynb) document, if there are notebook cells
     merges: list[tuple[int, int, int, int]] = field(default_factory=list)  # merged cells' blocks
+    filter: object = None  # the sheet's filter (a filtering.SheetFilter), if it has one
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
@@ -87,6 +88,8 @@ def save_sheet(path: str, sheet: SheetData) -> None:
     if sheet.merges:
         document["merges"] = [f"{cell_name(top, left)}:{cell_name(bottom, right)}"
                               for top, left, bottom, right in sorted(sheet.merges)]
+    if sheet.filter is not None:
+        document["filter"] = filtering.to_json(sheet.filter)
     if sheet.notebook:
         document["notebook"] = sheet.notebook  # last, as it can be long
     write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
@@ -200,6 +203,11 @@ def load_sheet(path: str) -> SheetData:
             raise SheetFileError(f"{path} is damaged: merged cells {block} overlap others.")
         sheet.merges.append((top, left, bottom, right))
         _grow_to_fit(sheet, bottom, right)
+    if "filter" in document:  # absent before version 9, or with no filter
+        sheet.filter = filtering.from_json(document["filter"], lambda name: _cell_key(path, name))
+        if sheet.filter is None:
+            raise SheetFileError(f"{path} is damaged: bad filter.")
+        _grow_to_fit(sheet, sheet.filter.top, sheet.filter.right)
     if "notebook" in document:  # absent before version 7, or with no notebook cells
         try:
             cells_from_json(document["notebook"])

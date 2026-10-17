@@ -4,7 +4,18 @@ import dataclasses
 import os
 import uuid
 
-from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QPointF, QSize, QStandardPaths, Qt, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QItemSelection,
+    QItemSelectionModel,
+    QPoint,
+    QPointF,
+    QRect,
+    QSize,
+    QStandardPaths,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -15,6 +26,7 @@ from PySide6.QtGui import (
     QIcon,
     QKeySequence,
     QPainter,
+    QPolygonF,
     QPalette,
     QPen,
     QPixmap,
@@ -99,7 +111,9 @@ from .borders import BORDER_KINDS, MERGE_KINDS, border_icon, border_style_icon, 
 from .borders import merge_icon
 from .custom_format_dialog import CustomFormatDialog
 from .sort_dialog import SortDialog
-from .sorting import ARROWS, ASCENDING, DESCENDING, has_header
+from .sorting import ARROWS, ASCENDING, DESCENDING, has_header, sorted_rows
+from .filter_menu import FilterMenu
+from .filtering import SheetFilter
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
 from .textstyle import BORDER_STYLES, MAX_SIZE, MIN_SIZE, PLAIN, SIZES, Border
 from .references import cell_name, column_name
@@ -108,6 +122,7 @@ from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_shee
 FILE_FILTER = f"EZ Sheet Sheets (*{EXTENSION})"
 CUSTOM_FORMAT = "Custom number format…"  # the Number menu's last item
 DEFAULT_FONT = "Default"  # the font box's first item: the sheet's own font
+CREATE_FILTER, REMOVE_FILTER = "Create a Filter", "Remove Filter"  # Data menu's, as there's a filter or not
 TOOLS = (  # what the toolbar's right-click menu shows and hides, in the toolbar's order
     ("autosum", "Σ AutoSum"), ("fill", "Fill"), ("notebook", "Notebook"), ("currency", "Currency ($)"),
     ("percent", "Percent (%)"), ("fewer", "Decrease Decimal Places (.0)"),
@@ -200,6 +215,12 @@ class CellDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         super().paint(painter, option, index)
+        sheet_filter = index.model().sheet_filter()
+        if (sheet_filter is not None and index.row() == sheet_filter.top
+                and sheet_filter.left <= index.column() <= sheet_filter.right):
+            rect = self.parent().filter_button_rect(index.row(), index.column())
+            _draw_filter_button(painter, rect, option.palette.text().color(),
+                                sheet_filter.column(index.column()).active)
         marquee = self.parent().marquee
         if marquee is None:
             return
@@ -229,10 +250,12 @@ class SheetView(QTableView):
 
     editor_closed = Signal()
     escape_pressed = Signal()
+    filter_button_clicked = Signal(int, QPoint)  # a filter button's column, and where to show its menu
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.zoom = 100  # percent: cells' own font sizes are zoomed with it
+        self._filtered_out: set[int] = set()  # rows the filter hides
         self._grid_style = GridStyle()  # kept: setStyle doesn't take ownership
         self.setStyle(self._grid_style)
         self.setEditTriggers(
@@ -352,8 +375,38 @@ class SheetView(QTableView):
         return at
 
     def mousePressEvent(self, event):
+        col = self.filter_button_at(event.position().toPoint())
+        if col is not None and event.button() == Qt.LeftButton:
+            rect = self.filter_button_rect(self.model().sheet_filter().top, col)
+            self.filter_button_clicked.emit(col, self.viewport().mapToGlobal(rect.bottomLeft()))
+            return
         if not (self._pick_cell(event) or self._insert_reference(event)):
             super().mousePressEvent(event)
+
+    def filter_button_rect(self, row: int, col: int) -> QRect:
+        """Where a header cell's filter button is: at its right, as tall as the text."""
+        rect = self.visualRect(self.model().index(row, col))
+        side = max(10, min(18, rect.height() - 6))
+        return QRect(rect.right() - side - 3, rect.center().y() - side // 2, side, side)
+
+    def filter_button_at(self, pos) -> int | None:
+        """The column whose filter button is at a point in the grid, if there's one there."""
+        sheet_filter = self.model().sheet_filter()
+        index = self.indexAt(pos)
+        if sheet_filter is None or not index.isValid() or index.row() != sheet_filter.top:
+            return None
+        col = index.column()
+        if sheet_filter.left <= col <= sheet_filter.right and self.filter_button_rect(index.row(), col).contains(pos):
+            return col
+        return None
+
+    def show_filtered_rows(self, hidden: set[int]) -> None:
+        """Hide the rows the filter hides, and show the rest again."""
+        for row in self._filtered_out - hidden:
+            self.setRowHidden(row, False)
+        for row in hidden - self._filtered_out:
+            self.setRowHidden(row, True)
+        self._filtered_out = set(hidden)
 
     def mouseDoubleClickEvent(self, event):
         if not (self._pick_cell(event) or self._insert_reference(event)):
@@ -448,7 +501,12 @@ class SheetView(QTableView):
         if block is not None:  # from its far side
             row = block[2] if d_row > 0 else block[0] if d_row < 0 else row
             col = block[3] if d_col > 0 else block[1] if d_col < 0 else col
-        row = min(max(row + d_row, 0), self.model().rowCount() - 1)
+        target = row + d_row
+        while d_row and 0 <= target < self.model().rowCount() and self.isRowHidden(target):
+            target += 1 if d_row > 0 else -1  # past rows the filter hides
+        if not 0 <= target < self.model().rowCount():
+            target = row  # (only hidden rows that way: stay)
+        row = target
         col = min(max(col + d_col, 0), self.model().columnCount() - 1)
         block = self.model().merge_at(row, col)
         if block is not None:
@@ -491,6 +549,24 @@ class SheetView(QTableView):
                 line = {"top": (x0 - 1, y0 - 1, x1, y0 - 1), "bottom": (x0 - 1, y1, x1, y1),
                         "left": (x0 - 1, y0 - 1, x0 - 1, y1), "right": (x1, y0 - 1, x1, y1)}[side]
                 _draw_border(painter, border, *line, side in ("top", "bottom"), self.zoom)
+
+
+FILTER_GREEN = "#1e9e5a"  # a filtered column's button
+
+
+def _draw_filter_button(painter: QPainter, rect: QRect, ink: QColor, active: bool) -> None:
+    """A funnel, as Google Sheets' filter buttons have: filled in green when the column's filtered."""
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing)
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    funnel = QPolygonF([QPointF(x + w * 0.12, y + h * 0.2), QPointF(x + w * 0.88, y + h * 0.2),
+                        QPointF(x + w * 0.58, y + h * 0.55), QPointF(x + w * 0.58, y + h * 0.85),
+                        QPointF(x + w * 0.42, y + h * 0.75), QPointF(x + w * 0.42, y + h * 0.55)])
+    color = QColor(FILTER_GREEN) if active else ink
+    painter.setPen(QPen(color, 1.2))
+    painter.setBrush(color if active else Qt.NoBrush)
+    painter.drawPolygon(funnel)
+    painter.restore()
 
 
 _BORDER_WIDTHS = {"thin": 1, "medium": 2, "thick": 3, "dashed": 1, "dotted": 1, "double": 1}
@@ -988,6 +1064,67 @@ class MainWindow(QMainWindow):
         self.view.selectionModel().currentChanged.connect(self._name_sort_actions)
         self.view.selectionModel().selectionChanged.connect(self._name_sort_actions)
         self._name_sort_actions()
+        menu.addSeparator()
+        self.filter_action = QAction(CREATE_FILTER, self)
+        self.filter_action.triggered.connect(lambda _checked=False: self.toggle_filter())
+        menu.addAction(self.filter_action)
+        self.model.filter_changed.connect(self._show_filter)
+        self.model.dataChanged.connect(self._show_filter)
+        self.model.modelReset.connect(self._show_filter)
+        self.view.filter_button_clicked.connect(self._show_filter_menu)
+
+    def toggle_filter(self) -> bool:
+        """Data > Create a Filter: on the selected cells, or (with no more
+        than one selected) the sheet's data, its first row the header, with
+        a filter button in each of its cells. Data > Remove Filter takes it
+        away, and every row shows again."""
+        self._commit_pending_edit()
+        if self.model.sheet_filter() is not None:
+            self.model.set_filter(None, "Remove Filter")
+            self._show_status("Removed the filter: every row shows.")
+            return True
+        if len(self._selected_cells()) > 1:
+            top, left, _bottom, right = self.view.selection_bounds()
+        else:
+            block = self.model.data_block()
+            if block is None:
+                self._show_status("There's nothing to filter. Put some data in the sheet first.")
+                return False
+            top, left, _bottom, right = block
+        self.model.set_filter(SheetFilter(top, left, right), "Create Filter")
+        self._show_status(f"Made a filter on {cell_name(top, left)}:{cell_name(top, right)}. "
+                          "Click a header's filter button to choose what shows.")
+        return True
+
+    def _show_filter(self, *_args) -> None:
+        """Hide the rows the filter hides; name Data > Create a Filter, or Remove Filter."""
+        self.view.show_filtered_rows(self.model.hidden_rows())
+        self.filter_action.setText(REMOVE_FILTER if self.model.sheet_filter() is not None else CREATE_FILTER)
+
+    def _show_filter_menu(self, col: int, where) -> None:
+        """A filter button's menu: sort by the column, or choose what it shows."""
+        sheet_filter = self.model.sheet_filter()
+        first, last = self.model.filter_rows()
+        rows = sorted_rows(range(first, last + 1), self.model.value, [(col, ASCENDING)])
+        values = list(dict.fromkeys(self.model.display_text(row, col) for row in rows))
+        menu = FilterMenu(values, sheet_filter.column(col), self)
+        menu.applied.connect(lambda column_filter, c=col: self._filter_column(c, column_filter))
+        menu.sort.connect(lambda ascending, c=col: self._sort_filter(c, ascending))
+        self.filter_menu = menu  # kept while it's shown
+        menu.popup(where)
+
+    def _filter_column(self, col: int, column_filter) -> None:
+        sheet_filter = self.model.sheet_filter()
+        self.model.set_filter(sheet_filter.with_column(col, column_filter), "Filter")
+        first, last = self.model.filter_rows()
+        total, hidden = last - first + 1, len(self.model.hidden_rows())
+        self._show_status(f"Showing {total - hidden} of {total} rows." if hidden else f"Showing all {total} rows.")
+
+    def _sort_filter(self, col: int, ascending: bool) -> None:
+        """Sort the filter's rows (not its header) by a column."""
+        sheet_filter = self.model.sheet_filter()
+        first, last = self.model.filter_rows()
+        self._sort((first, sheet_filter.left, last, sheet_filter.right), [(col, ascending)], False, "Sort Range")
 
     def _name_sort_actions(self, *_args) -> None:
         """The Data menu's sorts name the current cell's column."""

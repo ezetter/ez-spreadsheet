@@ -22,6 +22,7 @@ from .formula import (
 from .functions import DEGREES
 from . import names
 from .custom_format import COLORS
+from .filtering import SheetFilter
 from .sorting import sorted_rows
 from .numformat import (
     DATE_KINDS,
@@ -43,6 +44,8 @@ DEFAULT_COLS = 52
 UNDO_LIMIT = 1000
 
 
+KEEP = object()  # (set_cells: the filter as it is)
+
 def _moved_block(block, move):
     """A merged block once its cells move (move(row, col) is a cell's new
     place, or None if it's deleted): around where they are, so inserting
@@ -60,9 +63,10 @@ def _moved_block(block, move):
 
 class _CellsCommand(QUndoCommand):
     """One undoable change: the raw text, number formats, and text styles of
-    some cells, cell and column names, and merged cells, before and after,
-    each as a (texts, formats, styles, names, columns, merges) tuple: dicts,
-    and the whole set of merges (None if they don't change)."""
+    some cells, cell and column names, merged cells, and the filter, before
+    and after, each as a (texts, formats, styles, names, columns, merges,
+    filter) tuple: dicts, the whole set of merges (None if they don't
+    change), and the filter (KEEP if it doesn't; None if there's none)."""
 
     def __init__(self, model, before: tuple, after: tuple, description: str):
         super().__init__(description)
@@ -115,6 +119,8 @@ class SheetModel(QAbstractTableModel):
     angle_unit_changed = Signal(str)
     # Emitted when cells are merged or unmerged (or a sheet is loaded).
     merges_changed = Signal()
+    # Emitted when the filter's made, changed, or removed (or a sheet is loaded).
+    filter_changed = Signal()
 
     def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
         super().__init__(parent)
@@ -132,6 +138,8 @@ class SheetModel(QAbstractTableModel):
         self._styles: dict[tuple[int, int], CellStyle] = {}
         # Merged cells: (top, left, bottom, right) blocks, each shown as one cell, the top-left one.
         self._merges: set[tuple[int, int, int, int]] = set()
+        # The filter (Data > Create a Filter), if there is one.
+        self._filter: SheetFilter | None = None
         # Cell names, by names.key(name): (the name as typed, the (row, col) it
         # names, or None if that cell was deleted).
         self._names: dict[str, tuple[str, tuple[int, int] | None]] = {}
@@ -226,12 +234,13 @@ class SheetModel(QAbstractTableModel):
                   styles: dict[tuple[int, int], CellStyle | None] | None = None,
                   names: dict[str, tuple | None] | None = None,
                   columns: dict[str, int | None] | None = None,
-                  merges=None) -> None:
+                  merges=None, sheet_filter=KEEP) -> None:
         """Set many cells' text, and optionally their number formats and text
         styles, and cell names (each keyed by names.key(name), as (name,
         cell) entries), and column names (name -> column index), where None
-        removes one, and the merged cells (all of them: (top, left, bottom,
-        right) blocks), as one undoable step,
+        removes one, the merged cells (all of them: (top, left, bottom,
+        right) blocks), and the filter (a SheetFilter, None for none), as
+        one undoable step,
         recalculating and notifying views a single time. `description` names
         the step in the Undo menu.
 
@@ -256,10 +265,16 @@ class SheetModel(QAbstractTableModel):
         merges = None if merges is None else frozenset(merges)  # (once: it may be a generator)
         if merges is not None and merges != frozenset(self._merges):
             merges_before, merges_after = frozenset(self._merges), merges
-        if after or formats_after or styles_after or names_after or columns_after or merges_after is not None:
+        filter_before = filter_after = KEEP
+        if sheet_filter is not KEEP and sheet_filter != self._filter:
+            filter_before, filter_after = self._filter, sheet_filter
+        if (after or formats_after or styles_after or names_after or columns_after or merges_after is not None
+                or filter_after is not KEEP):
             self.undo_stack.push(_CellsCommand(
-                self, (before, formats_before, styles_before, names_before, columns_before, merges_before),
-                (after, formats_after, styles_after, names_after, columns_after, merges_after), description))
+                self, (before, formats_before, styles_before, names_before, columns_before, merges_before,
+                       filter_before),
+                (after, formats_after, styles_after, names_after, columns_after, merges_after, filter_after),
+                description))
 
     def _completed(self, writes: dict, formats: dict) -> dict:
         """The writes, with fractions written as text (3/7) made numbers
@@ -324,8 +339,14 @@ class SheetModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
 
     def _apply(self, texts: dict, formats: dict, styles: dict, names: dict, columns: dict, merges=None,
-               from_history: bool = False) -> None:
+               sheet_filter=KEEP, from_history: bool = False) -> None:
         changed = {key for key, text in texts.items() if self._store(key, text)}
+        if sheet_filter is not KEEP:
+            for each in (self._filter, sheet_filter):  # (its header, for selecting)
+                if each is not None:
+                    changed.add((each.top, each.left))
+            self._filter = sheet_filter
+            self.filter_changed.emit()
         if merges is not None:
             for block in self._merges ^ set(merges):  # (the cells merged or unmerged, for selecting)
                 changed.add(block[:2])
@@ -407,7 +428,7 @@ class SheetModel(QAbstractTableModel):
         return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats),
                          dict(self._styles), self._angle_unit,
                          {name: cell for name, cell in self._names.values()},
-                         dict(self._column_names), merges=sorted(self._merges))
+                         dict(self._column_names), merges=sorted(self._merges), filter=self._filter)
 
     def load_sheet_data(self, sheet: SheetData) -> None:
         """Replace the whole sheet, including its size."""
@@ -422,6 +443,7 @@ class SheetModel(QAbstractTableModel):
         self._names = {names.key(name): (name, cell) for name, cell in sheet.names.items()}
         self._column_names = dict(sheet.column_names)
         self._merges = set(sheet.merges)
+        self._filter = sheet.filter
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
@@ -430,6 +452,7 @@ class SheetModel(QAbstractTableModel):
         self.angle_unit_changed.emit(self._angle_unit)
         self.names_changed.emit()
         self.merges_changed.emit()
+        self.filter_changed.emit()
 
     def insert_problem(self, top: int, left: int, bottom: int, right: int, shift: str) -> str | None:
         """Why blank cells can't be inserted in place of a block with this
@@ -598,7 +621,32 @@ class SheetModel(QAbstractTableModel):
             moved_names,
             columns,
             merges=filter(None, (_moved_block(block, move) for block in self._merges)),
+            sheet_filter=self._filter.moved(move) if self._filter is not None else KEEP,
         )
+
+    # --- The filter ---
+
+    def sheet_filter(self) -> SheetFilter | None:
+        return self._filter
+
+    def set_filter(self, sheet_filter: SheetFilter | None, description: str) -> None:
+        """Make, change, or remove (None) the filter, as one undoable step."""
+        self.set_cells({}, description, sheet_filter=sheet_filter)
+
+    def filter_rows(self) -> tuple[int, int] | None:
+        """The rows the filter shows or hides: (first, last), from below its
+        header to the sheet's last row of data; None without a filter."""
+        if self._filter is None:
+            return None
+        block = self.data_block()
+        return self._filter.top + 1, max(self._filter.top, block[2] if block else 0)
+
+    def hidden_rows(self) -> set[int]:
+        """The rows the filter hides."""
+        rows = self.filter_rows()
+        if rows is None or not self._filter.columns:
+            return set()
+        return self._filter.hidden_rows(rows[1], self.display_text, self.value)
 
     # --- Sorting ---
 
