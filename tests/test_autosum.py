@@ -96,7 +96,7 @@ def test_sigma_is_first_toolbar_button(window):
     assert window.autosum_button.text() == "Σ"
     assert window.autosum_button.popupMode() == QToolButton.MenuButtonPopup
     labels = [a.text().split()[-1] for a in window.autosum_button.menu().actions()]
-    assert labels == ["Sum", "Mean", "Median", "Deviation", "Count", "Non-Empty"]
+    assert labels == ["Sum", "Mean", "Median", "Minimum", "Maximum", "Deviation", "Count", "Non-Empty"]
     assert window.aggregate_actions["SUM"].isChecked()
 
 
@@ -261,6 +261,8 @@ def choose(window, function):
     ("MEAN", "x̄", "5"),
     ("MEDIAN", "x̃", "4"),
     ("STDDEV", "σ", "3.605551275"),
+    ("MIN", "min", "2"),
+    ("MAX", "max", "9"),
     ("COUNT", "n", "3"),
     ("COUNTA", "nₐ", "3"),
 ])
@@ -531,3 +533,23 @@ def test_count_only_counts_numbers(window):
     assert model.get_cell(2, 0) == ""
     assert window.statusBar().currentMessage() == (
         "Nothing to count: select some numbers, or start below or right of them.")
+
+
+def test_sigma_button_keeps_its_width(window):
+    button = window.autosum_button
+    for aggregate in AGGREGATES:  # each fits its width, so the toolbar doesn't shift
+        window.autosum.set_aggregate(aggregate)
+        window._show_aggregate()
+        assert button.sizeHint().width() <= button.minimumWidth()
+    window.set_zoom(200)
+    assert button.sizeHint().width() <= button.minimumWidth()
+
+
+def test_sigma_button_stays_zoomed(window):
+    size = window.autosum_button.font().pointSizeF()
+    window.set_zoom(150)
+    window.aggregate_actions["MEAN"].trigger()  # (its action changes: the button takes its font)
+    window.autosum_action.setChecked(True)
+    assert window.autosum_button.font().pointSizeF() == size * 1.5
+    window.set_zoom(100)
+    assert window.autosum_button.font().pointSizeF() == size

@@ -311,6 +311,11 @@ def test_sum_large_range(app):
     ("=COUNT(A1:A3)", "3"),
     ("=COUNT(A1:A3, 7, B1:B5)", "4"),  # (empty cells aren't counted)
     ("=COUNTA(A1:A3, 7, B1:B5)", "4"),
+    ("=MIN(A1:A3)", "10"),
+    ("=MAX(A1:A3, 5)", "30"),
+    ("=MIN(A1:A3, -5, B1:B5)", "-5"),
+    ("=MAX(B1:B5)", "0"),  # (no numbers: 0, as in other spreadsheets)
+    ("=MIN(B1:B5)", "0"),
     ("=SUM(A1:A3)*2", "120"),
 ])
 def test_aggregate_functions(sheet, formula, expected):
@@ -343,6 +348,12 @@ def test_counta_counts_all_but_empty_cells(sheet):
     assert sheet.display_text(8, 0) == "0"
     sheet.set_cell(8, 1, "=COUNTA(A6:A8)")
     assert sheet.display_text(8, 1) == "3"  # (not shown as dollars)
+
+
+def test_min_and_max_keep_their_cells_format(sheet):
+    sheet.set_cells({(5, 0): "$4.50", (6, 0): "$1.25", (7, 0): "=MIN(A6:A7)", (8, 0): "=MAX(A6:A7)",
+                     (9, 0): "=MAX(A6:A7, 1/0)"})
+    assert [sheet.display_text(row, 0) for row in (7, 8, 9)] == ["$1.25", "$4.50", "#DIV/0!"]
 
 
 def test_a_count_isnt_shown_in_its_cells_format(sheet):

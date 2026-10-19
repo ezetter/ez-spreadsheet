@@ -1336,6 +1336,7 @@ class MainWindow(QMainWindow):
         self.view_menu = menu
         self.zoom = 100  # percent
         self._zoom_base_fonts = None  # each zoomable widget's font at 100%, saved on first zoom
+        self._zoom_base_action_font = None  # likewise the Σ button's action's
         self.zoom_actions = {}
         # These zoom the notebook instead when it's in front, as the Mac's
         # menu bar, shortcuts included, stays this window's.
@@ -1403,9 +1404,15 @@ class MainWindow(QMainWindow):
         self.view.zoom = percent
         for widget, base in self._zoom_base_fonts.items():
             widget.setFont(scaled_font(base, percent))
+        # The Σ button takes its action's font each time the action changes (its symbol, or
+        # being pressed), so that's zoomed too.
+        if self._zoom_base_action_font is None:
+            self._zoom_base_action_font = QFont(self.autosum_action.font())
+        self.autosum_action.setFont(scaled_font(self._zoom_base_action_font, percent))
         _rescale_header(self.view.horizontalHeader(), COLUMN_WIDTH, old, percent)
         _rescale_header(self.view.verticalHeader(), ROW_HEIGHT, old, percent)
         self._fit_rows_to_fonts()
+        self._fit_autosum_button()
         self._update_zoom_actions()
         self.statusBar().showMessage(f"Zoom {percent}%", 2000)
 
@@ -2064,6 +2071,7 @@ class MainWindow(QMainWindow):
         self.autosum_button.setMenu(menu)
         self.autosum_button.setPopupMode(QToolButton.MenuButtonPopup)
         toolbar.addWidget(self.autosum_button)
+        self._fit_autosum_button()
         self._show_aggregate()
 
         self.autosum.pending_changed.connect(self.autosum_action.setChecked)
@@ -2540,6 +2548,14 @@ class MainWindow(QMainWindow):
         self._commit_pending_edit()
         if not self.autosum.switch_selected_cells():
             self._autosum()
+
+    def _fit_autosum_button(self) -> None:
+        """As wide as its widest symbol (max), so the toolbar doesn't shift as the function changes."""
+        button = self.autosum_button
+        metrics = button.fontMetrics()  # (measured, not shown: showing each would reset its zoomed font)
+        button.setMinimumWidth(0)
+        extra = button.sizeHint().width() - metrics.horizontalAdvance(button.text())  # its arrow and margins
+        button.setMinimumWidth(extra + max(metrics.horizontalAdvance(a.symbol) for a in AGGREGATES))
 
     def _show_aggregate(self):
         aggregate = self.autosum.aggregate

@@ -50,6 +50,8 @@ AGGREGATES = [
     Aggregate("SUM", "Sum", "Σ"),
     Aggregate("MEAN", "Mean", "x̄"),
     Aggregate("MEDIAN", "Median", "x̃"),
+    Aggregate("MIN", "Minimum", "min"),
+    Aggregate("MAX", "Maximum", "max"),
     Aggregate("STDDEV", "Standard Deviation", "σ"),
     Aggregate("COUNT", "Count", "n"),
     Aggregate("COUNTA", "Count Non-Empty", "nₐ", any_value=True, noun="count"),

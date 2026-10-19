@@ -795,7 +795,7 @@ column in each cell.
      outermost).
    - **Columns**: a column whose values become the columns, or (None).
    - **Values**: each a column and an aggregate of it: SUM, MEAN, MEDIAN,
-     STDDEV, COUNT, or COUNTA (Add Value for more). COUNT counts numbers;
+     MIN, MAX, STDDEV, COUNT, or COUNTA (Add Value for more). COUNT counts numbers;
      COUNTA counts every cell that isn't empty, so COUNTA of any column
      that's always filled in counts each group's rows.
    - **Filters**: each a column, and with **Values…** which of its rows to
@@ -1063,6 +1063,8 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
   - `SUM` adds the numbers (0 if there are none).
   - `MEAN` averages them (`#DIV/0!` if there are none).
   - `MEDIAN` gives the middle value (`#NUM!` if there are none).
+  - `MIN` and `MAX` give the smallest and largest (0 if there are none, as
+    in other spreadsheets).
   - `STDDEV` gives the sample standard deviation, dividing by n − 1 like
     `STDEV` in other spreadsheets (`#DIV/0!` with fewer than two numbers).
   - `COUNT` counts the numbers, as in other spreadsheets: text, empty cells,
@@ -1170,7 +1172,8 @@ the secondary-click menu, and on a column header's), and name, say, column C
 
 The Σ button on the toolbar applies a function to a block of numbers. The
 arrow beside it chooses the function: Sum (Σ), Mean (x̄), Median (x̃),
-Standard Deviation (σ), Count (n), or Count Non-Empty (nₐ, `COUNTA`). Choosing one runs it straight away, and the button
+Minimum (min), Maximum (max), Standard Deviation (σ), Count (n), or Count
+Non-Empty (nₐ, `COUNTA`). Choosing one runs it straight away, and the button
 keeps using it until you choose another. The button uses the first of these
 that applies:
 

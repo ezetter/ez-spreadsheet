@@ -60,6 +60,16 @@ def _aggregate(compute, minimum: int, too_few_error: str):
     return function
 
 
+def _extreme(compute):
+    """MIN or MAX: of the numbers among the arguments, or 0 if there are none, as in other spreadsheets."""
+
+    def function(args) -> float:
+        data = numbers(args)
+        return float(compute(data)) if data.size else 0.0
+
+    return function
+
+
 def count(args) -> float:
     """How many numbers there are among the arguments; empty cells, text, and
     errors aren't counted."""
@@ -145,6 +155,8 @@ FUNCTIONS = {
     "SUM": Function(_aggregate(np.sum, 0, NUM_ERROR), 1, None, ranges=True),
     "MEAN": Function(_aggregate(np.mean, 1, DIV_ZERO_ERROR), 1, None, ranges=True),
     "MEDIAN": Function(_aggregate(np.median, 1, NUM_ERROR), 1, None, ranges=True),
+    "MIN": Function(_extreme(np.min), 1, None, ranges=True),
+    "MAX": Function(_extreme(np.max), 1, None, ranges=True),
     # Sample standard deviation (n - 1 in the denominator), like STDEV in other spreadsheets.
     "STDDEV": Function(_aggregate(lambda data: np.std(data, ddof=1), 2, DIV_ZERO_ERROR),
                        1, None, ranges=True),
