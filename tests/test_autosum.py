@@ -96,7 +96,7 @@ def test_sigma_is_first_toolbar_button(window):
     assert window.autosum_button.text() == "Σ"
     assert window.autosum_button.popupMode() == QToolButton.MenuButtonPopup
     labels = [a.text().split()[-1] for a in window.autosum_button.menu().actions()]
-    assert labels == ["Sum", "Mean", "Median", "Deviation", "Count"]
+    assert labels == ["Sum", "Mean", "Median", "Deviation", "Count", "Non-Empty"]
     assert window.aggregate_actions["SUM"].isChecked()
 
 
@@ -262,6 +262,7 @@ def choose(window, function):
     ("MEDIAN", "x̃", "4"),
     ("STDDEV", "σ", "3.605551275"),
     ("COUNT", "n", "3"),
+    ("COUNTA", "nₐ", "3"),
 ])
 def test_choosing_function_runs_it_on_numbers_above(window, function, symbol, expected):
     model = window.model
@@ -502,3 +503,31 @@ def test_column_results_stop_at_sheet_edge(window):
     window.view.scrollTo(model.index(6, last))
     click_cell(window, 6, last)
     assert model.get_cell(6, last) == "=SUM(A2:A5)"
+
+
+def test_count_non_empty_counts_text_too(window):
+    model = window.model
+    fill(model, {(0, 0): "East", (1, 0): "West", (2, 0): "=1/0", (0, 1): "x"})
+    select(window, 3, 0, 3, 0)
+    choose(window, "COUNTA")
+    assert model.get_cell(3, 0) == "=COUNTA(A1:A3)" and model.display_text(3, 0) == "3"
+    assert window.undo_action.text() == "Undo Count Non-Empty"
+    select(window, 0, 0, 1, 1)  # a selection of text: it waits for a click
+    press_sigma(window)
+    assert window.statusBar().currentMessage() == (
+        "Click the cell for the first column's count; the other columns' go to its right. Esc cancels.")
+    window.autosum.cancel()
+    select(window, 5, 3, 5, 3)
+    press_sigma(window)
+    assert window.statusBar().currentMessage() == (
+        "Nothing to count: select some cells with something in them, or start below or right of them.")
+
+
+def test_count_only_counts_numbers(window):
+    model = window.model
+    fill(model, {(0, 0): "East", (1, 0): "West"})
+    select(window, 2, 0, 2, 0)
+    choose(window, "COUNT")
+    assert model.get_cell(2, 0) == ""
+    assert window.statusBar().currentMessage() == (
+        "Nothing to count: select some numbers, or start below or right of them.")

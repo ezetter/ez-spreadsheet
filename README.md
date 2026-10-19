@@ -795,8 +795,9 @@ column in each cell.
      outermost).
    - **Columns**: a column whose values become the columns, or (None).
    - **Values**: each a column and an aggregate of it: SUM, MEAN, MEDIAN,
-     STDDEV, or COUNT (Add Value for more). COUNT counts numbers, so to count
-     a group's rows, count a column of numbers.
+     STDDEV, COUNT, or COUNTA (Add Value for more). COUNT counts numbers;
+     COUNTA counts every cell that isn't empty, so COUNTA of any column
+     that's always filled in counts each group's rows.
    - **Filters**: each a column, and with **Values…** which of its rows to
      leave in, by value or by condition, as with the sheet's filter.
    - **Show grand totals**: a Grand Total row, and column too if there are
@@ -1067,6 +1068,8 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
   - `COUNT` counts the numbers, as in other spreadsheets: text, empty cells,
     and errors aren't counted. Unlike the others, its result isn't shown in
     its cells' number format (counting dollar amounts gives 3, not $3.00).
+  - `COUNTA` counts every value that isn't empty: numbers, text, and errors.
+    Like `COUNT`, it isn't shown in its cells' number format.
   - `SIN`, `COS`, and `TAN` take an angle in degrees, or in radians if the
     sheet is set to radians (see [Degrees or radians](#degrees-or-radians)):
     `=SIN(30)` is 0.5 in degrees, as is `=SIN(PI/6)` in radians. Exact angles
@@ -1167,7 +1170,7 @@ the secondary-click menu, and on a column header's), and name, say, column C
 
 The Σ button on the toolbar applies a function to a block of numbers. The
 arrow beside it chooses the function: Sum (Σ), Mean (x̄), Median (x̃),
-Standard Deviation (σ), or Count (n). Choosing one runs it straight away, and the button
+Standard Deviation (σ), Count (n), or Count Non-Empty (nₐ, `COUNTA`). Choosing one runs it straight away, and the button
 keeps using it until you choose another. The button uses the first of these
 that applies:
 
@@ -1195,6 +1198,11 @@ than call one function, such as `=SUM(A1:A9)*2`, are left alone.
 
 For 2 and 3 it takes the nearest unbroken block of numbers, skipping blank
 cells right next to the current cell and stopping at text or a gap.
+
+Count Non-Empty counts cells with anything in them, text included, so it
+looks for those instead of numbers. Its block stops only at a gap, so a
+header right above the cells is counted too; select just the cells to
+count, and click where the count goes, to leave the header out.
 
 ## Fill
 

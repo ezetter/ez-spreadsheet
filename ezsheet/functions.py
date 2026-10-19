@@ -66,6 +66,12 @@ def count(args) -> float:
     return float(sum(1 for values in args for value in values if isinstance(value, float)))
 
 
+def count_all(args) -> float:
+    """How many values there are among the arguments, of any kind (numbers,
+    text, and errors): COUNTA, which counts every cell that isn't empty."""
+    return float(sum(1 for values in args for value in values if value is not None and value != ""))
+
+
 def power(base: float, exponent: float):
     """base ** exponent, for both the ^ operator and POW. A complex or infinite
     result (such as (-8)^(1/3)) is reported as #NUM! by the caller."""
@@ -143,6 +149,7 @@ FUNCTIONS = {
     "STDDEV": Function(_aggregate(lambda data: np.std(data, ddof=1), 2, DIV_ZERO_ERROR),
                        1, None, ranges=True),
     "COUNT": Function(count, 1, None, ranges=True, counts=True),
+    "COUNTA": Function(count_all, 1, None, ranges=True, counts=True),
     # Trigonometry, in the sheet's angle unit.
     "SIN": Function(sine, 1, 1, ranges=False, angle=True),
     "COS": Function(cosine, 1, 1, ranges=False, angle=True),

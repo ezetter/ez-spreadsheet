@@ -61,12 +61,18 @@ def test_rows_and_a_value(book):
 
 def test_every_aggregate(book):
     values = tuple((2, function) for function in FUNCTION_NAMES)
-    assert FUNCTION_NAMES == ("SUM", "MEAN", "MEDIAN", "STDDEV", "COUNT")
+    assert FUNCTION_NAMES == ("SUM", "MEAN", "MEDIAN", "STDDEV", "COUNT", "COUNTA")
     cells = layout(pivot(rows=(1,), values=values), book)
     assert grid(cells)[0] == ["Month", "SUM of Sales", "MEAN of Sales", "MEDIAN of Sales", "STDDEV of Sales",
-                              "COUNT of Sales"]
-    feb = [cells[(1, c)].value for c in range(1, 6)]
-    assert feb[:3] == [2200.0, 1100.0, 1100.0] and round(feb[3], 3) == 565.685 and feb[4] == 2.0
+                              "COUNT of Sales", "COUNTA of Sales"]
+    feb = [cells[(1, c)].value for c in range(1, 7)]
+    assert feb[:3] == [2200.0, 1100.0, 1100.0] and round(feb[3], 3) == 565.685 and feb[4:] == [2.0, 2.0]
+
+
+def test_counting_a_text_column(book):
+    cells = layout(pivot(rows=(1,), values=((0, "COUNT"), (0, "COUNTA"))), book)
+    assert grid(cells) == [["Month", "COUNT of Region", "COUNTA of Region"], ["Feb", "0.0", "2.0"],
+                           ["Jan", "0.0", "3.0"], ["Grand Total", "0.0", "5.0"]]
 
 
 def test_counts_arent_in_their_columns_format(book):
@@ -261,7 +267,8 @@ def test_dialog(app):
     assert dialog.choice() == {"rows": (0,), "column": None, "values": ((2, "SUM"),), "filters": (), "totals": True}
     assert dialog.ok_button.text() == "Choose Where…" and dialog.ok_button.isEnabled()
     functions = dialog.value_lines[0][2]
-    assert [functions.itemText(i) for i in range(functions.count())] == ["SUM", "MEAN", "MEDIAN", "STDDEV", "COUNT"]
+    assert [functions.itemText(i) for i in range(functions.count())] == ["SUM", "MEAN", "MEDIAN", "STDDEV", "COUNT",
+                                                                              "COUNTA"]
     assert dialog.value_lines[0][1].itemText(1) == "Month (column B)"
     dialog.add_row(1)
     dialog.column_box.setCurrentIndex(dialog.column_box.findData(1))

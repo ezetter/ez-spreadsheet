@@ -12,6 +12,9 @@ others). In order of priority, pressing it:
 With several cells selected (say, the empty cells under several columns of
 numbers), 2 and 3 apply to each empty one, so each column gets its own total.
 
+Count Non-Empty (COUNTA) works the same way with cells of anything, text
+included, where the others look for numbers.
+
 Choosing a function from the menu while on a cell that already holds one,
 such as =SUM(A1:A9), switches that cell, and any others selected that hold
 one, to the new function instead.
@@ -31,6 +34,16 @@ class Aggregate:
     function: str  # formula function name
     label: str  # menu text
     symbol: str  # button text
+    any_value: bool = False  # of cells with anything in them (COUNTA), not just numbers
+    noun: str = ""  # what it makes, in messages, if not its label: a count
+
+    @property
+    def name(self) -> str:
+        return self.noun or self.label.lower()
+
+    def takes(self, value) -> bool:
+        """Whether it's of a cell with this value: a number, or for one of any value, anything."""
+        return value not in (None, "") if self.any_value else isinstance(value, float)
 
 
 AGGREGATES = [
@@ -39,6 +52,7 @@ AGGREGATES = [
     Aggregate("MEDIAN", "Median", "x̃"),
     Aggregate("STDDEV", "Standard Deviation", "σ"),
     Aggregate("COUNT", "Count", "n"),
+    Aggregate("COUNTA", "Count Non-Empty", "nₐ", any_value=True, noun="count"),
 ]
 
 
@@ -93,18 +107,21 @@ def aggregate_formula(function: str, ranges, names=()) -> str:
     return f"={function}(" + ", ".join(range_name(r, names) for r in ranges) + ")"
 
 
-def run_above(model, row: int, col: int):
-    """The block of numbers nearest above (row, col), skipping blank cells
-    directly above it, as (top, left, bottom, right); or None."""
-    return _run(model, row, col, -1, 0)
+def run_above(model, row: int, col: int, takes=None):
+    """The block of numbers (or of the values `takes(value)` accepts)
+    nearest above (row, col), skipping blank cells directly above it, as
+    (top, left, bottom, right); or None."""
+    return _run(model, row, col, -1, 0, takes)
 
 
-def run_left(model, row: int, col: int):
+def run_left(model, row: int, col: int, takes=None):
     """The block of numbers nearest to the left of (row, col), like run_above."""
-    return _run(model, row, col, 0, -1)
+    return _run(model, row, col, 0, -1, takes)
 
 
-def _run(model, row, col, d_row, d_col):
+def _run(model, row, col, d_row, d_col, takes=None):
+    takes = takes or (lambda value: isinstance(value, float))
+
     def value(steps):
         return model.value(row + d_row * steps, col + d_col * steps)
 
@@ -113,7 +130,7 @@ def _run(model, row, col, d_row, d_col):
     while step <= limit and value(step) is None:
         step += 1
     first = step
-    while step <= limit and isinstance(value(step), float):
+    while step <= limit and takes(value(step)):
         step += 1
     if step == first:
         return None
@@ -171,7 +188,7 @@ class AutoSumController(QObject):
             self.cancel()
             return
         selected = {(i.row(), i.column()) for i in self.view.selectedIndexes()}
-        if any(isinstance(self.model.value(*cell), float) for cell in selected):
+        if any(self.aggregate.takes(self.model.value(*cell)) for cell in selected):
             self._cells = selected
             self.view.pick_handler = self._place
             self.pending_changed.emit(True)
@@ -189,17 +206,19 @@ class AutoSumController(QObject):
         # include each other.
         writes = {}
         for row, col in targets:
-            run = run_above(self.model, row, col) or run_left(self.model, row, col)
+            takes = self.aggregate.takes
+            run = run_above(self.model, row, col, takes) or run_left(self.model, row, col, takes)
             if run is not None:
                 writes[(row, col)] = aggregate_formula(self.aggregate.function, [run], self.model.name_set())
         if not writes:
             self.message.emit(
-                f"Nothing to {self.aggregate.label.lower()}: select some numbers, "
+                f"Nothing to {self.aggregate.name}: select some "
+                f"{'cells with something in them' if self.aggregate.any_value else 'numbers'}, "
                 "or start below or right of them."
             )
             return
         self.message.emit("" if len(writes) == 1 else
-                          f"Added {len(writes)} {self.aggregate.label.lower()} formulas.")
+                          f"Added {len(writes)} {self.aggregate.name} formulas.")
         self.model.set_cells(writes, self.aggregate.label)
 
     def cancel(self) -> None:
@@ -218,7 +237,7 @@ class AutoSumController(QObject):
         return len(rows) > 1 and len(cols) > 1
 
     def _prompt(self) -> None:
-        label = self.aggregate.label.lower()
+        label = self.aggregate.name
         if self._per_column():
             self.message.emit(f"Click the cell for the first column's {label}; the other columns' "
                               "go to its right. Esc cancels.")
@@ -253,7 +272,7 @@ class AutoSumController(QObject):
             target_col = col + source_col - left
             if target_col >= self.model.columnCount():
                 continue
-            if any(isinstance(self.model.value(*cell), float) for cell in cells):
+            if any(self.aggregate.takes(self.model.value(*cell)) for cell in cells):
                 writes[(row, target_col)] = aggregate_formula(self.aggregate.function, cell_ranges(cells),
                                                                      self.model.name_set())
         return writes
