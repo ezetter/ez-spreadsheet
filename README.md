@@ -794,8 +794,9 @@ column in each cell.
    - **Rows**: the columns to group rows by (Add Row for more; the first is
      outermost).
    - **Columns**: a column whose values become the columns, or (None).
-   - **Values**: each a column and an aggregate of it: SUM, MEAN, MEDIAN, or
-     STDDEV (Add Value for more).
+   - **Values**: each a column and an aggregate of it: SUM, MEAN, MEDIAN,
+     STDDEV, or COUNT (Add Value for more). COUNT counts numbers, so to count
+     a group's rows, count a column of numbers.
    - **Filters**: each a column, and with **Values…** which of its rows to
      leave in, by value or by condition, as with the sheet's filter.
    - **Show grand totals**: a Grand Total row, and column too if there are
@@ -807,7 +808,8 @@ column in each cell.
 
 Groups are sorted as Sort A → Z sorts (numbers as numbers), with empty cells
 last, shown as (Blanks). Text in a value column is skipped, as in formulas.
-Values keep their column's number format, so dollars stay dollars. Headers
+Values keep their column's number format, so dollars stay dollars (counts
+don't). Headers
 and totals are bold.
 
 A pivot table keeps up with its source as it changes: edits, rows added just
@@ -1062,6 +1064,9 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
   - `MEDIAN` gives the middle value (`#NUM!` if there are none).
   - `STDDEV` gives the sample standard deviation, dividing by n − 1 like
     `STDEV` in other spreadsheets (`#DIV/0!` with fewer than two numbers).
+  - `COUNT` counts the numbers, as in other spreadsheets: text, empty cells,
+    and errors aren't counted. Unlike the others, its result isn't shown in
+    its cells' number format (counting dollar amounts gives 3, not $3.00).
   - `SIN`, `COS`, and `TAN` take an angle in degrees, or in radians if the
     sheet is set to radians (see [Degrees or radians](#degrees-or-radians)):
     `=SIN(30)` is 0.5 in degrees, as is `=SIN(PI/6)` in radians. Exact angles
@@ -1161,8 +1166,8 @@ the secondary-click menu, and on a column header's), and name, say, column C
 ## AutoSum (Σ)
 
 The Σ button on the toolbar applies a function to a block of numbers. The
-arrow beside it chooses the function: Sum (Σ), Mean (x̄), Median (x̃), or
-Standard Deviation (σ). Choosing one runs it straight away, and the button
+arrow beside it chooses the function: Sum (Σ), Mean (x̄), Median (x̃),
+Standard Deviation (σ), or Count (n). Choosing one runs it straight away, and the button
 keeps using it until you choose another. The button uses the first of these
 that applies:
 

@@ -378,7 +378,9 @@ def references(node) -> tuple[set[tuple[int, int]], list[tuple[int, int, int, in
 
 def ordered_references(node) -> list:
     """The ("ref", row, col) and ("range", top, left, bottom, right) nodes of
-    an AST, in the order they appear in the formula."""
+    an AST, in the order they appear in the formula: those whose number
+    formats its result could be shown in, so not those a count is of
+    (=COUNT(B2:B9) of dollars is a number of them, not dollars)."""
     found = []
     stack = [node]
     while stack:
@@ -390,7 +392,7 @@ def ordered_references(node) -> list:
             stack.append(node[1])
         elif kind == "bin":
             stack.extend(reversed(node[2:]))
-        elif kind == "call":
+        elif kind == "call" and not FUNCTIONS[node[1]].counts:
             stack.extend(reversed(node[2]))
     return found
 

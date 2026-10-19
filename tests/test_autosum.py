@@ -96,7 +96,7 @@ def test_sigma_is_first_toolbar_button(window):
     assert window.autosum_button.text() == "Σ"
     assert window.autosum_button.popupMode() == QToolButton.MenuButtonPopup
     labels = [a.text().split()[-1] for a in window.autosum_button.menu().actions()]
-    assert labels == ["Sum", "Mean", "Median", "Deviation"]
+    assert labels == ["Sum", "Mean", "Median", "Deviation", "Count"]
     assert window.aggregate_actions["SUM"].isChecked()
 
 
@@ -261,6 +261,7 @@ def choose(window, function):
     ("MEAN", "x̄", "5"),
     ("MEDIAN", "x̃", "4"),
     ("STDDEV", "σ", "3.605551275"),
+    ("COUNT", "n", "3"),
 ])
 def test_choosing_function_runs_it_on_numbers_above(window, function, symbol, expected):
     model = window.model

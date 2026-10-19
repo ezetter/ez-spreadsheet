@@ -31,6 +31,7 @@ class Function:
     max_args: int | None  # None for any number
     ranges: bool  # aggregate: takes ranges; otherwise each argument is one number
     angle: bool = False  # takes an angle, so compute also gets the angle unit
+    counts: bool = False  # gives a count, not a number in its arguments' units (so not shown in their format)
 
 
 def numbers(args) -> np.ndarray:
@@ -57,6 +58,12 @@ def _aggregate(compute, minimum: int, too_few_error: str):
             return float(compute(data))
 
     return function
+
+
+def count(args) -> float:
+    """How many numbers there are among the arguments; empty cells, text, and
+    errors aren't counted."""
+    return float(sum(1 for values in args for value in values if isinstance(value, float)))
 
 
 def power(base: float, exponent: float):
@@ -135,6 +142,7 @@ FUNCTIONS = {
     # Sample standard deviation (n - 1 in the denominator), like STDEV in other spreadsheets.
     "STDDEV": Function(_aggregate(lambda data: np.std(data, ddof=1), 2, DIV_ZERO_ERROR),
                        1, None, ranges=True),
+    "COUNT": Function(count, 1, None, ranges=True, counts=True),
     # Trigonometry, in the sheet's angle unit.
     "SIN": Function(sine, 1, 1, ranges=False, angle=True),
     "COS": Function(cosine, 1, 1, ranges=False, angle=True),

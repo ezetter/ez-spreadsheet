@@ -308,6 +308,8 @@ def test_sum_large_range(app):
     ("=MEDIAN(A1:A3, 100)", "25"),
     ("=STDDEV(A1:A3)", "10"),
     ("=STDDEV(A1:A2)", "7.071067812"),
+    ("=COUNT(A1:A3)", "3"),
+    ("=COUNT(A1:A3, 7, B1:B5)", "4"),  # (empty cells aren't counted)
     ("=SUM(A1:A3)*2", "120"),
 ])
 def test_aggregate_functions(sheet, formula, expected):
@@ -324,6 +326,18 @@ def test_aggregate_functions(sheet, formula, expected):
 def test_aggregate_errors(sheet, formula, error):
     sheet.set_cell(0, 2, formula)
     assert sheet.display_text(0, 2) == error
+
+
+def test_count_counts_only_numbers(sheet):
+    sheet.set_cells({(5, 0): "text", (6, 0): "=1/0", (7, 0): "$4.50", (8, 0): "=COUNT(A6:A8, B1:B5)"})
+    assert sheet.display_text(8, 0) == "1"  # (not text, errors, or empty cells)
+    sheet.set_cell(8, 0, "=COUNT(B1:B5)")
+    assert sheet.display_text(8, 0) == "0"
+
+
+def test_a_count_isnt_shown_in_its_cells_format(sheet):
+    sheet.set_cells({(5, 0): "$4.50", (6, 0): "$1.25", (7, 0): "=COUNT(A6:A7)", (8, 0): "=SUM(A6:A7)/COUNT(A6:A7)"})
+    assert sheet.display_text(7, 0) == "2" and sheet.display_text(8, 0) == "$2.88"
 
 
 def test_empty_sum_is_zero(sheet):

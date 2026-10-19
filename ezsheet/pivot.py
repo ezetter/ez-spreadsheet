@@ -141,7 +141,7 @@ def layout(pivot: Pivot, sheet) -> dict[tuple[int, int], PivotCell]:
             value = FUNCTIONS[function].compute([[sheet.value(row, col) for row in rows]])
         except FormulaError as error:
             value = CellError(error.code)
-        return PivotCell(value, formats[col], bold)
+        return PivotCell(value, None if FUNCTIONS[function].counts else formats[col], bold)
 
     formats = {col: _format_of(sheet, col, data) for col, _function in pivot.values}
     row_groups = groups(pivot.rows) if pivot.rows else {}

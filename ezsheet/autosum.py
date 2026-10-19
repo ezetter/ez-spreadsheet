@@ -38,6 +38,7 @@ AGGREGATES = [
     Aggregate("MEAN", "Mean", "x̄"),
     Aggregate("MEDIAN", "Median", "x̃"),
     Aggregate("STDDEV", "Standard Deviation", "σ"),
+    Aggregate("COUNT", "Count", "n"),
 ]
 
 
