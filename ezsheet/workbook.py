@@ -6,11 +6,14 @@ of it to that sheet, so the rest of the app works on the sheet shown. Its
 sheets share one undo history: undoing a change to a sheet goes to it.
 
 A formula can refer to another sheet's cells by its name (Sheet2!A1; see
-formula.py). Renaming a sheet rewrites the formulas that name it; inserting
+formula.py), and a pivot table can be of them. Renaming a sheet rewrites
+the formulas and pivot tables that name it; inserting
 or deleting its rows or columns moves their references, as for its own
 (see SheetModel._rearrange). A formula naming a sheet that isn't there (it
 was deleted) is #REF!, until there's one of that name again.
 """
+
+from dataclasses import replace
 
 from PySide6.QtCore import QIdentityProxyModel, Signal
 from PySide6.QtGui import QUndoCommand, QUndoStack
@@ -171,12 +174,14 @@ class WorkbookModel(QIdentityProxyModel):
         for each in self._sheets:
             writes = {key: renamed for key, text in each.formula_cells().items()
                       if (renamed := rename_sheet(text, old, title)) != text}
-            if writes:
-                rewrites.append((each, writes))
+            pivots = tuple(replace(pivot, source=title) if same_sheet(pivot.source, old) else pivot
+                           for pivot in each.pivots())  # (pivot tables of it)
+            if writes or pivots != each.pivots():
+                rewrites.append((each, writes, pivots))
         self.undo_stack.beginMacro("Rename Sheet")
         self.undo_stack.push(_RenameCommand(self, sheet, old, title))
-        for each, writes in rewrites:
-            each.set_cells(writes, "Rename Sheet", show=False)
+        for each, writes, pivots in rewrites:
+            each.set_cells(writes, "Rename Sheet", show=False, pivots=pivots)
         self.undo_stack.endMacro()
         return None
 

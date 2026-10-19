@@ -23,6 +23,7 @@ NO_VALUE = {"none", "empty", "not empty"}  # conditions without a value to compa
 _NUMERIC = {"greater": float.__gt__, "greater or equal": float.__ge__, "less": float.__lt__,
             "less or equal": float.__le__}
 BLANK = ""  # an empty cell's value, among the values to hide
+BLANKS = "(Blanks)"  # how lists show an empty cell's value
 
 
 @dataclass(frozen=True)
@@ -115,16 +116,7 @@ class SheetFilter:
 def to_json(sheet_filter: SheetFilter) -> dict:
     data = {"header": f"{cell_name(sheet_filter.top, sheet_filter.left)}:"
                       f"{cell_name(sheet_filter.top, sheet_filter.right)}"}
-    columns = {}
-    for col, column_filter in sheet_filter.columns:
-        entry = {}
-        if column_filter.hidden:
-            entry["hidden"] = sorted(column_filter.hidden)
-        if column_filter.condition != "none":
-            entry["condition"] = column_filter.condition
-            if column_filter.condition not in NO_VALUE:
-                entry["value"] = column_filter.value
-        columns[column_name(col)] = entry
+    columns = {column_name(col): column_to_json(column_filter) for col, column_filter in sheet_filter.columns}
     if columns:
         data["columns"] = columns
     return data
@@ -143,15 +135,35 @@ def from_json(data, parse_cell) -> SheetFilter | None:
     columns = data.get("columns", {})
     if not isinstance(columns, dict):
         return None
-    conditions = {key for key, _label in CONDITIONS}
     sheet_filter = SheetFilter(top, left, right)
     for letters, entry in columns.items():
-        if not isinstance(letters, str) or not letters.isalpha() or not isinstance(entry, dict):
+        if not isinstance(letters, str) or not letters.isalpha():
             return None
-        col = column_index(letters.upper())
-        hidden, condition, value = entry.get("hidden", []), entry.get("condition", "none"), entry.get("value", "")
-        if (not left <= col <= right or not isinstance(hidden, list) or not all(isinstance(h, str) for h in hidden)
-                or condition not in conditions or not isinstance(value, str)):
+        col, column_filter = column_index(letters.upper()), column_from_json(entry)
+        if not left <= col <= right or column_filter is None:
             return None
-        sheet_filter = sheet_filter.with_column(col, ColumnFilter(frozenset(hidden), condition, value))
+        sheet_filter = sheet_filter.with_column(col, column_filter)
     return sheet_filter
+
+
+def column_to_json(column_filter: ColumnFilter) -> dict:
+    """A column's filter, for a file: {"hidden": [...], "condition": ..., "value": ...}, as it has them."""
+    entry = {}
+    if column_filter.hidden:
+        entry["hidden"] = sorted(column_filter.hidden)
+    if column_filter.condition != "none":
+        entry["condition"] = column_filter.condition
+        if column_filter.condition not in NO_VALUE:
+            entry["value"] = column_filter.value
+    return entry
+
+
+def column_from_json(entry) -> ColumnFilter | None:
+    """A column's filter read from a file, or None if it's malformed."""
+    if not isinstance(entry, dict):
+        return None
+    hidden, condition, value = entry.get("hidden", []), entry.get("condition", "none"), entry.get("value", "")
+    if (not isinstance(hidden, list) or not all(isinstance(h, str) for h in hidden)
+            or condition not in {key for key, _label in CONDITIONS} or not isinstance(value, str)):
+        return None
+    return ColumnFilter(frozenset(hidden), condition, value)

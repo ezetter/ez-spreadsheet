@@ -24,6 +24,7 @@ from .functions import DEGREES
 from . import names
 from .custom_format import COLORS
 from .filtering import SheetFilter
+from .pivot import Pivot, PivotCell, layout as pivot_layout
 from .sorting import sorted_rows
 from .numformat import (
     DATE_KINDS,
@@ -48,6 +49,7 @@ UNDO_LIMIT = 1000
 KEEP = object()  # (set_cells: the filter as it is)
 DEFAULT_TITLE = "Sheet1"
 _EVALUATING: set = set()  # (sheet, cell) formulas being worked out, across sheets: met again, they're circular
+_PIVOTING: set = set()  # sheets whose pivot tables are being worked out (their sources can't see them)
 
 def _moved_block(block, move):
     """A merged block once its cells move (move(row, col) is a cell's new
@@ -66,10 +68,12 @@ def _moved_block(block, move):
 
 class _CellsCommand(QUndoCommand):
     """One undoable change: the raw text, number formats, and text styles of
-    some cells, cell and column names, merged cells, and the filter, before
-    and after, each as a (texts, formats, styles, names, columns, merges,
-    filter) tuple: dicts, the whole set of merges (None if they don't
-    change), and the filter (KEEP if it doesn't; None if there's none)."""
+    some cells, cell and column names, merged cells, the filter, and the
+    pivot tables, before and after, each as a (texts, formats, styles,
+    names, columns, merges, filter, pivots) tuple: dicts, the whole set of
+    merges (None if they don't change), the filter (KEEP if it doesn't;
+    None if there's none), and all the pivot tables (KEEP if they don't
+    change)."""
 
     def __init__(self, model, before: tuple, after: tuple, description: str, show: bool = True):
         super().__init__(description)
@@ -157,6 +161,13 @@ class SheetModel(QAbstractTableModel):
         self._merges: set[tuple[int, int, int, int]] = set()
         # The filter (Data > Create a Filter), if there is one.
         self._filter: SheetFilter | None = None
+        # Pivot tables (Insert > Pivot Table…), and, worked out when needed,
+        # what they show: cell -> PivotCell, and each one's (top, left,
+        # bottom, right), and why one shows #REF! (at its corner).
+        self._pivots: tuple[Pivot, ...] = ()
+        self._pivot_cells: dict | None = None
+        self._pivot_blocks: dict = {}
+        self._pivot_problems: dict = {}
         # Cell names, by names.key(name): (the name as typed, the (row, col) it
         # names, or None if that cell was deleted).
         self._names: dict[str, tuple[str, tuple[int, int] | None]] = {}
@@ -190,12 +201,16 @@ class SheetModel(QAbstractTableModel):
             return self.display_text(row, col)
         if role == Qt.FontRole:
             style = self._styles.get((row, col))
+            pivot_cell = self._pivot_cell((row, col))
+            bold = pivot_cell is not None and pivot_cell.bold  # (a pivot table's headers and totals)
             if style is None:
-                return None
+                if not bold:
+                    return None
+                style = PLAIN
             font = QFont()  # (its size is the view's, zoomed: the delegate sets a cell's own)
             if style.font is not None:
                 font.setFamily(style.font)
-            font.setBold(style.bold)
+            font.setBold(style.bold or bold)
             font.setItalic(style.italic)
             font.setStrikeOut(style.strikethrough)
             return font
@@ -221,6 +236,8 @@ class SheetModel(QAbstractTableModel):
         if role == Qt.BackgroundRole:
             style = self._styles.get((row, col))
             return QColor(style.fill) if style is not None and style.fill is not None else None
+        if role == Qt.ToolTipRole:
+            return self._pivot_problems.get((row, col)) if self._pivots else None
         return None
 
     def setData(self, index, value, role=Qt.EditRole):
@@ -262,14 +279,14 @@ class SheetModel(QAbstractTableModel):
                   styles: dict[tuple[int, int], CellStyle | None] | None = None,
                   names: dict[str, tuple | None] | None = None,
                   columns: dict[str, int | None] | None = None,
-                  merges=None, sheet_filter=KEEP, show: bool = True) -> None:
+                  merges=None, sheet_filter=KEEP, show: bool = True, pivots=KEEP) -> None:
         """Set many cells' text, and optionally their number formats and text
         styles, and cell names (each keyed by names.key(name), as (name,
         cell) entries), and column names (name -> column index), where None
         removes one, the merged cells (all of them: (top, left, bottom,
-        right) blocks), and the filter (a SheetFilter, None for none), as
-        one undoable step (which, undone or redone, goes to this sheet if
-        `show`),
+        right) blocks), the filter (a SheetFilter, None for none), and the
+        pivot tables (all of them), as one undoable step (which, undone or
+        redone, goes to this sheet if `show`),
         recalculating and notifying views a single time. `description` names
         the step in the Undo menu.
 
@@ -297,12 +314,16 @@ class SheetModel(QAbstractTableModel):
         filter_before = filter_after = KEEP
         if sheet_filter is not KEEP and sheet_filter != self._filter:
             filter_before, filter_after = self._filter, sheet_filter
+        pivots_before = pivots_after = KEEP
+        if pivots is not KEEP and tuple(pivots) != self._pivots:
+            pivots_before, pivots_after = self._pivots, tuple(pivots)
         if (after or formats_after or styles_after or names_after or columns_after or merges_after is not None
-                or filter_after is not KEEP):
+                or filter_after is not KEEP or pivots_after is not KEEP):
             self.undo_stack.push(_CellsCommand(
                 self, (before, formats_before, styles_before, names_before, columns_before, merges_before,
-                       filter_before),
-                (after, formats_after, styles_after, names_after, columns_after, merges_after, filter_after),
+                       filter_before, pivots_before),
+                (after, formats_after, styles_after, names_after, columns_after, merges_after, filter_after,
+                 pivots_after),
                 description, show))
 
     def _completed(self, writes: dict, formats: dict) -> dict:
@@ -362,15 +383,20 @@ class SheetModel(QAbstractTableModel):
     def _apply_angle_unit(self, unit: str) -> None:
         self._angle_unit = unit
         self._values.clear()
+        self._pivot_cells = None
         self._tell_workbook()
         self.angle_unit_changed.emit(unit)
         self.contents_changed.emit()
-        if self._formula_keys:
+        if self._formula_keys or self._pivots:
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
 
     def _apply(self, texts: dict, formats: dict, styles: dict, names: dict, columns: dict, merges=None,
-               sheet_filter=KEEP, from_history: bool = False) -> None:
+               sheet_filter=KEEP, pivots=KEEP, from_history: bool = False) -> None:
         changed = {key for key, text in texts.items() if self._store(key, text)}
+        if pivots is not KEEP:
+            for pivot in {*self._pivots, *pivots}:  # (their corners, for selecting)
+                changed.add((pivot.row, pivot.col))
+            self._pivots = tuple(pivots)
         if sheet_filter is not KEEP:
             for each in (self._filter, sheet_filter):  # (its header, for selecting)
                 if each is not None:
@@ -425,9 +451,10 @@ class SheetModel(QAbstractTableModel):
         changed = sorted(changed)
         self._values.clear()
         self._inferred_formats.clear()
+        self._pivot_cells = None
         self._tell_workbook()
         self.contents_changed.emit()
-        if self._formula_keys:
+        if self._formula_keys or self._pivots:
             # Any formula might depend on these cells, so refresh the whole sheet.
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
         else:
@@ -460,7 +487,7 @@ class SheetModel(QAbstractTableModel):
                          dict(self._styles), self._angle_unit,
                          {name: cell for name, cell in self._names.values()},
                          dict(self._column_names), merges=sorted(self._merges), filter=self._filter,
-                         name=self.title)
+                         name=self.title, pivots=list(self._pivots))
 
     def load_sheet_data(self, sheet: SheetData, clear_history: bool = True) -> None:
         """Replace the whole sheet, including its size (and the undo history,
@@ -477,6 +504,8 @@ class SheetModel(QAbstractTableModel):
         self._column_names = dict(sheet.column_names)
         self._merges = set(sheet.merges)
         self._filter = sheet.filter
+        self._pivots = tuple(sheet.pivots)
+        self._pivot_cells = None
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
@@ -647,9 +676,14 @@ class SheetModel(QAbstractTableModel):
         # Names follow their cells; a deleted cell's name is kept, as #REF!.
         moved_names = {name_key: (name, move(*cell) if cell else None)
                        for name_key, (name, cell) in self._names.items()}
-        # Other sheets' formulas follow these cells too (Sheet2!A1), in the same step.
-        elsewhere = [(other, writes) for other in (self.workbook.sheets() if self.workbook else []) if other is not self
-                     and (writes := other._references_moved(self.title, move, move_range))]
+        # Other sheets' formulas follow these cells too (Sheet2!A1), as do
+        # pivot tables of them, in the same step.
+        elsewhere = []
+        for other in self.workbook.sheets() if self.workbook else []:
+            if other is not self:
+                writes, pivots = other._references_moved(self.title, move, move_range)
+                if writes or pivots is not KEEP:
+                    elsewhere.append((other, writes, pivots))
         if elsewhere:
             self.undo_stack.beginMacro(description)
         self.set_cells(
@@ -661,22 +695,114 @@ class SheetModel(QAbstractTableModel):
             columns,
             merges=filter(None, (_moved_block(block, move) for block in self._merges)),
             sheet_filter=self._filter.moved(move) if self._filter is not None else KEEP,
+            pivots=tuple(filter(None, (pivot.moved(move, True, same_sheet(pivot.source, self.title))
+                                       for pivot in self._pivots))) if self._pivots else KEEP,
         )
-        for other, writes in elsewhere:
-            other.set_cells(writes, description, show=False)
+        for other, writes, pivots in elsewhere:
+            other.set_cells(writes, description, show=False, pivots=pivots)
         if elsewhere:
             self.undo_stack.endMacro()
 
-    def _references_moved(self, title: str, move, move_range) -> dict:
+    def _references_moved(self, title: str, move, move_range) -> tuple[dict, object]:
         """This sheet's formulas whose references to sheet `title`'s cells
-        change as those cells move (see _rearrange): cell -> new formula."""
+        change as those cells move (see _rearrange), as cell -> new formula;
+        and its pivot tables, if any have a source there (else KEEP)."""
         writes = {}
         for key in self._formula_keys:
             text = self._cells[key]
             moved = move_references(text, move, move_range, (), None, title, home=False)
             if moved != text:
                 writes[key] = moved
-        return writes
+        pivots = tuple(pivot.moved(move, False, True) if same_sheet(pivot.source, title) else pivot
+                       for pivot in self._pivots)
+        return writes, pivots if pivots != self._pivots else KEEP
+
+    # --- Pivot tables ---
+
+    def pivots(self) -> tuple[Pivot, ...]:
+        return self._pivots
+
+    def set_pivots(self, pivots, description: str, show: bool = True) -> None:
+        """All the sheet's pivot tables, as one undoable step."""
+        self.set_cells({}, description, pivots=tuple(pivots), show=show)
+
+    def pivot_at(self, row: int, col: int) -> Pivot | None:
+        """The pivot table showing in the cell, if there's one."""
+        self._pivot_output()
+        return next((pivot for pivot, (top, left, bottom, right) in self._pivot_blocks.items()
+                     if top <= row <= bottom and left <= col <= right), None)
+
+    def pivot_block(self, pivot: Pivot) -> tuple[int, int, int, int] | None:
+        """Where a pivot table shows: (top, left, bottom, right)."""
+        self._pivot_output()
+        return self._pivot_blocks.get(pivot)
+
+    def pivot_room_problem(self, pivot: Pivot, others=None) -> str | None:
+        """Why a pivot table can't go where it says (as it would cover cells
+        with something in them, or another pivot table), if it can't.
+        `others` are the pivot tables it would go with (else the sheet's)."""
+        self._pivot_output()
+        block = _block_of(pivot, pivot_layout(pivot, self._sheet_titled(pivot.source)))
+        if block[2] >= self._rows or block[3] >= self._cols:
+            return "There isn't room for it there: it would go past the edge of the sheet."
+        blocked = sorted(key for key in self._cells if _in_range(key, block))
+        if blocked:
+            return f"It would cover {cell_name(*blocked[0])}, which has something in it."
+        blocks = {other: self._pivot_blocks.get(other) for other in (self._pivots if others is None else others)}
+        if any(other_block and _overlap(block, other_block) for other_block in blocks.values()):
+            return "It would cover another pivot table."
+        return None
+
+    def _sheet_titled(self, title: str):
+        if self.workbook is not None:
+            return self.workbook.sheet_named(title)
+        return self if same_sheet(title, self.title) else None
+
+    def _pivot_output(self) -> dict:
+        """What the pivot tables show: cell -> PivotCell (worked out once
+        after each change; empty while they're being worked out, so their
+        sources can't see them)."""
+        if not self._pivots:
+            self._pivot_blocks, self._pivot_problems = {}, {}
+            return {}
+        if self._pivot_cells is None:
+            if self in _PIVOTING:
+                return {}
+            _PIVOTING.add(self)
+            try:
+                self._pivot_cells = self._lay_out_pivots()
+            finally:
+                _PIVOTING.discard(self)
+        return self._pivot_cells
+
+    def _lay_out_pivots(self) -> dict:
+        cells, self._pivot_blocks, self._pivot_problems = {}, {}, {}
+        for pivot in self._pivots:
+            corner = (pivot.row, pivot.col)
+            shown = pivot_layout(pivot, self._sheet_titled(pivot.source))
+            block = _block_of(pivot, shown)
+            blocked = sorted(key for key in self._cells if _in_range(key, block))
+            covered = any(_overlap(block, other) for other in self._pivot_blocks.values())
+            if blocked or covered:
+                where = cell_name(*blocked[0]) if blocked else "another pivot table"
+                self._pivot_problems[corner] = (f"This pivot table needs room: {where} is in the way. "
+                                                "Clear it, or move the pivot table, to show it.")
+                shown, block = {(0, 0): PivotCell(CellError(REF_ERROR))}, (*corner, *corner)
+                if corner in self._cells:
+                    continue  # (not even its corner's free)
+            for (dr, dc), cell in shown.items():
+                if pivot.row + dr < self._rows and pivot.col + dc < self._cols:
+                    cells[(pivot.row + dr, pivot.col + dc)] = cell
+            self._pivot_blocks[pivot] = block
+        return cells
+
+    def _pivot_cell(self, key) -> PivotCell | None:
+        return self._pivot_output().get(key) if self._pivots else None
+
+    def content(self, row: int, col: int) -> str:
+        """The cell's text to copy: as typed, or what a pivot table shows there."""
+        cell = self._pivot_cell((row, col))
+        return self.display_text(row, col) if cell is not None else self.get_cell(row, col)
 
     # --- In a workbook ---
 
@@ -692,11 +818,12 @@ class SheetModel(QAbstractTableModel):
             self.workbook.sheet_changed(self)
 
     def recalculate(self) -> None:
-        """Work out every formula again (another sheet they may refer to has
-        changed), and show them."""
+        """Work out every formula and pivot table again (another sheet they
+        may refer to has changed), and show them."""
         self._values.clear()
         self._inferred_formats.clear()
-        if self._formula_keys:
+        self._pivot_cells = None
+        if self._formula_keys or self._pivots:
             self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
 
     # --- The filter ---
@@ -898,25 +1025,41 @@ class SheetModel(QAbstractTableModel):
 
     def used_range(self) -> tuple[int, int, int, int] | None:
         """(top, left, bottom, right) of the block holding every cell with
-        something in it, or None if the sheet is empty."""
-        if not self._cells:
+        something in it (pivot tables too), or None if the sheet is empty."""
+        filled = self._shown_cells()
+        if not filled:
             return None
-        rows = [row for row, _ in self._cells]
-        cols = [col for _, col in self._cells]
+        rows = [row for row, _ in filled]
+        cols = [col for _, col in filled]
         return min(rows), min(cols), max(rows), max(cols)
+
+    def _shown_cells(self) -> set:
+        """The cells showing something: with text, or a pivot table's."""
+        return set(self._cells) | set(self._pivot_output())
 
     def displayed_rows(self) -> list[list[str]]:
         """What each cell shows, from A1 to the last non-empty row and column."""
-        if not self._cells:
+        filled = self._shown_cells()
+        if not filled:
             return []
-        bottom = max(row for row, _ in self._cells)
-        right = max(col for _, col in self._cells)
+        bottom = max(row for row, _ in filled)
+        right = max(col for _, col in filled)
         return [[self.display_text(r, c) for c in range(right + 1)] for r in range(bottom + 1)]
 
     def clear_cells(self, indexes) -> None:
-        self.set_cells({(index.row(), index.column()): "" for index in indexes}, "Clear")
+        """Empty the cells, as one step; a pivot table whose corner's among them goes too."""
+        cells = {(index.row(), index.column()) for index in indexes}
+        kept = tuple(pivot for pivot in self._pivots if (pivot.row, pivot.col) not in cells)
+        self.set_cells(dict.fromkeys(cells, ""), "Clear", pivots=kept if kept != self._pivots else KEEP)
 
     def display_text(self, row: int, col: int) -> str:
+        pivot_cell = self._pivot_cell((row, col))
+        if pivot_cell is not None:
+            value = pivot_cell.value
+            if not isinstance(value, float):
+                return str(value)
+            fmt = self._formats.get((row, col)) or pivot_cell.fmt
+            return format_value(value, fmt) if fmt else format_number(value)
         raw = self.get_cell(row, col)
         value = self.value(row, col)
         if not isinstance(value, float):
@@ -942,7 +1085,8 @@ class SheetModel(QAbstractTableModel):
             return explicit
         raw = self._cells.get(key)
         if raw is None:
-            return None
+            pivot_cell = self._pivot_cell(key)
+            return pivot_cell.fmt if pivot_cell is not None else None
         if key not in self._formula_keys:
             typed = parse_formatted(raw)
             return typed[1] if typed else None
@@ -999,7 +1143,8 @@ class SheetModel(QAbstractTableModel):
             return self._values[key]
         raw = self._cells.get(key)
         if raw is None:
-            return None
+            pivot_cell = self._pivot_cell(key)
+            return pivot_cell.value if pivot_cell is not None else None
         if (self, key) in _EVALUATING:
             return CellError(CIRCULAR_ERROR)  # (by way of another sheet)
         if key in self._formula_keys:
@@ -1109,6 +1254,16 @@ def _in_range(key, bounds) -> bool:
     return top <= key[0] <= bottom and left <= key[1] <= right
 
 
+def _overlap(a, b) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
+def _block_of(pivot: Pivot, shown: dict) -> tuple[int, int, int, int]:
+    """Where a pivot table's layout goes on its sheet: (top, left, bottom, right)."""
+    rows, cols = [row for row, _ in shown], [col for _, col in shown]
+    return pivot.row, pivot.col, pivot.row + max(rows), pivot.col + max(cols)
+
+
 class _FormulaSheet:
     """The sheet as formula evaluation sees it (see formula.evaluate)."""
 
@@ -1142,4 +1297,5 @@ class _FormulaSheet:
         self._check(bottom, right)
         bounds = (top, left, bottom, right)
         keys = [key for key in self.model._cells if _in_range(key, bounds)]
+        keys += [key for key in self.model._pivot_output() if _in_range(key, bounds)]  # (no text there)
         return [self.model.value(*key) for key in keys]

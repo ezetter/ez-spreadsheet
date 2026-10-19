@@ -781,6 +781,51 @@ the work it has done.
   in `~/.zshrc`), or log in with Anthropic's `ant` tool (`ant auth login`).
   Without one, the window explains how to set it up.
 
+## Pivot tables
+
+A pivot table summarizes a table of data: its rows grouped by the values of
+some columns, and maybe its columns by another's, with an aggregate of a
+column in each cell.
+
+1. Select the table, its header row included (with no more than one cell
+   selected, the sheet's data is used). Then choose **Insert > Pivot
+   Table…**, or right-click and choose **Pivot Table…**.
+2. In the dialog, choose:
+   - **Rows**: the columns to group rows by (Add Row for more; the first is
+     outermost).
+   - **Columns**: a column whose values become the columns, or (None).
+   - **Values**: each a column and an aggregate of it: SUM, MEAN, MEDIAN, or
+     STDDEV (Add Value for more).
+   - **Filters**: each a column, and with **Values…** which of its rows to
+     leave in, by value or by condition, as with the sheet's filter.
+   - **Show grand totals**: a Grand Total row, and column too if there are
+     columns.
+3. Click **Choose Where…**, then click the cell for the pivot table's
+   top-left corner, on this sheet or on another (click its tab, or + for a
+   new one, first). Esc cancels. It needs empty cells to go in; if they
+   aren't, the status bar says so and you can click somewhere else.
+
+Groups are sorted as Sort A → Z sorts (numbers as numbers), with empty cells
+last, shown as (Blanks). Text in a value column is skipped, as in formulas.
+Values keep their column's number format, so dollars stay dollars. Headers
+and totals are bold.
+
+A pivot table keeps up with its source as it changes: edits, rows added just
+below the table (it takes them in), and rows or columns inserted or deleted
+(it grows, shrinks, and moves with them, on either sheet). Renaming the
+source's sheet keeps it. If the source's sheet is deleted, it shows `#REF!`
+until Undo brings the sheet back.
+
+Its cells hold no text of their own. The bar above the grid shows their
+value in gray, formulas can use them (`=H2*2`, `=SUM(H2:H9)`), and Copy
+copies what they show. Typing in one, or a pivot table growing into cells
+that have something in them, makes it show `#REF!` at its corner. Hover
+over that to see which cell's in the way, and clear it to bring the table
+back. In a pivot table, Insert > Pivot Table… (or right-click) becomes
+**Edit Pivot Table…**, and right-clicking also offers **Delete Pivot
+Table**. Deleting a block of cells that includes its corner deletes it too.
+Making, editing, and deleting pivot tables can each be undone.
+
 ## Find and replace
 
 **Edit > Find and Replace…** (Cmd+F, or Cmd+Shift+H as in Google Sheets)
@@ -843,14 +888,16 @@ EZ Sheet. A new sheet joins it when it's first saved.
 Spreadsheets are saved as `.ezs` files: JSON holding each sheet, by its
 name: each cell's raw text (formulas, not their results) under its cell name,
 the angle unit for `SIN`, `COS`, and `TAN`, and any number formats, styles,
-cell and column names, merged cells, and the filter. Then the sheet shown
+cell and column names, merged cells, the filter, and pivot tables (under
+`"pivots"`, each with its corner, its source's sheet and range, and what it
+shows). Then the sheet shown
 (`"active"`, left out for the first) and the notebook (as a Jupyter notebook
 document, under `"notebook"`), e.g.
 
 ```json
 {
   "format": "ezsheet",
-  "version": 10,
+  "version": 11,
   "sheets": [
     {
       "name": "Sheet1",
@@ -884,7 +931,8 @@ document, under `"notebook"`), e.g.
 }
 ```
 
-Files saved before version 10 held one sheet, and open as Sheet1.
+Files saved before version 10 held one sheet, and open as Sheet1. Version
+11 added pivot tables.
 
 Saves go to a temporary file that then replaces the original, so a failed save
 never leaves a half-written file. New files get your normal default

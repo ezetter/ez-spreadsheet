@@ -18,25 +18,24 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from .filtering import BLANK, CONDITIONS, NO_VALUE, ColumnFilter
-
-BLANKS = "(Blanks)"  # how the list shows an empty cell's value
+from .filtering import BLANK, BLANKS, CONDITIONS, NO_VALUE, ColumnFilter
 
 
 class FilterMenu(QMenu):
     """For one column: `values` are its values as its cells show them
     (sorted, "" for empty), and `current` its ColumnFilter now. `applied`
-    gives the new ColumnFilter on OK; `sort` asks to sort by the column."""
+    gives the new ColumnFilter on OK; `sort` asks to sort by the column
+    (unless not `sortable`: then there's no sorting)."""
 
     applied = Signal(object)
     sort = Signal(bool)  # ascending
 
-    def __init__(self, values: list[str], current: ColumnFilter, parent=None):
+    def __init__(self, values: list[str], current: ColumnFilter, parent=None, sortable: bool = True):
         super().__init__(parent)
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(10, 8, 10, 8)
-        for ascending, label in ((True, "Sort A → Z"), (False, "Sort Z → A")):
+        for ascending, label in ((True, "Sort A → Z"), (False, "Sort Z → A")) if sortable else ():
             button = QPushButton(label)
             button.setFlat(True)
             button.setStyleSheet("text-align: left;")

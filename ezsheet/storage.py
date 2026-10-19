@@ -19,7 +19,7 @@ SIN, COS, and TAN take angles in, and each non-empty cell's raw text
 A sheet's number formats, text styles, cell names, and column names, if
 any, follow under "formats", "styles", "names" (name to cell, or null for a
 name whose cell was deleted), and "column_names" (name to column letters);
-then "merges" and "filter". "active" is the sheet shown (left out for the
+then "merges", "filter", and "pivots" (see pivot.to_json). "active" is the sheet shown (left out for the
 first). The notebook, if it has cells, is under "notebook", as a Jupyter
 notebook (.ipynb) document. Before version 10 a file held one sheet, its
 parts at the top level.
@@ -31,7 +31,7 @@ import tempfile
 from dataclasses import dataclass, field
 
 from . import names as cell_names
-from . import filtering, numformat, textstyle
+from . import filtering, numformat, pivot, textstyle
 from .functions import ANGLE_UNITS, DEGREES
 from .notebook import NotebookFormatError, cells_from_json
 from .numformat import NumberFormat
@@ -39,8 +39,8 @@ from .textstyle import CellStyle
 from .references import cell_name, column_index, column_name, parse_cell_name
 
 FORMAT = "ezsheet"
-VERSION = 10  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
-# 6 column names; 7 the notebook; 8 merged cells; 9 the filter; 10 sheets
+VERSION = 11  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
+# 6 column names; 7 the notebook; 8 merged cells; 9 the filter; 10 sheets; 11 pivot tables
 EXTENSION = ".ezs"
 MAX_TITLE = 100  # a sheet name's longest
 
@@ -63,6 +63,7 @@ class SheetData:
     merges: list[tuple[int, int, int, int]] = field(default_factory=list)  # merged cells' blocks
     filter: object = None  # the sheet's filter (a filtering.SheetFilter), if it has one
     name: str = "Sheet1"  # its tab's
+    pivots: list = field(default_factory=list)  # its pivot tables (pivot.Pivot)
 
 
 @dataclass
@@ -128,6 +129,8 @@ def _sheet_json(sheet: SheetData) -> dict:
                               for top, left, bottom, right in sorted(sheet.merges)]
     if sheet.filter is not None:
         document["filter"] = filtering.to_json(sheet.filter)
+    if sheet.pivots:
+        document["pivots"] = [pivot.to_json(each) for each in sheet.pivots]
     return document
 
 
@@ -283,6 +286,15 @@ def _sheet_from_json(path: str, document: dict) -> SheetData:
         if sheet.filter is None:
             raise SheetFileError(f"{path} is damaged: bad filter.")
         _grow_to_fit(sheet, sheet.filter.top, sheet.filter.right)
+    pivots = document.get("pivots", [])  # absent before version 11, or with none
+    if not isinstance(pivots, list):
+        raise SheetFileError(f"{path} is damaged: bad pivot tables.")
+    for data in pivots:
+        each = pivot.from_json(data)
+        if each is None:
+            raise SheetFileError(f"{path} is damaged: bad pivot table.")
+        sheet.pivots.append(each)
+        _grow_to_fit(sheet, each.row, each.col)
     return sheet
 
 

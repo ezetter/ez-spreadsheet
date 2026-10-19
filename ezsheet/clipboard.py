@@ -59,7 +59,7 @@ class ClipboardController:
         top, left, bottom, right = self.view.selection_bounds()
         rows = range(top, bottom + 1)
         cols = range(left, right + 1)
-        cells = tuple(tuple(self.model.get_cell(r, c) for c in cols) for r in rows)
+        cells = tuple(tuple(self.model.content(r, c) for c in cols) for r in rows)  # (a pivot table's: as shown)
         formats = tuple(tuple(self.model.cell_format(r, c) for c in cols) for r in rows)
         styles = tuple(tuple(self.model.cell_style(r, c) for c in cols) for r in rows)
         text = to_tsv([self.model.display_text(r, c) for c in cols] for r in rows)

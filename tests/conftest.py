@@ -58,6 +58,10 @@ class Dialogs:
         self.sheet_name_prompts = []  # the name it started with, each time
         self.delete_sheet_answer = True  # whether to delete a sheet with something in it
         self.delete_sheet_prompts = []  # the sheet's name, each time
+        # The Pivot Table dialog's answer: what to change of what it starts with (rows, column, values,
+        # filters, totals), as a dict; None cancels.
+        self.pivot_answer = {}
+        self.pivot_prompts = []  # (what it's of, its columns' labels, the pivot table it started as, editing)
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +108,16 @@ def dialogs(monkeypatch):
         return dialogs.delete_sheet_answer
 
     monkeypatch.setattr(MainWindow, "_ask_delete_sheet", ask_delete_sheet)
+
+    def ask_pivot(window, where, labels, values_of, start, editing):
+        dialogs.pivot_prompts.append((where, labels, start, editing))
+        if dialogs.pivot_answer is None:
+            return None
+        choice = {"rows": start.rows, "column": start.column, "values": start.values, "filters": start.filters,
+                  "totals": start.totals}
+        return {**choice, **dialogs.pivot_answer}
+
+    monkeypatch.setattr(MainWindow, "_ask_pivot", ask_pivot)
 
     def ask_dataframe(window, frames, current, name, source, problem):
         dialogs.frame_name_prompts.append((name, source))

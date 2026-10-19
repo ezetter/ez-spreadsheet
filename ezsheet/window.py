@@ -118,6 +118,8 @@ from .sort_dialog import SortDialog
 from .sorting import ARROWS, ASCENDING, DESCENDING, has_header, sorted_rows
 from .filter_menu import FilterMenu
 from .filtering import SheetFilter
+from .pivot import Pivot, headers, source_bottom
+from .pivot_dialog import PivotDialog
 from .find_dialog import FindDialog
 from .search import cells_in_order
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
@@ -747,6 +749,8 @@ class MainWindow(QMainWindow):
         self.edit_bar.installEventFilter(self)
         QApplication.instance().focusChanged.connect(self._update_reference_mode)
 
+        self.view.escape_pressed.connect(self._cancel_placing)
+        self.view.selectionModel().currentChanged.connect(self._name_pivot_actions)
         self.view.setCurrentIndex(self.model.index(0, 0))
         self.view.setFocus()
         self._show_tabs()
@@ -1013,6 +1017,124 @@ class MainWindow(QMainWindow):
         box.exec()
         return box.clickedButton() is delete
 
+    # --- Pivot tables ---
+
+    def _name_pivot_actions(self, *_args) -> None:
+        """In a pivot table, Pivot Table… changes it, and it can be deleted."""
+        current = self.view.currentIndex()
+        here = self.model.pivot_at(current.row(), current.column()) is not None
+        self.pivot_action.setText("Edit Pivot Table…" if here else "Pivot Table…")
+        self.delete_pivot_action.setVisible(here)
+
+    def pivot_table(self) -> bool:
+        """Insert > Pivot Table…: one of the selected cells (or, with no more
+        than one selected, the sheet's data), its first row the header,
+        asking what it shows and then where it goes. In a pivot table,
+        change it."""
+        self._commit_pending_edit()
+        current = self.view.currentIndex()
+        here = self.model.pivot_at(current.row(), current.column())
+        if here is not None:
+            return self.edit_pivot(here)
+        if len(self._selected_cells()) > 1:
+            block = self.view.selection_bounds()
+        else:
+            block = self.model.data_block()
+            if block is None:
+                self._show_status("There's nothing to make a pivot table of. Select a table, with its header row.")
+                return False
+        top, left, bottom, right = block
+        if bottom <= top:
+            self._show_status("A pivot table needs a header row with rows of data below it. Select them all.")
+            return False
+        sheet = self.model.current_sheet()
+        numbers = [col for col in range(left, right + 1)
+                   if any(isinstance(sheet.value(row, col), float) for row in range(top + 1, bottom + 1))]
+        start = Pivot(0, 0, sheet.title, block, rows=(left,), values=((numbers[-1] if numbers else right, "SUM"),))
+        choice = self._ask_pivot(start.source_name(), headers(sheet, block), self._values_of(sheet, block), start,
+                                 False)
+        if choice is None:
+            return False
+        self.autosum.cancel()
+        self._placing = dataclasses.replace(start, **choice)
+        self.view.pick_handler = self._place_pivot
+        self.view.viewport().setCursor(Qt.CrossCursor)
+        self._show_status("Click the cell for the pivot table's top-left corner: on this sheet, or click another "
+                          "sheet's tab first. Esc cancels.")
+        return True
+
+    def _place_pivot(self, index) -> bool:
+        """The cell clicked for a new pivot table's corner: put it there, if there's room."""
+        pivot = dataclasses.replace(self._placing, row=index.row(), col=index.column())
+        sheet = self.model.current_sheet()
+        problem = sheet.pivot_room_problem(pivot)
+        if problem:
+            self._show_status(f"{problem} Click another cell, or press Esc.")
+            return False
+        self._stop_placing()
+        sheet.set_pivots(sheet.pivots() + (pivot,), "Add Pivot Table")
+        self.view.select_range(*sheet.pivot_block(pivot))
+        self._show_status(f"Made a pivot table of {pivot.source_name()} at {cell_name(pivot.row, pivot.col)}. "
+                          "It keeps up as they change.")
+        return True
+
+    def _stop_placing(self) -> None:
+        self._placing = None
+        self.view.pick_handler = None
+        self.view.viewport().unsetCursor()
+
+    def _cancel_placing(self) -> None:
+        if self._placing is not None:
+            self._stop_placing()
+            self._show_status("No pivot table made.")
+
+    def edit_pivot(self, pivot: Pivot) -> bool:
+        """Change what a pivot table shows (Edit Pivot Table…)."""
+        source = self.model.sheet_named(pivot.source)
+        if source is None or pivot.block is None:
+            self._show_status(f"This pivot table's source, {pivot.source_name()}, is gone. "
+                              "Undo, or delete the pivot table.")
+            return False
+        choice = self._ask_pivot(pivot.source_name(), headers(source, pivot.block),
+                                 self._values_of(source, pivot.block), pivot, True)
+        if choice is None:
+            return False
+        sheet = self.model.current_sheet()
+        changed = dataclasses.replace(pivot, **choice)
+        others = tuple(other for other in sheet.pivots() if other != pivot)
+        problem = sheet.pivot_room_problem(changed, others)
+        sheet.set_pivots(tuple(changed if other == pivot else other for other in sheet.pivots()), "Edit Pivot Table")
+        self._show_status(f"{problem} It shows #REF! until there's room." if problem else "Changed the pivot table.")
+        return True
+
+    def delete_pivot(self) -> bool:
+        """Delete the pivot table at the current cell."""
+        current = self.view.currentIndex()
+        pivot = self.model.pivot_at(current.row(), current.column())
+        if pivot is None:
+            return False
+        sheet = self.model.current_sheet()
+        sheet.set_pivots(tuple(other for other in sheet.pivots() if other != pivot), "Delete Pivot Table")
+        self._name_pivot_actions()
+        self._show_status("Deleted the pivot table.")
+        return True
+
+    def _values_of(self, sheet, block):
+        """For a pivot table's filters: a source column's values, as its cells show them, sorted."""
+        top, _left, _bottom, _right = block
+        bottom = source_bottom(sheet, block)
+
+        def values_of(col: int) -> list[str]:
+            rows = sorted_rows(range(top + 1, bottom + 1), sheet.value, [(col, ASCENDING)])
+            return list(dict.fromkeys(sheet.display_text(row, col) for row in rows))
+
+        return values_of
+
+    def _ask_pivot(self, where: str, labels: dict, values_of, start: Pivot, editing: bool) -> dict | None:
+        """What a pivot table shows (see PivotDialog.choice), or None if cancelled."""
+        dialog = PivotDialog(self, where, labels, values_of, start, editing)
+        return dialog.choice() if dialog.exec() == QDialog.Accepted else None
+
     # --- Find and replace ---
 
     def find_and_replace(self) -> FindDialog:
@@ -1165,6 +1287,8 @@ class MainWindow(QMainWindow):
         menu.addAction(self.name_cell_action)
         menu.addAction(self.name_column_action)
         menu.addSeparator()
+        menu.addAction(self.pivot_action)
+        menu.addAction(self.delete_pivot_action)
         self._add_notebook_menu(menu)
         menu.addAction(self.ask_claude_action)
         self.context_menu = menu
@@ -1182,6 +1306,7 @@ class MainWindow(QMainWindow):
 
     def _show_context_menu(self, pos):
         self._commit_pending_edit()
+        self._name_pivot_actions()
         self.context_menu.popup(self.view.viewport().mapToGlobal(pos))
 
     def _build_claude_menu(self):
@@ -1313,6 +1438,13 @@ class MainWindow(QMainWindow):
         self.add_sheet_action.setToolTip("Add a sheet to the spreadsheet")
         self.add_sheet_action.triggered.connect(lambda _checked=False: self.add_sheet())
         menu.addAction(self.add_sheet_action)
+        self.pivot_action = QAction("Pivot Table…", self)
+        self.pivot_action.setToolTip("Summarize the selected cells in a pivot table, or change the one here")
+        self.pivot_action.triggered.connect(lambda _checked=False: self.pivot_table())
+        menu.addAction(self.pivot_action)
+        self.delete_pivot_action = QAction("Delete Pivot Table", self)
+        self.delete_pivot_action.triggered.connect(lambda _checked=False: self.delete_pivot())
+        self._placing = None  # a new pivot table, while its place is being chosen
         menu.addSeparator()
         # Notebook: open it as it is, or add the selected cells as a DataFrame,
         # or as a DataFrame and a chart.
@@ -3358,6 +3490,10 @@ class MainWindow(QMainWindow):
         reference = cell_name(index.row(), index.column())
         self.cell_label.setText(f"{reference} ({name})" if name else reference)
         self.edit_bar.setText(self.model.get_cell(index.row(), index.column()))
+        # A pivot table's cell holds no text: what it shows, in gray.
+        empty = not self.model.get_cell(index.row(), index.column())
+        shown = self.model.content(index.row(), index.column()) if empty and self.model.pivots() else ""
+        self.edit_bar.setPlaceholderText(shown or "Cell contents")
 
     def _store_edit_bar(self):
         index = self.view.currentIndex()
