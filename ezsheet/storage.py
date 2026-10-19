@@ -1,22 +1,28 @@
-"""Reading and writing sheets as .ezs files.
+"""Reading and writing spreadsheets as .ezs files.
 
-A .ezs file is JSON holding each non-empty cell's raw text (formulas
-included) keyed by its A1 name, and the unit SIN, COS, and TAN take angles in:
+A .ezs file is JSON holding its sheets, each with its name, size, the unit
+SIN, COS, and TAN take angles in, and each non-empty cell's raw text
+(formulas included) keyed by its A1 name:
 
     {
       "format": "ezsheet",
-      "version": 6,
-      "rows": 1000,
-      "columns": 52,
-      "angles": "degrees",
-      "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"}
+      "version": 10,
+      "sheets": [
+        {"name": "Sheet1", "rows": 1000, "columns": 52, "angles": "degrees",
+         "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"}},
+        {"name": "Totals", "rows": 1000, "columns": 52, "angles": "degrees",
+         "cells": {"A1": "=SUM(Sheet1!B2:B9)"}}
+      ],
+      "active": 1
     }
 
-Number formats, text styles, cell names, and column names, if any, follow
-under "formats", "styles", "names" (name to cell, or null for a name whose
-cell was deleted), and "column_names" (name to column letters). The sheet's
-notebook, if it has cells, is under "notebook", as a Jupyter notebook (.ipynb)
-document.
+A sheet's number formats, text styles, cell names, and column names, if
+any, follow under "formats", "styles", "names" (name to cell, or null for a
+name whose cell was deleted), and "column_names" (name to column letters);
+then "merges" and "filter". "active" is the sheet shown (left out for the
+first). The notebook, if it has cells, is under "notebook", as a Jupyter
+notebook (.ipynb) document. Before version 10 a file held one sheet, its
+parts at the top level.
 """
 
 import json
@@ -33,9 +39,10 @@ from .textstyle import CellStyle
 from .references import cell_name, column_index, column_name, parse_cell_name
 
 FORMAT = "ezsheet"
-VERSION = 9  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
-# 6 column names; 7 the notebook; 8 merged cells; 9 the filter
+VERSION = 10  # 2 number formats; 3 bold and italic; 4 the angle unit; 5 cell names;
+# 6 column names; 7 the notebook; 8 merged cells; 9 the filter; 10 sheets
 EXTENSION = ".ezs"
+MAX_TITLE = 100  # a sheet name's longest
 
 
 class SheetFileError(Exception):
@@ -55,13 +62,44 @@ class SheetData:
     notebook: dict | None = None  # a Jupyter notebook (.ipynb) document, if there are notebook cells
     merges: list[tuple[int, int, int, int]] = field(default_factory=list)  # merged cells' blocks
     filter: object = None  # the sheet's filter (a filtering.SheetFilter), if it has one
+    name: str = "Sheet1"  # its tab's
+
+
+@dataclass
+class WorkbookData:
+    """A spreadsheet: its sheets (each named), the one shown, and the notebook."""
+
+    sheets: list[SheetData]
+    active: int = 0
+    notebook: dict | None = None  # a Jupyter notebook (.ipynb) document, if there are notebook cells
 
 
 def save_sheet(path: str, sheet: SheetData) -> None:
+    """Save a spreadsheet of just one sheet (and its notebook)."""
+    save_workbook(path, WorkbookData([sheet], notebook=sheet.notebook))
+
+
+def load_sheet(path: str) -> SheetData:
+    """A spreadsheet's sheet shown (with the notebook)."""
+    book = load_workbook(path)
+    sheet = book.sheets[book.active]
+    sheet.notebook = book.notebook
+    return sheet
+
+
+def save_workbook(path: str, book: WorkbookData) -> None:
+    document = {"format": FORMAT, "version": VERSION, "sheets": [_sheet_json(sheet) for sheet in book.sheets]}
+    if book.active:
+        document["active"] = book.active
+    if book.notebook:
+        document["notebook"] = book.notebook  # last, as it can be long
+    write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+
+
+def _sheet_json(sheet: SheetData) -> dict:
     ordered = sorted(sheet.cells.items())  # row by row, so files diff nicely
     document = {
-        "format": FORMAT,
-        "version": VERSION,
+        "name": sheet.name,
         "rows": sheet.rows,
         "columns": sheet.cols,
         "angles": sheet.angle_unit,
@@ -90,9 +128,7 @@ def save_sheet(path: str, sheet: SheetData) -> None:
                               for top, left, bottom, right in sorted(sheet.merges)]
     if sheet.filter is not None:
         document["filter"] = filtering.to_json(sheet.filter)
-    if sheet.notebook:
-        document["notebook"] = sheet.notebook  # last, as it can be long
-    write_text_atomically(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+    return document
 
 
 def write_text_atomically(path: str, text: str) -> None:
@@ -124,7 +160,7 @@ def _file_mode(path: str) -> int:
         return 0o666 & ~umask
 
 
-def load_sheet(path: str) -> SheetData:
+def load_workbook(path: str) -> WorkbookData:
     try:
         with open(path, encoding="utf-8") as f:
             document = json.load(f)
@@ -139,6 +175,45 @@ def load_sheet(path: str) -> SheetData:
     if not isinstance(version, int) or version > VERSION:
         raise SheetFileError(f"{path} was saved by a newer version of EZ Sheet.")
 
+    if version < 10:
+        sheets = [_sheet_from_json(path, document)]  # one sheet, at the top level
+        active = 0
+    else:
+        parts, active = document.get("sheets"), document.get("active", 0)
+        if not isinstance(parts, list) or not parts or not all(isinstance(part, dict) for part in parts):
+            raise SheetFileError(f"{path} is damaged: bad sheets.")
+        sheets = [_sheet_from_json(path, part) for part in parts]
+        if not isinstance(active, int) or isinstance(active, bool) or not 0 <= active < len(sheets):
+            raise SheetFileError(f"{path} is damaged: bad sheet shown.")
+        titles = [sheet.name for sheet in sheets]
+        problem = next((title_problem(title, titles[:i]) for i, title in enumerate(titles)
+                        if title_problem(title, titles[:i])), None)
+        if problem:
+            raise SheetFileError(f"{path} is damaged: {problem}")
+    book = WorkbookData(sheets, active)
+    if "notebook" in document:  # absent before version 7, or with no notebook cells
+        try:
+            cells_from_json(document["notebook"])
+        except NotebookFormatError as e:
+            raise SheetFileError(f"{path} is damaged: {e}.") from None
+        book.notebook = document["notebook"]
+    return book
+
+
+def title_problem(title, others) -> str | None:
+    """Why a sheet can't be named `title`, among sheets named `others`."""
+    if not isinstance(title, str) or not title.strip():
+        return "A sheet needs a name."
+    if title != title.strip():
+        return "A sheet's name can't start or end with a space."
+    if len(title) > MAX_TITLE:
+        return f"A sheet's name can be at most {MAX_TITLE} characters."
+    if any(other.casefold() == title.casefold() for other in others):
+        return f"There's a sheet named {title} already."
+    return None
+
+
+def _sheet_from_json(path: str, document: dict) -> SheetData:
     rows = document.get("rows")
     cols = document.get("columns")
     cells = document.get("cells", {})
@@ -154,7 +229,7 @@ def load_sheet(path: str) -> SheetData:
     if angle_unit not in ANGLE_UNITS:
         raise SheetFileError(f"{path} is damaged: angles must be degrees or radians.")
 
-    sheet = SheetData(rows, cols, angle_unit=angle_unit)
+    sheet = SheetData(rows, cols, angle_unit=angle_unit, name=document.get("name", "Sheet1"))
     for name, text in cells.items():
         row, col = _cell_key(path, name)
         if not isinstance(text, str):
@@ -208,12 +283,6 @@ def load_sheet(path: str) -> SheetData:
         if sheet.filter is None:
             raise SheetFileError(f"{path} is damaged: bad filter.")
         _grow_to_fit(sheet, sheet.filter.top, sheet.filter.right)
-    if "notebook" in document:  # absent before version 7, or with no notebook cells
-        try:
-            cells_from_json(document["notebook"])
-        except NotebookFormatError as e:
-            raise SheetFileError(f"{path} is damaged: {e}.") from None
-        sheet.notebook = document["notebook"]
     return sheet
 
 

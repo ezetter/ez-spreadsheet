@@ -36,9 +36,9 @@ def test_file_is_readable_json(tmp_path):
     path = tmp_path / "s.ezs"
     save_sheet(str(path), SheetData(10, 5, {(1, 0): "b", (0, 1): "a"}))
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert document == {"format": "ezsheet", "version": VERSION, "rows": 10, "columns": 5,
-                        "angles": "degrees", "cells": {"B1": "a", "A2": "b"}}
-    assert list(document["cells"]) == ["B1", "A2"]  # row by row
+    assert document == {"format": "ezsheet", "version": VERSION, "sheets": [
+        {"name": "Sheet1", "rows": 10, "columns": 5, "angles": "degrees", "cells": {"B1": "a", "A2": "b"}}]}
+    assert list(document["sheets"][0]["cells"]) == ["B1", "A2"]  # row by row
 
 
 def test_failed_save_keeps_old_file(tmp_path, monkeypatch):

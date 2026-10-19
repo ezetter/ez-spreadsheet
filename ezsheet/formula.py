@@ -7,13 +7,18 @@ Grammar (lowest to highest precedence):
     term    := unary (('*' | '/') unary)*
     unary   := ('+' | '-') unary | power
     power   := primary ('^' unary)?
-    primary := NUMBER | REF | '#REF!' | CONSTANT ('(' ')')? | NAME '(' args ')'
+    primary := NUMBER | SHEET? REF | '#REF!' | CONSTANT ('(' ')')? | NAME '(' args ')'
              | '(' expr ')'
     args    := arg (',' arg)*
-    arg     := REF ':' REF | expr
+    arg     := SHEET? REF ':' SHEET? REF | expr
 
 Ranges (A1:B9) appear only as function arguments. A constant such as PI may
 be followed by empty parentheses, PI(), as in other spreadsheets.
+
+A reference may name another sheet of the spreadsheet: Sheet2!A1, or
+'Q1 Sales'!B2:B9 for a name that isn't a single word (a ' inside it is
+doubled: 'Ann''s'!A1). Names and column aliases are each sheet's own, so
+after a sheet's name come only cells.
 
 Exponentiation follows mathematical convention: it binds tighter than unary
 minus (-2^2 = -4) and is right-associative (2^3^2 = 512).
@@ -40,7 +45,8 @@ from .references import column_index, column_name, parse_cell_name
 
 _TOKEN = re.compile(
     r"""\s*(?:
-        (?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)
+        (?P<sheet>(?:'(?:[^']|'')+'|[A-Za-z_][\w.]*)!)
+      | (?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)
       | (?P<ref>(?P<col_anchor>\$?)(?P<col>[A-Za-z]+)(?P<row_anchor>\$?)(?P<row>\d+))(?![\w.(])
       | (?P<error>\#REF!)
       | (?P<name>[A-Za-z_][\w.]*)
@@ -49,6 +55,9 @@ _TOKEN = re.compile(
     re.VERBOSE,
 )
 _NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+_BARE_SHEET = re.compile(r"[A-Za-z_][\w.]*")  # a sheet name that needn't be quoted
+_KINDS = ("sheet", "number", "ref", "error", "name", "op")
+_NO_NAMES = as_names({})  # (another sheet's cells: this sheet's names don't apply)
 
 
 def is_formula(text: str) -> bool:
@@ -79,7 +88,57 @@ def _scan(text: str) -> list[re.Match]:
 
 
 def _token_kind(match: re.Match) -> str:
-    return next(kind for kind in ("number", "ref", "error", "name", "op") if match.group(kind) is not None)
+    return next(kind for kind in _KINDS if match.group(kind) is not None)
+
+
+def sheet_prefix(name: str) -> str:
+    """How a formula names a sheet before a reference: Sheet2!, or 'Q1 Sales'!."""
+    return (name if _BARE_SHEET.fullmatch(name) else "'" + name.replace("'", "''") + "'") + "!"
+
+
+def _sheet_name(token: str) -> str:
+    """The sheet a sheet token (Sheet2!, 'Q1 Sales'!) names."""
+    name = token[:-1]
+    return name[1:-1].replace("''", "'") if name.startswith("'") else name
+
+
+def same_sheet(a: str, b: str) -> bool:
+    """Whether two sheet names are the same sheet's (case doesn't matter)."""
+    return a.casefold() == b.casefold()
+
+
+def _prefixes(matches: list) -> dict[int, str]:
+    """The reference tokens after a sheet's name (both corners of a range
+    after one, as in Sheet2!A1:B9), and the sheet each names."""
+    found = {}
+    for i, match in enumerate(matches):
+        if match.group("sheet") is None or i + 1 >= len(matches) or matches[i + 1].group("ref") is None:
+            continue
+        sheet = _sheet_name(match.group("sheet"))
+        found[i + 1] = sheet
+        if i + 3 < len(matches) and matches[i + 2].group("op") == ":":
+            j = i + 3
+            if matches[j].group("sheet") is not None and j + 1 < len(matches):
+                j += 1  # Sheet2!A1:Sheet2!B9
+            if matches[j].group("ref") is not None:
+                found[j] = sheet
+    return found
+
+
+def rename_sheet(formula: str, old: str, new: str) -> str:
+    """A formula (with its leading '=') naming sheet `new` wherever it named `old`."""
+    body = formula[1:]
+    try:
+        matches = _scan(body)
+    except FormulaError:
+        return formula
+    pieces, pos = [], 0
+    for match in matches:
+        token = match.group("sheet")
+        if token is not None and same_sheet(_sheet_name(token), old):
+            pieces += [body[pos:match.start("sheet")], sheet_prefix(new)]
+            pos = match.end("sheet")
+    return "=" + "".join(pieces) + body[pos:]
 
 
 def tokenize(text: str) -> list[tuple[str, str]]:
@@ -95,7 +154,8 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     `names` (a names.Names, or cell names): a cell name doesn't move. A column
     alias (t1) moves like $C1: its row number changes and its column doesn't.
     A shifted reference that would be spelled like a name gets a $ so it
-    still means the cell (see names.cell_text).
+    still means the cell (see names.cell_text). References to other sheets
+    (Sheet2!A1) shift too, as plain cells.
     """
     names = as_names(names)
     body = formula[1:]
@@ -104,11 +164,12 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     except FormulaError:
         return formula
     endpoints = _range_endpoints(matches)
+    prefixed = _prefixes(matches)
     pieces = []
     pos = 0
     for i, match in enumerate(matches):
         corner = i in endpoints
-        found = _token_cell(match, names, corner)
+        found = _token_cell(match, _NO_NAMES if i in prefixed else names, corner)
         if found is None:
             continue
         (row, col), alias = found
@@ -122,7 +183,7 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
         if row < 0 or col < 0:
             shifted = REF_ERROR
         else:
-            shifted = _cell_token_text(match, (row, col), alias, names, corner)
+            shifted = _cell_token_text(match, (row, col), alias, _NO_NAMES if i in prefixed else names, corner)
         start, stop = _token_span(match)
         pieces.append(body[pos:start])
         pieces.append(shifted)
@@ -131,7 +192,8 @@ def shift_references(formula: str, d_row: int, d_col: int, names=()) -> str:
     return "=" + "".join(pieces)
 
 
-def move_references(formula: str, move, move_range=None, names=(), columns_after=None) -> str:
+def move_references(formula: str, move, move_range=None, names=(), columns_after=None,
+                    sheet: str | None = None, home: bool = True) -> str:
     """Rewrite a formula's references for cells that have moved, such as when
     cells are inserted or deleted. `move(row, col)` gives a cell's new (row,
     col), or None if it's gone (that reference becomes #REF!). `move_range`,
@@ -143,7 +205,11 @@ def move_references(formula: str, move, move_range=None, names=(), columns_after
     definitions do), a column alias follows its cell (staying an alias while
     the cell stays in the named column), and a moved reference spelled like a
     name gets a $. `columns_after` gives the column names' columns once
-    they've moved too (inserting whole columns), if they have."""
+    they've moved too (inserting whole columns), if they have.
+
+    The cells that moved are sheet `sheet`'s: references naming it
+    (Sheet2!A1) follow them, and so do plain ones (A1) if the formula is on
+    that sheet (`home`); references to other sheets stay as they are."""
     names = as_names(names)
     body = formula[1:]
     try:
@@ -151,6 +217,7 @@ def move_references(formula: str, move, move_range=None, names=(), columns_after
     except FormulaError:
         return formula
     endpoints = _range_endpoints(matches)
+    prefixed = _prefixes(matches)
     pieces = []
     pos = 0
 
@@ -163,31 +230,39 @@ def move_references(formula: str, move, move_range=None, names=(), columns_after
     i = 0
     while i < len(matches):
         match = matches[i]
-        found = _token_cell(match, names, i in endpoints)
+        prefix = prefixed.get(i)
+        here = _NO_NAMES if prefix is not None else names
+        found = _token_cell(match, here, i in endpoints)
         if found is None or min(found[0]) < 0:
             i += 1
             continue
-        last_found = None
+        named = prefix is not None and matches[i - 1].group("sheet") is not None
+        start = _token_span(matches[i - 1] if named else match, "sheet")[0]  # (from its sheet's name)
+        last_index = None
         if i + 2 < len(matches) and matches[i + 1].group("op") == ":":
-            last_found = _token_cell(matches[i + 2], names, True)
+            last_index = i + 3 if prefix is not None and matches[i + 2].group("sheet") is not None else i + 2
+        last_found = _token_cell(matches[last_index], here, True) if last_index is not None else None
+        if prefix is None and not home or prefix is not None and (sheet is None or not same_sheet(prefix, sheet)):
+            i = last_index + 1 if last_found is not None else i + 1  # another sheet's cells: not moved
+            continue
         if last_found is not None and move_range is not None:
-            last = matches[i + 2]
+            last = matches[last_index]
             old = (found[0], last_found[0])
             new = move_range(*old)
             if new is None or min(new[0] + new[1]) < 0:
-                replace(_token_span(match)[0], _token_span(last)[1], REF_ERROR)
+                replace(start, _token_span(last)[1], REF_ERROR)
             elif new != old:
                 replace(_token_span(match)[0], _token_span(last)[1],
-                        f"{_cell_token_text(match, new[0], found[1], names, True, columns_after)}:"
-                        f"{_cell_token_text(last, new[1], last_found[1], names, True, columns_after)}")
-            i += 3
+                        f"{_cell_token_text(match, new[0], found[1], here, True, columns_after)}:"
+                        f"{_cell_token_text(last, new[1], last_found[1], here, True, columns_after)}")
+            i = last_index + 1
             continue
         old, alias = found
         new = move(*old)
         if new is None or min(new) < 0:
-            replace(*_token_span(match), REF_ERROR)
+            replace(start, _token_span(match)[1], REF_ERROR)
         elif new != old:
-            replace(*_token_span(match), _cell_token_text(match, new, alias, names, i in endpoints, columns_after))
+            replace(*_token_span(match), _cell_token_text(match, new, alias, here, i in endpoints, columns_after))
         i += 1
     pieces.append(body[pos:])
     return "=" + "".join(pieces)
@@ -221,8 +296,8 @@ def _cell_token_text(match: re.Match, cell: tuple[int, int], alias, names, corne
     return _ref_text(match, cell, names, corner)
 
 
-def _token_span(match: re.Match) -> tuple[int, int]:
-    group = "ref" if match.group("ref") is not None else "name"
+def _token_span(match: re.Match, *groups: str) -> tuple[int, int]:
+    group = next(g for g in (*groups, "ref", "name") if match.group(g) is not None)
     return match.start(group), match.end(group)
 
 
@@ -268,7 +343,8 @@ def parse(text: str, names: dict | None = None):
     """Parse a formula body (without the leading '=') into an AST of tuples:
     ("num", value), ("ref", row, col), ("range", top, left, bottom, right),
     ("err", code), ("neg", operand), ("bin", op, left, right),
-    ("call", name, [args]).
+    ("call", name, [args]); and another sheet's cells, ("xref", sheet, row,
+    col) and ("xrange", sheet, top, left, bottom, right).
 
     `names` (a names.Names, or a dict of cell names to cells) says what names
     mean; a name becomes a reference to its cell, or #REF! if that cell was
@@ -279,7 +355,8 @@ def parse(text: str, names: dict | None = None):
 
 
 def references(node) -> tuple[set[tuple[int, int]], list[tuple[int, int, int, int]]]:
-    """The single cells and the (top, left, bottom, right) ranges an AST refers to."""
+    """The single cells and the (top, left, bottom, right) ranges an AST refers
+    to, on its own sheet (not those naming a sheet: Sheet2!A1)."""
     cells = set()
     ranges = []
     stack = [node]
@@ -333,13 +410,17 @@ def evaluate(node, sheet) -> float:
     """Evaluate an AST against `sheet`, which provides `cell(row, col)` and
     `cells_in(top, left, bottom, right)` returning cell values (None, float,
     str, or CellError) and raising FormulaError(REF_ERROR) off the sheet, and
-    `angle_unit`, which SIN, COS, and TAN take angles in (DEGREES or RADIANS).
+    `angle_unit`, which SIN, COS, and TAN take angles in (DEGREES or RADIANS);
+    and `on(name)`, another sheet by its name, likewise (raising
+    FormulaError(REF_ERROR) if there's none).
     """
     kind = node[0]
     if kind == "num":
         return node[1]
     if kind == "ref":
         return to_number(sheet.cell(node[1], node[2]))
+    if kind == "xref":
+        return to_number(sheet.on(node[1]).cell(node[2], node[3]))
     if kind == "err":
         raise FormulaError(node[1])
     if kind == "neg":
@@ -348,7 +429,7 @@ def evaluate(node, sheet) -> float:
         function = FUNCTIONS[node[1]]
         if function.ranges:
             return _finite(function.compute([_argument(arg, sheet) for arg in node[2]]))
-        if any(arg[0] == "range" for arg in node[2]):
+        if any(arg[0] in ("range", "xrange") for arg in node[2]):
             raise FormulaError(VALUE_ERROR)  # takes single numbers, not ranges
         args = [evaluate(arg, sheet) for arg in node[2]]
         if function.angle:
@@ -387,6 +468,10 @@ def _argument(node, sheet) -> list:
         return sheet.cells_in(*node[1:])
     if node[0] == "ref":
         return [sheet.cell(node[1], node[2])]
+    if node[0] == "xrange":
+        return sheet.on(node[1]).cells_in(*node[2:])
+    if node[0] == "xref":
+        return [sheet.on(node[1]).cell(node[2], node[3])]
     return [evaluate(node, sheet)]
 
 
@@ -454,6 +539,11 @@ class _Parser:
             return ("ref", *parse_cell_name(text))
         if kind == "error":
             return ("err", text)
+        if kind == "sheet":
+            kind, text = self.take()
+            if kind != "ref":
+                raise FormulaError(PARSE_ERROR)  # (after a sheet's name: just a cell)
+            return ("xref", _sheet_name(self.tokens[self.pos - 2][1]), *parse_cell_name(text))
         if kind == "name":
             return self.named(text)
         if text == "(":
@@ -519,6 +609,8 @@ class _Parser:
         return ("call", name, args)
 
     def argument(self):
+        if self._at_sheet_range():
+            return self._sheet_range()
         is_endpoint = self.pos < len(self.tokens) and self.tokens[self.pos][0] in ("ref", "error", "name")
         if is_endpoint and self.pos + 1 < len(self.tokens) and self.tokens[self.pos + 1][1] == ":":
             first = self._corner(self.take())
@@ -529,3 +621,24 @@ class _Parser:
             (r1, c1), (r2, c2) = first, second
             return ("range", min(r1, r2), min(c1, c2), max(r1, r2), max(c1, c2))
         return self.expr()
+
+    def _at_sheet_range(self) -> bool:
+        kinds = [kind for kind, _text in self.tokens[self.pos:self.pos + 3]]
+        return kinds[:2] == ["sheet", "ref"] and len(kinds) == 3 and self.tokens[self.pos + 2][1] == ":"
+
+    def _sheet_range(self):
+        """Sheet2!A1:B9 (or Sheet2!A1:Sheet2!B9)."""
+        sheet = _sheet_name(self.take()[1])
+        r1, c1 = parse_cell_name(self.take()[1])
+        self.take()
+        kind, text = self.take()
+        if kind == "sheet":
+            if not same_sheet(_sheet_name(text), sheet):
+                raise FormulaError(PARSE_ERROR)  # a range is on one sheet
+            kind, text = self.take()
+        if kind == "error":
+            return ("err", REF_ERROR)
+        if kind != "ref":
+            raise FormulaError(PARSE_ERROR)
+        r2, c2 = parse_cell_name(text)
+        return ("xrange", sheet, min(r1, r2), min(c1, c2), max(r1, r2), max(c1, c2))

@@ -141,7 +141,7 @@ def test_names_saved_and_loaded(tmp_path):
     path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(1, 1): "3"}, names={"r": (1, 1), "gone": None})
     save_sheet(path, sheet)
-    assert json.loads(open(path).read())["names"] == {"gone": None, "r": "B2"}
+    assert json.loads(open(path).read())["sheets"][0]["names"] == {"gone": None, "r": "B2"}
     assert load_sheet(path) == sheet
 
 

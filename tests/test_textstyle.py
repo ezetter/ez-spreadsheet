@@ -58,7 +58,7 @@ def test_styles_saved_and_loaded(tmp_path):
     save_sheet(path, sheet)
     document = json.loads(open(path).read())
     assert document["version"] == VERSION
-    assert document["styles"] == {"A1": {"bold": True}, "D3": {"bold": True, "italic": True}}
+    assert document["sheets"][0]["styles"] == {"A1": {"bold": True}, "D3": {"bold": True, "italic": True}}
     assert load_sheet(path) == sheet
 
 

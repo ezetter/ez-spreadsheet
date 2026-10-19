@@ -145,7 +145,7 @@ def test_formats_saved_and_loaded(tmp_path):
     sheet = SheetData(10, 5, {(0, 0): "5"}, {(0, 0): CURRENCY, (3, 3): NumberFormat("number", 1, False)})
     save_sheet(path, sheet)
     document = json.loads(open(path).read())
-    assert document["formats"]["A1"] == {"kind": "currency", "decimals": 2, "thousands": True}
+    assert document["sheets"][0]["formats"]["A1"] == {"kind": "currency", "decimals": 2, "thousands": True}
     assert load_sheet(path) == sheet
 
 

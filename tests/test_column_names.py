@@ -178,7 +178,7 @@ def test_column_names_saved_and_loaded(tmp_path):
     path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(0, 2): "1"}, names={"x": (0, 1)}, column_names={"t": 2})
     save_sheet(path, sheet)
-    assert json.loads(open(path).read())["column_names"] == {"t": "C"}
+    assert json.loads(open(path).read())["sheets"][0]["column_names"] == {"t": "C"}
     assert load_sheet(path) == sheet
 
 

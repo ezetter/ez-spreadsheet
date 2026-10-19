@@ -50,6 +50,8 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QStyledItemDelegate,
     QTableView,
+    QInputDialog,
+    QTabBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -104,7 +106,9 @@ from .notebook_window import NotebookWindow, kernel_folder
 from .recent import add_recent_file, clear_recent_files, menu_labels, recent_files, remove_recent_file
 from .names_dialog import NameCellDialog, NameColumnDialog, NamesDialog
 from .shift_dialog import SHIFT_LABELS, DeleteCellsDialog, InsertCellsDialog, ask_shift
-from .model import DEFAULT_COLS, DEFAULT_ROWS, SheetModel
+from .model import DEFAULT_COLS, DEFAULT_ROWS
+from .workbook import WorkbookModel
+from .formula import sheet_prefix
 from .colors import ICON_SIZE as COLOR_ICON_SIZE
 from .colors import ColorMenu, fill_color_icon, text_color_icon
 from .borders import BORDER_KINDS, MERGE_KINDS, border_icon, border_style_icon, border_styles, covered, merged
@@ -119,7 +123,7 @@ from .search import cells_in_order
 from .numformat import DATE_KINDS, GENERAL, MAX_DECIMALS, MENU_FORMATS, NumberFormat, format_number, pattern_of
 from .textstyle import BORDER_STYLES, MAX_SIZE, MIN_SIZE, PLAIN, SIZES, Border
 from .references import cell_name, column_name
-from .storage import EXTENSION, SheetData, SheetFileError, load_sheet, save_sheet
+from .storage import EXTENSION, SheetData, SheetFileError, WorkbookData, load_workbook, save_workbook
 
 FILE_FILTER = f"EZ Sheet Sheets (*{EXTENSION})"
 CUSTOM_FORMAT = "Custom number format…"  # the Number menu's last item
@@ -614,13 +618,22 @@ def _section_ratios(header) -> list[float]:
     return [header.sectionSize(i) / default for i in range(header.count())]
 
 
+def _set_section_ratios(header, ratios: list[float]) -> None:
+    """Size each section as a multiple of the default (see _section_ratios); the rest at the default."""
+    default = header.defaultSectionSize()
+    for i in range(header.count()):
+        size = max(1, round((ratios[i] if i < len(ratios) else 1.0) * default))
+        if header.sectionSize(i) != size:
+            header.resizeSection(i, size)
+
+
 class _SectionSizesCommand(QUndoCommand):
     """Column widths or row heights moving with inserted columns or rows, as
-    part of the insert's undo step."""
+    part of the insert's undo step (on its sheet, which it goes to)."""
 
-    def __init__(self, header, before: list[float], after: list[float]):
+    def __init__(self, header, before: list[float], after: list[float], sheet):
         super().__init__()
-        self.header, self.before, self.after = header, before, after
+        self.header, self.before, self.after, self.sheet = header, before, after, sheet
 
     def redo(self):
         self._apply(self.after)
@@ -629,11 +642,8 @@ class _SectionSizesCommand(QUndoCommand):
         self._apply(self.before)
 
     def _apply(self, ratios: list[float]) -> None:
-        header, default = self.header, self.header.defaultSectionSize()
-        for i in range(header.count()):
-            size = max(1, round((ratios[i] if i < len(ratios) else 1.0) * default))
-            if header.sectionSize(i) != size:
-                header.resizeSection(i, size)
+        self.sheet._show_sheet()
+        _set_section_ratios(self.header, ratios)
 
 
 def _rescale_header(header, base_size: int, old_zoom: int, new_zoom: int) -> None:
@@ -660,7 +670,7 @@ class MainWindow(QMainWindow):
         self.file_path: str | None = None
         self._set_file_path(None)
 
-        self.model = SheetModel(parent=self)
+        self.model = WorkbookModel(parent=self)
         self.view = SheetView()
         self.view.setModel(self.model)
         # The sheet's own font: what a cell without one of its own shows (at 100% zoom).
@@ -683,6 +693,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(bar)
         layout.addWidget(self.view)
+        layout.addWidget(self._build_sheet_bar())
         central = QWidget()
         central.setLayout(layout)
         self.setCentralWidget(central)
@@ -726,6 +737,10 @@ class MainWindow(QMainWindow):
         # destroyed, before the undo stack's last signals during teardown.)
         self.model.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.model.history_applied.connect(self._show_changed_cells)
+        self._sheet_views = {}  # sheets not shown: how they looked (see _save_sheet_view)
+        self.model.sheets_changed.connect(self._show_tabs)
+        self.model.sheet_about_to_change.connect(self._save_sheet_view)
+        self.model.sheet_shown.connect(self._restore_sheet_view)
         self.edit_bar.returnPressed.connect(self._commit_edit_bar)
         self.edit_bar.textChanged.connect(self._update_reference_mode)
         self.edit_bar.cursorPositionChanged.connect(self._update_reference_mode)
@@ -734,6 +749,7 @@ class MainWindow(QMainWindow):
 
         self.view.setCurrentIndex(self.model.index(0, 0))
         self.view.setFocus()
+        self._show_tabs()
 
     def _build_file_menu(self):
         menu = self.menuBar().addMenu("File")
@@ -810,6 +826,192 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
             action.triggered.connect(lambda _checked=False, b=backward: self.find_next(b))
             menu.addAction(action)
+
+    # --- Sheets ---
+
+    def _build_sheet_bar(self) -> QWidget:
+        """Below the grid: + to add a sheet, and a tab for each sheet."""
+        bar = QWidget()
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(4, 0, 4, 2)
+        layout.setSpacing(4)
+        self.add_sheet_button = QToolButton()
+        self.add_sheet_button.setText("+")
+        self.add_sheet_button.setToolTip("Add Sheet")
+        self.add_sheet_button.setAutoRaise(True)
+        self.add_sheet_button.setFocusPolicy(Qt.NoFocus)  # (the arrow keys stay the grid's)
+        self.add_sheet_button.clicked.connect(lambda _checked=False: self.add_sheet())
+        layout.addWidget(self.add_sheet_button)
+        tabs = QTabBar()
+        tabs.setShape(QTabBar.RoundedSouth)
+        tabs.setDocumentMode(True)
+        tabs.setDrawBase(False)
+        tabs.setExpanding(False)
+        tabs.setMovable(True)  # drag a tab to move its sheet
+        tabs.setFocusPolicy(Qt.NoFocus)
+        tabs.setUsesScrollButtons(True)
+        tabs.setToolTip("Double-click a sheet's tab to rename it; right-click it for more")
+        tabs.currentChanged.connect(self._on_tab_changed)
+        tabs.tabMoved.connect(lambda start, end: self.model.move_sheet(start, end))
+        tabs.tabBarDoubleClicked.connect(lambda index: index >= 0 and self.rename_sheet(index))
+        tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        tabs.customContextMenuRequested.connect(self._show_tab_menu)
+        layout.addWidget(tabs, 1)
+        self.sheet_tabs = tabs
+        self._show_tabs()
+        return bar
+
+    def _show_tabs(self) -> None:
+        """A tab for each sheet, by its name, the current one's chosen."""
+        tabs, titles = self.sheet_tabs, self.model.titles()
+        tabs.blockSignals(True)
+        while tabs.count() > len(titles):
+            tabs.removeTab(tabs.count() - 1)
+        for index, title in enumerate(titles):
+            if index < tabs.count():
+                tabs.setTabText(index, title)  # (not made afresh: a tab may be being dragged)
+            else:
+                tabs.addTab(title)
+        tabs.setCurrentIndex(self.model.current_index())
+        tabs.blockSignals(False)
+        for action in getattr(self, "sheet_actions", {}).values():
+            action.setEnabled(len(titles) > 1)
+
+    def _on_tab_changed(self, index: int) -> None:
+        if 0 <= index != self.model.current_index():
+            self._commit_pending_edit()
+            self.model.show_index(index)
+
+    def step_sheet(self, step: int) -> None:
+        """View > Next Sheet (or Previous): the one to the right (left), round to the first (last)."""
+        self._commit_pending_edit()
+        self.model.show_index((self.model.current_index() + step) % len(self.model.sheets()))
+
+    def add_sheet(self):
+        """Insert > Sheet, or +: a new, empty sheet, last, shown."""
+        self._commit_pending_edit()
+        sheet = self.model.add_sheet()
+        self._show_status(f"Added {sheet.title}. Refer to its cells from other sheets as "
+                          f"{sheet_prefix(sheet.title)}A1.")
+        return sheet
+
+    def duplicate_sheet(self, index: int):
+        self._commit_pending_edit()
+        sheet = self.model.duplicate_sheet(index)
+        self._show_status(f"Made {sheet.title}.")
+        return sheet
+
+    def rename_sheet(self, index: int | None = None) -> bool:
+        """Name a sheet (the current one, if not said), asking what; formulas naming it follow."""
+        self._commit_pending_edit()
+        index = self.model.current_index() if index is None else index
+        old = self.model.titles()[index]
+        title = self._ask_sheet_name(old)
+        if title is None or title.strip() == old:
+            return False
+        problem = self.model.rename_sheet(index, title)
+        if problem:
+            self._show_error("Couldn't rename the sheet.", problem)
+            return False
+        self._show_status(f"Renamed {old} to {self.model.title}.")
+        return True
+
+    def delete_sheet(self, index: int | None = None) -> bool:
+        """Delete a sheet (the current one, if not said), asking first if it has anything in it."""
+        self._commit_pending_edit()
+        index = self.model.current_index() if index is None else index
+        sheet = self.model.sheets()[index]
+        if len(self.model.sheets()) == 1:
+            self._show_status("A spreadsheet needs a sheet, so its only one can't be deleted.")
+            return False
+        if sheet.data_block() is not None and not self._ask_delete_sheet(sheet.title):
+            return False
+        self.model.delete_sheet(index)
+        self._show_status(f"Deleted {sheet.title}. Formulas that refer to it show #REF!; Undo brings it back.")
+        return True
+
+    def move_sheet(self, index: int, step: int) -> None:
+        end = index + step
+        if 0 <= end < len(self.model.sheets()):
+            self.model.move_sheet(index, end)
+
+    def _show_tab_menu(self, pos) -> None:
+        """A tab's menu: Rename, Duplicate, Delete, Move Left, Move Right."""
+        index = self.sheet_tabs.tabAt(pos)
+        if index < 0:
+            return
+        count = len(self.model.sheets())
+        menu = QMenu(self)
+        for label, slot, enabled in (
+            ("Rename…", lambda: self.rename_sheet(index), True),
+            ("Duplicate", lambda: self.duplicate_sheet(index), True),
+            ("Delete", lambda: self.delete_sheet(index), count > 1),
+            (None, None, None),
+            ("Move Left", lambda: self.move_sheet(index, -1), index > 0),
+            ("Move Right", lambda: self.move_sheet(index, 1), index < count - 1),
+        ):
+            if label is None:
+                menu.addSeparator()
+                continue
+            action = menu.addAction(label)
+            action.setEnabled(enabled)
+            action.triggered.connect(lambda _checked=False, s=slot: s())
+        self.tab_menu = menu  # kept while it's shown
+        menu.popup(self.sheet_tabs.mapToGlobal(pos))
+
+    def _save_sheet_view(self) -> None:
+        """Before another sheet's shown: how this one looks (its column
+        widths and row heights, selection, and scrolling), to show it so
+        again."""
+        view = self.view
+        current = view.currentIndex()
+        self.clipboard.cancel()  # (a cut's cells are this sheet's)
+        self.autosum.cancel()
+        self._sheet_views[self.model.current_sheet()] = (
+            _section_ratios(view.horizontalHeader()), _section_ratios(view.verticalHeader()),
+            dict(self._grown_rows), (current.row(), current.column()) if current.isValid() else (0, 0),
+            [(r.top(), r.left(), r.bottom(), r.right()) for r in view.selectionModel().selection()],
+            view.horizontalScrollBar().value(), view.verticalScrollBar().value())
+
+    def _restore_sheet_view(self) -> None:
+        """Another sheet's shown: as it looked when last shown (or fresh)."""
+        if not hasattr(self, "sheet_tabs"):
+            return  # (the first sheet, as the window's made)
+        view, model = self.view, self.model
+        state = self._sheet_views.pop(model.current_sheet(), None)
+        columns, rows, grown, current, ranges, across, down = state or ([], [], {}, (0, 0), [], 0, 0)
+        _set_section_ratios(view.horizontalHeader(), columns)
+        _set_section_ratios(view.verticalHeader(), rows)
+        self._grown_rows = grown
+        self._fit_rows_to_fonts()
+        for row in view._filtered_out:  # (the last sheet's filter's)
+            view.setRowHidden(row, False)
+        view._filtered_out = set()
+        self._show_filter()
+        row, col = min(current[0], model.rowCount() - 1), min(current[1], model.columnCount() - 1)
+        view.setCurrentIndex(model.index(row, col))
+        for top, left, bottom, right in ranges:
+            view.selectionModel().select(QItemSelection(model.index(top, left), model.index(bottom, right)),
+                                         QItemSelectionModel.Select)
+        view.horizontalScrollBar().setValue(across)
+        view.verticalScrollBar().setValue(down)
+        self._refresh_bar(view.currentIndex())
+        self._show_tabs()
+
+    def _ask_sheet_name(self, current: str) -> str | None:
+        """The name typed for a sheet, or None if cancelled."""
+        title, ok = QInputDialog.getText(self, "Rename Sheet", "Sheet name:", text=current)
+        return title if ok else None
+
+    def _ask_delete_sheet(self, title: str) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f"Delete {title}?")
+        box.setInformativeText("Formulas that refer to its cells will show #REF!. You can undo this.")
+        box.setStandardButtons(QMessageBox.Cancel)
+        delete = box.addButton("Delete", QMessageBox.DestructiveRole)
+        box.exec()
+        return box.clickedButton() is delete
 
     # --- Find and replace ---
 
@@ -1026,6 +1228,16 @@ class MainWindow(QMainWindow):
             self.zoom_actions[name] = action
         QGuiApplication.instance().focusWindowChanged.connect(self._update_zoom_actions)
 
+        menu.addSeparator()
+        self.sheet_actions = {}
+        for name, shortcut, step in (("Next Sheet", QKeySequence.NextChild, 1),
+                                     ("Previous Sheet", QKeySequence.PreviousChild, -1)):
+            action = QAction(name, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, d=step: self.step_sheet(d))
+            menu.addAction(action)
+            self.sheet_actions[name] = action
+
         self.show_notebook_action = QAction("Notebook", self)
         self.show_notebook_action.setToolTip("Open the sheet's notebook")
         self.show_notebook_action.triggered.connect(lambda _checked=False: self.show_notebook())
@@ -1096,6 +1308,12 @@ class MainWindow(QMainWindow):
 
     def _build_insert_menu(self):
         menu = self.menuBar().addMenu("Insert")
+        self.add_sheet_action = QAction("Sheet", self)
+        self.add_sheet_action.setShortcut(QKeySequence("Shift+F11"))  # as in Google Sheets and Excel
+        self.add_sheet_action.setToolTip("Add a sheet to the spreadsheet")
+        self.add_sheet_action.triggered.connect(lambda _checked=False: self.add_sheet())
+        menu.addAction(self.add_sheet_action)
+        menu.addSeparator()
         # Notebook: open it as it is, or add the selected cells as a DataFrame,
         # or as a DataFrame and a chart.
         self.open_notebook_action = QAction("Open", self)
@@ -2724,7 +2942,7 @@ class MainWindow(QMainWindow):
             new = old + sum(count for start, count in blocks if start <= old)
             if new < len(after):
                 after[new] = ratio
-        stack.push(_SectionSizesCommand(header, before, after))
+        stack.push(_SectionSizesCommand(header, before, after, self.model.current_sheet()))
         stack.endMacro()
         inserted, moved = [], 0
         for start, count in blocks:
@@ -2766,7 +2984,7 @@ class MainWindow(QMainWindow):
         gone = set(indexes)
         after = [ratio for i, ratio in enumerate(before) if i not in gone]
         after += [1.0] * (header.count() - len(after))  # the sheet keeps its size
-        stack.push(_SectionSizesCommand(header, before, after))
+        stack.push(_SectionSizesCommand(header, before, after, self.model.current_sheet()))
         stack.endMacro()
         selected, removed = [], 0
         for start, count in blocks:
@@ -2853,11 +3071,11 @@ class MainWindow(QMainWindow):
 
     def open_path(self, path: str) -> bool:
         try:
-            sheet = load_sheet(path)
+            book = load_workbook(path)
         except SheetFileError as e:
             self._show_error("Couldn't open the sheet.", str(e))
             return False
-        self._load(sheet, path)
+        self._load(book, path)
         self._remember_recent(path)
         return True
 
@@ -2920,9 +3138,9 @@ class MainWindow(QMainWindow):
         self._load(self._empty_sheet(), path)
         return True
 
-    def _empty_sheet(self) -> SheetData:
-        """A new sheet, taking angles in the same unit as the current one."""
-        return SheetData(DEFAULT_ROWS, DEFAULT_COLS, angle_unit=self.model.angle_unit)
+    def _empty_sheet(self) -> WorkbookData:
+        """A new spreadsheet of one sheet, taking angles in the same unit as the current one."""
+        return WorkbookData([SheetData(DEFAULT_ROWS, DEFAULT_COLS, angle_unit=self.model.angle_unit)])
 
     def save(self) -> bool:
         if self.file_path is None:
@@ -2940,10 +3158,10 @@ class MainWindow(QMainWindow):
 
     def save_to(self, path: str) -> bool:
         self._commit_pending_edit()
-        sheet = self.model.sheet_data()
-        sheet.notebook = None if self.notebook.is_empty else self.notebook.to_json()
+        book = self.model.workbook_data()
+        book.notebook = None if self.notebook.is_empty else self.notebook.to_json()
         try:
-            save_sheet(path, sheet)
+            save_workbook(path, book)
         except SheetFileError as e:
             self._show_error("Couldn't save the sheet.", str(e))
             return False
@@ -3032,13 +3250,14 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def _load(self, sheet: SheetData, path: str | None) -> None:
+    def _load(self, book: WorkbookData, path: str | None) -> None:
         self.clipboard.cancel()
         self.autosum.cancel()
         self.kernel.shutdown()  # the old sheet's Python variables go with it
-        self.notebook.load(sheet.notebook)  # (its cells aren't run until asked)
+        self.notebook.load(book.notebook)  # (its cells aren't run until asked)
         self._notebook_dirty = False
-        self.model.load_sheet_data(sheet)
+        self._sheet_views = {}
+        self.model.load_workbook_data(book)
         self.view.setCurrentIndex(self.model.index(0, 0))
         self._refresh_bar(self.view.currentIndex())
         self._set_file_path(path)

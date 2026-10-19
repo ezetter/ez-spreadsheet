@@ -83,6 +83,46 @@ Info > Open with. `scripts/make_icon.py` draws the icon
   Sheet…), and Ask Claude…. Clicking
   inside the selection keeps it; clicking elsewhere selects that cell first.
 
+## Sheets
+
+A spreadsheet can have several sheets, each with a tab below the grid.
+Click a tab to show its sheet, or use **View > Next Sheet** (Cmd+}) and
+**Previous Sheet** (Cmd+{). Each sheet keeps its own column widths, row
+heights, selection, and scroll position.
+
+- **+**, at the left of the tabs, or **Insert > Sheet** (Shift+F11), adds an
+  empty sheet at the end, named Sheet2, Sheet3, and so on.
+- **Double-click a tab** to rename its sheet. Names can't be empty or used
+  twice (ignoring case), and can be up to 100 characters.
+- **Drag a tab** to move its sheet.
+- **Right-click a tab** for **Rename…**, **Duplicate** (a copy just after it,
+  named "Copy of Sheet1"), **Delete**, **Move Left**, and **Move Right**. A
+  spreadsheet always keeps at least one sheet, and deleting one with
+  anything in it asks first.
+
+A formula can use another sheet's cells by putting its name and `!` before
+them: `=Sheet1!A1*2`, or `=SUM(Sheet1!B2:B9)`. A name that isn't one word,
+or starts with a digit, goes in single quotes: `='Q1 Sales'!B2` (a `'` in
+the name is doubled: `='Ann''s'!A1`). Sheet names in formulas ignore case.
+Cell and column names are each sheet's own, so only cells come after a
+sheet's name.
+
+These formulas recalculate when the other sheet changes, and keep up with it:
+
+- **Renaming** a sheet rewrites the formulas that name it.
+- **Inserting or deleting** rows, columns, or cells moves the references to
+  them, in every sheet, as for references on the sheet itself. A reference
+  to a deleted cell becomes `#REF!`.
+- **Deleting** a sheet makes formulas that use it show `#REF!` (their text
+  stays as it was). Undo brings the sheet back, and the formulas work again.
+
+Copying and pasting works between sheets: a pasted formula's relative
+references shift as usual, including ones to other sheets. A cut is dropped
+when you switch sheets. Undo and redo cover every sheet, going to the sheet
+they change, and adding, deleting, renaming, and moving sheets can be undone
+too. Find and Replace, sorting, filters, and the notebook's Load Data work
+on the sheet shown.
+
 ## Toolbar
 
 Right-click the toolbar to choose its tools: each is listed, checked if it's
@@ -800,24 +840,38 @@ off the list when you choose it, and Clear Menu empties the list. The list is
 kept with EZ Sheet's preferences, so it's there the next time you start
 EZ Sheet. A new sheet joins it when it's first saved.
 
-Sheets are saved as `.ezs` files: JSON holding each cell's raw text
-(formulas, not their results) under its cell name, the angle unit for `SIN`,
-`COS`, and `TAN`, and any number formats, styles, cell and column names,
-merged cells, the filter, and the notebook (as a Jupyter notebook document,
-under `"notebook"`), e.g.
+Spreadsheets are saved as `.ezs` files: JSON holding each sheet, by its
+name: each cell's raw text (formulas, not their results) under its cell name,
+the angle unit for `SIN`, `COS`, and `TAN`, and any number formats, styles,
+cell and column names, merged cells, and the filter. Then the sheet shown
+(`"active"`, left out for the first) and the notebook (as a Jupyter notebook
+document, under `"notebook"`), e.g.
 
 ```json
 {
   "format": "ezsheet",
-  "version": 9,
-  "rows": 1000,
-  "columns": 52,
-  "angles": "degrees",
-  "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
-  "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}},
-  "styles": {"A1": {"bold": true}, "B1": {"bold": true}},
-  "merges": ["C1:D1"],
-  "filter": {"header": "A1:B1", "columns": {"A": {"hidden": ["Pens"]}}},
+  "version": 10,
+  "sheets": [
+    {
+      "name": "Sheet1",
+      "rows": 1000,
+      "columns": 52,
+      "angles": "degrees",
+      "cells": {"A1": "Item", "B1": "Qty", "B3": "=B2*3"},
+      "formats": {"B3": {"kind": "currency", "decimals": 2, "thousands": true}},
+      "styles": {"A1": {"bold": true}, "B1": {"bold": true}},
+      "merges": ["C1:D1"],
+      "filter": {"header": "A1:B1", "columns": {"A": {"hidden": ["Pens"]}}}
+    },
+    {
+      "name": "Totals",
+      "rows": 1000,
+      "columns": 52,
+      "angles": "degrees",
+      "cells": {"A1": "=SUM(Sheet1!B2:B9)"}
+    }
+  ],
+  "active": 1,
   "notebook": {
     "cells": [{"cell_type": "code", "id": "3f2a9c1e", "metadata": {},
                "source": "df.describe()", "outputs": [], "execution_count": null}],
@@ -829,6 +883,8 @@ under `"notebook"`), e.g.
   }
 }
 ```
+
+Files saved before version 10 held one sheet, and open as Sheet1.
 
 Saves go to a temporary file that then replaces the original, so a failed save
 never leaves a half-written file. New files get your normal default
@@ -977,9 +1033,12 @@ Start a cell with `=`, e.g. `=A1+B2*2`, `=(A1-B1)/2^3`, or `=SUM(A1:A100)`.
 - While typing a formula, clicking a cell right after `=`, an operator, `(`,
   `,`, or `:` inserts its reference. Clicking again replaces the reference just inserted.
   This works in the cell and in the bar above the grid.
+- Other sheets' cells: `=Sheet1!A1`, `=SUM('Q1 Sales'!B2:B9)` (see
+  [Sheets](#sheets)).
 - Errors: `#ERROR!` (bad formula), `#VALUE!` (text used as a number),
-  `#DIV/0!`, `#NUM!` (overflow or no real result), `#REF!` (off the sheet),
-  `#CIRC!` (circular reference), `#NAME?` (unknown function).
+  `#DIV/0!`, `#NUM!` (overflow or no real result), `#REF!` (off the sheet,
+  or a sheet that isn't there), `#CIRC!` (circular reference, also by way
+  of other sheets), `#NAME?` (unknown function).
 
 ## Degrees or radians
 

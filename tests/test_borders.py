@@ -90,7 +90,7 @@ def test_bad_borders(borders):
 def test_merges_saved(tmp_path):
     path = str(tmp_path / "s.ezs")
     save_sheet(path, SheetData(rows=10, cols=5, merges=[(0, 0, 0, 2), (3, 1, 5, 1)]))
-    assert json.loads(open(path).read())["merges"] == ["A1:C1", "B4:B6"]
+    assert json.loads(open(path).read())["sheets"][0]["merges"] == ["A1:C1", "B4:B6"]
     assert load_sheet(path).merges == [(0, 0, 0, 2), (3, 1, 5, 1)]
 
 

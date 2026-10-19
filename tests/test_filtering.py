@@ -153,7 +153,7 @@ def test_saved_and_opened(model, tmp_path):
     path = str(tmp_path / "f.ezs")
     sheet_filter = SheetFilter(0, 0, 1, ((0, ColumnFilter(frozenset({"West"}))),))
     save_sheet(path, SheetData(rows=10, cols=5, filter=sheet_filter))
-    assert json.loads(open(path).read())["filter"] == {"header": "A1:B1", "columns": {"A": {"hidden": ["West"]}}}
+    assert json.loads(open(path).read())["sheets"][0]["filter"] == {"header": "A1:B1", "columns": {"A": {"hidden": ["West"]}}}
     assert load_sheet(path).filter == sheet_filter
     model.set_filter(sheet_filter, "Filter")
     loaded = SheetModel(rows=5, cols=5)

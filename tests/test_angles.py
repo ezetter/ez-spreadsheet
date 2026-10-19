@@ -127,7 +127,7 @@ def test_unit_is_saved_and_loaded(tmp_path):
     path = str(tmp_path / "s.ezs")
     sheet = SheetData(10, 5, {(0, 0): "=SIN(PI)"}, angle_unit=RADIANS)
     save_sheet(path, sheet)
-    assert json.loads(open(path).read())["angles"] == "radians"
+    assert json.loads(open(path).read())["sheets"][0]["angles"] == "radians"
     assert load_sheet(path) == sheet
 
 

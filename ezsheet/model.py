@@ -17,6 +17,7 @@ from .formula import (
     parse,
     parse_number,
     references,
+    same_sheet,
     shift_references,
 )
 from .functions import DEGREES
@@ -45,6 +46,8 @@ UNDO_LIMIT = 1000
 
 
 KEEP = object()  # (set_cells: the filter as it is)
+DEFAULT_TITLE = "Sheet1"
+_EVALUATING: set = set()  # (sheet, cell) formulas being worked out, across sheets: met again, they're circular
 
 def _moved_block(block, move):
     """A merged block once its cells move (move(row, col) is a cell's new
@@ -68,21 +71,26 @@ class _CellsCommand(QUndoCommand):
     filter) tuple: dicts, the whole set of merges (None if they don't
     change), and the filter (KEEP if it doesn't; None if there's none)."""
 
-    def __init__(self, model, before: tuple, after: tuple, description: str):
+    def __init__(self, model, before: tuple, after: tuple, description: str, show: bool = True):
         super().__init__(description)
         self.model = model
         self.before = before
         self.after = after
+        self.show = show  # whether undoing or redoing it goes to its sheet
         self._done = False
 
     def redo(self):
         # QUndoStack.push calls redo() to make the change in the first place;
         # only later calls are redos the user asked for.
-        self.model._apply(*self.after, from_history=self._done)
+        if self._done and self.show:
+            self.model._show_sheet()
+        self.model._apply(*self.after, from_history=self._done and self.show)
         self._done = True
 
     def undo(self):
-        self.model._apply(*self.before, from_history=True)
+        if self.show:
+            self.model._show_sheet()
+        self.model._apply(*self.before, from_history=self.show)
 
 
 class _AngleUnitCommand(QUndoCommand):
@@ -95,9 +103,11 @@ class _AngleUnitCommand(QUndoCommand):
         self.after = unit
 
     def redo(self):
+        self.model._show_sheet()
         self.model._apply_angle_unit(self.after)
 
     def undo(self):
+        self.model._show_sheet()
         self.model._apply_angle_unit(self.before)
 
 
@@ -107,6 +117,10 @@ class SheetModel(QAbstractTableModel):
 
     Qt's EditRole is the raw text (e.g. "=A1+2"); DisplayRole is the computed
     value, formatted.
+
+    In a spreadsheet of several sheets (a workbook.WorkbookModel), each is
+    one of these, with its `title`, sharing the workbook's undo stack; its
+    formulas can refer to the others' cells (Sheet2!A1).
     """
 
     # Emitted when cell contents are edited (not when a whole sheet is loaded).
@@ -122,8 +136,11 @@ class SheetModel(QAbstractTableModel):
     # Emitted when the filter's made, changed, or removed (or a sheet is loaded).
     filter_changed = Signal()
 
-    def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None):
+    def __init__(self, rows: int = DEFAULT_ROWS, cols: int = DEFAULT_COLS, parent=None,
+                 workbook=None, title: str = DEFAULT_TITLE):
         super().__init__(parent)
+        self.workbook = workbook
+        self.title = title
         self._rows = rows
         self._cols = cols
         self._cells: dict[tuple[int, int], str] = {}
@@ -151,8 +168,11 @@ class SheetModel(QAbstractTableModel):
         self._angle_unit = DEGREES
         self._formula_sheet = _FormulaSheet(self)
         # Every edit goes through set_cells and lands here as one undo step.
-        self.undo_stack = QUndoStack(self)
-        self.undo_stack.setUndoLimit(UNDO_LIMIT)
+        if workbook is not None:
+            self.undo_stack = workbook.undo_stack
+        else:
+            self.undo_stack = QUndoStack(self)
+            self.undo_stack.setUndoLimit(UNDO_LIMIT)
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else self._rows
@@ -226,6 +246,10 @@ class SheetModel(QAbstractTableModel):
         """The raw text as entered."""
         return self._cells.get((row, col), "")
 
+    def formula_cells(self) -> dict[tuple[int, int], str]:
+        """The cells with formulas, and their formulas."""
+        return {key: self._cells[key] for key in self._formula_keys}
+
     def text_cells(self) -> list[tuple[int, int]]:
         """The cells with text in them (formulas too)."""
         return list(self._cells)
@@ -238,13 +262,14 @@ class SheetModel(QAbstractTableModel):
                   styles: dict[tuple[int, int], CellStyle | None] | None = None,
                   names: dict[str, tuple | None] | None = None,
                   columns: dict[str, int | None] | None = None,
-                  merges=None, sheet_filter=KEEP) -> None:
+                  merges=None, sheet_filter=KEEP, show: bool = True) -> None:
         """Set many cells' text, and optionally their number formats and text
         styles, and cell names (each keyed by names.key(name), as (name,
         cell) entries), and column names (name -> column index), where None
         removes one, the merged cells (all of them: (top, left, bottom,
         right) blocks), and the filter (a SheetFilter, None for none), as
-        one undoable step,
+        one undoable step (which, undone or redone, goes to this sheet if
+        `show`),
         recalculating and notifying views a single time. `description` names
         the step in the Undo menu.
 
@@ -278,7 +303,7 @@ class SheetModel(QAbstractTableModel):
                 self, (before, formats_before, styles_before, names_before, columns_before, merges_before,
                        filter_before),
                 (after, formats_after, styles_after, names_after, columns_after, merges_after, filter_after),
-                description))
+                description, show))
 
     def _completed(self, writes: dict, formats: dict) -> dict:
         """The writes, with fractions written as text (3/7) made numbers
@@ -337,6 +362,7 @@ class SheetModel(QAbstractTableModel):
     def _apply_angle_unit(self, unit: str) -> None:
         self._angle_unit = unit
         self._values.clear()
+        self._tell_workbook()
         self.angle_unit_changed.emit(unit)
         self.contents_changed.emit()
         if self._formula_keys:
@@ -399,6 +425,7 @@ class SheetModel(QAbstractTableModel):
         changed = sorted(changed)
         self._values.clear()
         self._inferred_formats.clear()
+        self._tell_workbook()
         self.contents_changed.emit()
         if self._formula_keys:
             # Any formula might depend on these cells, so refresh the whole sheet.
@@ -432,10 +459,12 @@ class SheetModel(QAbstractTableModel):
         return SheetData(self._rows, self._cols, dict(self._cells), dict(self._formats),
                          dict(self._styles), self._angle_unit,
                          {name: cell for name, cell in self._names.values()},
-                         dict(self._column_names), merges=sorted(self._merges), filter=self._filter)
+                         dict(self._column_names), merges=sorted(self._merges), filter=self._filter,
+                         name=self.title)
 
-    def load_sheet_data(self, sheet: SheetData) -> None:
-        """Replace the whole sheet, including its size."""
+    def load_sheet_data(self, sheet: SheetData, clear_history: bool = True) -> None:
+        """Replace the whole sheet, including its size (and the undo history,
+        unless not `clear_history`)."""
         self.beginResetModel()
         self._rows = sheet.rows
         self._cols = sheet.cols
@@ -451,7 +480,8 @@ class SheetModel(QAbstractTableModel):
         self._parsed.clear()
         self._values.clear()
         self._inferred_formats.clear()
-        self.undo_stack.clear()  # a new sheet starts with no history
+        if clear_history:
+            self.undo_stack.clear()  # a new sheet starts with no history
         self.endResetModel()
         self.angle_unit_changed.emit(self._angle_unit)
         self.names_changed.emit()
@@ -607,7 +637,7 @@ class SheetModel(QAbstractTableModel):
         cells, formats, styles = {}, {}, {}
         for key, text in self._cells.items():
             if (dest := move(*key)) is not None:
-                cells[dest] = (move_references(text, move, move_range, names_now, columns)
+                cells[dest] = (move_references(text, move, move_range, names_now, columns, self.title)
                                if is_formula(text) else text)
         for table, moved in ((self._formats, formats), (self._styles, styles)):
             for key, value in table.items():
@@ -617,6 +647,11 @@ class SheetModel(QAbstractTableModel):
         # Names follow their cells; a deleted cell's name is kept, as #REF!.
         moved_names = {name_key: (name, move(*cell) if cell else None)
                        for name_key, (name, cell) in self._names.items()}
+        # Other sheets' formulas follow these cells too (Sheet2!A1), in the same step.
+        elsewhere = [(other, writes) for other in (self.workbook.sheets() if self.workbook else []) if other is not self
+                     and (writes := other._references_moved(self.title, move, move_range))]
+        if elsewhere:
+            self.undo_stack.beginMacro(description)
         self.set_cells(
             {key: cells.get(key, "") for key in keys},
             description,
@@ -627,6 +662,42 @@ class SheetModel(QAbstractTableModel):
             merges=filter(None, (_moved_block(block, move) for block in self._merges)),
             sheet_filter=self._filter.moved(move) if self._filter is not None else KEEP,
         )
+        for other, writes in elsewhere:
+            other.set_cells(writes, description, show=False)
+        if elsewhere:
+            self.undo_stack.endMacro()
+
+    def _references_moved(self, title: str, move, move_range) -> dict:
+        """This sheet's formulas whose references to sheet `title`'s cells
+        change as those cells move (see _rearrange): cell -> new formula."""
+        writes = {}
+        for key in self._formula_keys:
+            text = self._cells[key]
+            moved = move_references(text, move, move_range, (), None, title, home=False)
+            if moved != text:
+                writes[key] = moved
+        return writes
+
+    # --- In a workbook ---
+
+    def _show_sheet(self) -> None:
+        """Go to this sheet, in its workbook (as undoing a change to it does)."""
+        if self.workbook is not None:
+            self.workbook.show_sheet(self)
+
+    def _tell_workbook(self) -> None:
+        """This sheet changed: its workbook's other sheets work out again what
+        their formulas that refer to it come to."""
+        if self.workbook is not None:
+            self.workbook.sheet_changed(self)
+
+    def recalculate(self) -> None:
+        """Work out every formula again (another sheet they may refer to has
+        changed), and show them."""
+        self._values.clear()
+        self._inferred_formats.clear()
+        if self._formula_keys:
+            self.dataChanged.emit(self.index(0, 0), self.index(self._rows - 1, self._cols - 1))
 
     # --- The filter ---
 
@@ -929,6 +1000,8 @@ class SheetModel(QAbstractTableModel):
         raw = self._cells.get(key)
         if raw is None:
             return None
+        if (self, key) in _EVALUATING:
+            return CellError(CIRCULAR_ERROR)  # (by way of another sheet)
         if key in self._formula_keys:
             self._compute(key)
         else:
@@ -969,7 +1042,7 @@ class SheetModel(QAbstractTableModel):
         in_progress = set()
         while stack:
             key = stack[-1]
-            if key in self._values:
+            if key in self._values or (self, key) in _EVALUATING:  # (worked out, or being, further out)
                 stack.pop()
                 in_progress.discard(key)
                 continue
@@ -981,7 +1054,11 @@ class SheetModel(QAbstractTableModel):
                 stack.extend(pending)
                 continue
             else:
-                self._values[key] = self._evaluate(key)
+                _EVALUATING.add((self, key))
+                try:
+                    self._values[key] = self._evaluate(key)
+                finally:
+                    _EVALUATING.discard((self, key))
             stack.pop()
             in_progress.discard(key)
 
@@ -1049,6 +1126,15 @@ class _FormulaSheet:
     def cell(self, row: int, col: int):
         self._check(row, col)
         return self.model.value(row, col)
+
+    def on(self, title: str) -> "_FormulaSheet":
+        """Another sheet of the workbook, by its title (Sheet2 in Sheet2!A1)."""
+        workbook = self.model.workbook
+        other = workbook.sheet_named(title) if workbook is not None else (
+            self.model if same_sheet(title, self.model.title) else None)
+        if other is None:
+            raise FormulaError(REF_ERROR)
+        return other._formula_sheet
 
     def cells_in(self, top: int, left: int, bottom: int, right: int) -> list:
         """Values of the non-empty cells in a range."""

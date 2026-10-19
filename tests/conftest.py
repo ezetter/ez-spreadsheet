@@ -54,6 +54,10 @@ class Dialogs:
         self.color_prompts = []  # (the color it started at, its title) each time
         self.custom_format_prompts = []  # (the pattern it started with, its sample) each time
         self.load_prompts = []  # (the DataFrames offered, the cell named) each time
+        self.sheet_name_answer = None  # the name typed to rename a sheet; None cancels
+        self.sheet_name_prompts = []  # the name it started with, each time
+        self.delete_sheet_answer = True  # whether to delete a sheet with something in it
+        self.delete_sheet_prompts = []  # the sheet's name, each time
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +92,18 @@ def dialogs(monkeypatch):
         return dialogs.delete_shift
 
     monkeypatch.setattr(MainWindow, "_ask_delete_shift", ask_delete_shift)
+
+    def ask_sheet_name(window, current):
+        dialogs.sheet_name_prompts.append(current)
+        return dialogs.sheet_name_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_sheet_name", ask_sheet_name)
+
+    def ask_delete_sheet(window, title):
+        dialogs.delete_sheet_prompts.append(title)
+        return dialogs.delete_sheet_answer
+
+    monkeypatch.setattr(MainWindow, "_ask_delete_sheet", ask_delete_sheet)
 
     def ask_dataframe(window, frames, current, name, source, problem):
         dialogs.frame_name_prompts.append((name, source))
