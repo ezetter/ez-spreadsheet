@@ -800,8 +800,10 @@ column in each cell.
      that's always filled in counts each group's rows.
    - **Filters**: each a column, and with **Values…** which of its rows to
      leave in, by value or by condition, as with the sheet's filter.
-   - **Show grand totals**: a Grand Total row, and column too if there are
-     columns.
+   - **Show grand totals**: a totals row, and column too if there are
+     columns. They're labeled with the function they're of: Sum, Mean,
+     Median, Min, Max, StdDev, Count, or CountA (Sum / Mean for values of
+     more than one).
 3. Click **Choose Where…**, then click the cell for the pivot table's
    top-left corner, on this sheet or on another (click its tab, or + for a
    new one, first). Esc cancels. It needs empty cells to go in; if they

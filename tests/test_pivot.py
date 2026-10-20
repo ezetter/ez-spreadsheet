@@ -55,7 +55,7 @@ def shown(model, top, left, height, width) -> list[list[str]]:
 def test_rows_and_a_value(book):
     cells = layout(pivot(), book)
     assert grid(cells) == [["Region", "SUM of Sales"], ["East", "2800.0"], ["West", "1600.0"],
-                           ["Grand Total", "4400.0"]]
+                           ["Sum", "4400.0"]]
     assert cells[(0, 0)].bold and not cells[(1, 0)].bold and cells[(3, 1)].bold  # headers and totals
 
 
@@ -73,7 +73,7 @@ def test_every_aggregate(book):
 def test_counting_a_text_column(book):
     cells = layout(pivot(rows=(1,), values=((0, "COUNT"), (0, "COUNTA"))), book)
     assert grid(cells) == [["Month", "COUNT of Region", "COUNTA of Region"], ["Feb", "0.0", "2.0"],
-                           ["Jan", "0.0", "3.0"], ["Grand Total", "0.0", "5.0"]]
+                           ["Jan", "0.0", "3.0"], ["Count / CountA", "0.0", "5.0"]]
 
 
 def test_counts_arent_in_their_columns_format(book):
@@ -85,10 +85,10 @@ def test_counts_arent_in_their_columns_format(book):
 def test_columns(book):
     cells = layout(pivot(column=1), book)
     assert grid(cells) == [["SUM of Sales", "Month", "", ""],
-                           ["Region", "Feb", "Jan", "Grand Total"],
+                           ["Region", "Feb", "Jan", "Sum"],
                            ["East", "1500.0", "1300.0", "2800.0"],
                            ["West", "700.0", "900.0", "1600.0"],
-                           ["Grand Total", "2200.0", "2200.0", "4400.0"]]
+                           ["Sum", "2200.0", "2200.0", "4400.0"]]
 
 
 def test_columns_with_several_values(book):
@@ -99,23 +99,30 @@ def test_columns_with_several_values(book):
                            ["West", "700.0", "1.0", "900.0", "2.0"]]
 
 
+def test_totals_are_named_for_their_function(book):
+    assert grid(layout(pivot(values=((2, "MAX"),)), book))[-1] == ["Max", "1500.0"]
+    cells = layout(pivot(column=1, values=((2, "SUM"), (3, "MEAN"), (2, "SUM"))), book)
+    assert grid(cells)[0][1::3] == ["Feb", "Jan", "Sum / Mean"]  # (its block's header: each function once)
+    assert grid(cells)[-1][:2] == ["Sum / Mean", "2200.0"]
+
+
 def test_rows_within_rows(book):
     cells = layout(pivot(rows=(0, 1), values=((3, "SUM"),)), book)
     assert grid(cells) == [["Region", "Month", "SUM of Units"],
                            ["East", "Feb", "5.0"], ["", "Jan", "4.0"],  # (East's label once)
                            ["West", "Feb", "1.0"], ["", "Jan", "2.0"],
-                           ["Grand Total", "", "12.0"]]
+                           ["Sum", "", "12.0"]]
 
 
 def test_no_rows_just_totals(book):
     cells = layout(pivot(rows=(), column=0, totals=False), book)
-    assert cells[(1, 1)].value == "East" and cells[(2, 0)].value == "Grand Total" and cells[(2, 1)].value == 2800.0
+    assert cells[(1, 1)].value == "East" and cells[(2, 0)].value == "Sum" and cells[(2, 1)].value == 2800.0
 
 
 def test_numbers_sort_as_numbers_and_blanks_last(book):
     fill(book, [("Size", "Count"), ("10", "1"), ("9", "2"), ("", "3"), ("10", "4")], 10, 0)
     cells = layout(pivot(block=(10, 0, 14, 1), values=((1, "SUM"),)), book)
-    assert [row[0] for row in grid(cells)] == ["Size", "9", "10", "(Blanks)", "Grand Total"]
+    assert [row[0] for row in grid(cells)] == ["Size", "9", "10", "(Blanks)", "Sum"]
 
 
 def test_formats_and_errors_carry_over(book):
@@ -129,10 +136,10 @@ def test_formats_and_errors_carry_over(book):
 def test_filters(book):
     leave_out_west = ((0, ColumnFilter(frozenset({"West"}))),)
     assert grid(layout(pivot(rows=(1,), filters=leave_out_west), book))[1:] == [
-        ["Feb", "1500.0"], ["Jan", "1300.0"], ["Grand Total", "2800.0"]]
+        ["Feb", "1500.0"], ["Jan", "1300.0"], ["Sum", "2800.0"]]
     big = ((2, ColumnFilter(condition="greater", value="800")),)
     assert grid(layout(pivot(filters=big), book))[1:] == [["East", "2700.0"], ["West", "900.0"],
-                                                         ["Grand Total", "3600.0"]]
+                                                         ["Sum", "3600.0"]]
 
 
 def test_takes_in_rows_added_below(book):
@@ -167,7 +174,7 @@ def test_json_round_trip():
 def test_shown_in_the_sheet_and_kept_up(book):
     book.set_pivots([pivot()], "Add Pivot Table")
     assert shown(book, 0, 6, 4, 2) == [["Region", "SUM of Sales"], ["East", "2800"], ["West", "1600"],
-                                       ["Grand Total", "4400"]]
+                                       ["Sum", "4400"]]
     assert book.value(1, 7) == 2800.0 and book.get_cell(1, 7) == "" and book.content(1, 7) == "2800"
     assert book.data(book.index(0, 6), Qt.FontRole).bold() and book.data(book.index(1, 6), Qt.FontRole) is None
     book.set_cell(1, 2, "2200")  # the source changes: so does it
@@ -216,7 +223,7 @@ def test_crowded_out_until_theres_room(book):
     book.set_cell(2, 7, "")
     assert book.display_text(1, 7) == "2800"
     book.set_cell(4, 7, "x")  # just below it
-    assert book.display_text(3, 6) == "Grand Total"
+    assert book.display_text(3, 6) == "Sum"
     book.set_cells({(6, 0): "North", (6, 2): "5"})  # it grows into the cell that's taken
     assert book.value(0, 6) == CellError("#REF!")
 
@@ -341,7 +348,7 @@ def test_put_on_another_sheet(window, dialogs):
     window.add_sheet()  # (clicking +, or a tab, while choosing)
     click(window, 1, 1)
     assert window.model.title == "Sheet2" and window.model.pivots()[0].source == "Sheet1"
-    assert window.model.display_text(4, 1) == "Grand Total" and window.model.display_text(4, 2) == "12"
+    assert window.model.display_text(4, 1) == "Sum" and window.model.display_text(4, 2) == "12"
     window.sheet_tabs.setCurrentIndex(0)
     window.model.set_cell(1, 3, "13")
     window.sheet_tabs.setCurrentIndex(1)

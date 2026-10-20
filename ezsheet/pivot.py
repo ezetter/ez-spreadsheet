@@ -7,7 +7,7 @@ row for each mix of them, sorted as Sort A → Z sorts); its columns, the
 values of its column column, if it has one; and in each cell, an aggregate
 (SUM, MEAN, ...) of a value column over the source rows in both groups, for
 each value it shows. Grand totals follow: a row, and a column if there are
-columns. Filters leave out source rows, as the sheet's filter hides them.
+columns, labeled with the function they're of (Sum, Max, ...). Filters leave out source rows, as the sheet's filter hides them.
 
 A pivot table isn't stored as cells: its sheet works out what it shows
 (see layout) whenever anything changes, so it keeps up with its source. The
@@ -27,7 +27,14 @@ from .references import cell_name, column_index, column_name, parse_cell_name
 from .sorting import _rank
 
 FUNCTION_NAMES = tuple(aggregate.function for aggregate in AGGREGATES)  # what values can be: SUM, MEAN, ...
-GRAND_TOTAL = "Grand Total"
+# A grand total's label: the name of the function it's of (Sum, Max, ...).
+TOTAL_NAMES = {"SUM": "Sum", "MEAN": "Mean", "MEDIAN": "Median", "MIN": "Min", "MAX": "Max", "STDDEV": "StdDev",
+               "COUNT": "Count", "COUNTA": "CountA"}
+
+
+def total_label(values) -> str:
+    """What labels a pivot table's grand totals: its values' functions, each once (Sum, or Sum / Mean)."""
+    return " / ".join(dict.fromkeys(TOTAL_NAMES.get(function, function.capitalize()) for _col, function in values))
 
 
 @dataclass(frozen=True)
@@ -172,7 +179,7 @@ def layout(pivot: Pivot, sheet) -> dict[tuple[int, int], PivotCell]:
         for i, col in enumerate(pivot.rows):
             out[(1, i)] = PivotCell(labels[col], bold=True)
         for b, (key, _rows) in enumerate(blocks):
-            title = GRAND_TOTAL if key is None else key or BLANKS
+            title = total_label(pivot.values) if key is None else key or BLANKS
             out[(1 if count == 1 else 0, width + b * count)] = PivotCell(title, bold=True)
             if count > 1:
                 for v, name in enumerate(names):
@@ -189,7 +196,7 @@ def layout(pivot: Pivot, sheet) -> dict[tuple[int, int], PivotCell]:
         _values(out, r, width, pivot, rows, blocks, aggregate)
     if pivot.totals or not pivot.rows:
         r = height + len(body)
-        out[(r, 0)] = PivotCell(GRAND_TOTAL, bold=True)
+        out[(r, 0)] = PivotCell(total_label(pivot.values), bold=True)
         _values(out, r, width, pivot, data, blocks, aggregate, bold=True)
     return out
 
