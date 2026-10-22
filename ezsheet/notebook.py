@@ -299,15 +299,20 @@ def dataframe_parts(model, cells, name: str) -> tuple[str, str]:
 
 # --- Graphing them with Seaborn ---
 
-GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter"}  # the Chart dialog's
-GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "reg")  # Seaborn's kinds: swarm is a categorical
-# scatter too, and reg a scatter with a linear regression line
+GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter",
+               "hist": "Distribution"}  # the Chart dialog's
+GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "reg", "hist", "kde", "ecdf")  # Seaborn's kinds: swarm
+# is a categorical scatter too, reg a scatter with a linear regression line, and kde and ecdf distributions
 CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories
-REGRESSION = {"reg"}  # drawn with lmplot, which fits a line to numbers both ways; the rest with relplot
+REGRESSION = {"reg"}  # drawn with lmplot, which fits a line to numbers both ways
+DISTRIBUTION = {"hist", "kde", "ecdf"}  # drawn with displot, of x's numbers (and y's); the rest with relplot
+DISTRIBUTION_KINDS = {"hist": "Histogram", "kde": "KDE", "ecdf": "ECDF"}  # the Chart dialog's Kind
+BIVARIATE = {"hist", "kde"}  # distributions that can be of a y column too, as well as x
 NEEDS_MARKERS = {"scatter", "strip", "swarm", "reg"}  # their points are nothing but markers
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
 OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
-               "swarm": "  # or 'strip'"}  # what follows kind=, naming the other kind its function draws
+               "swarm": "  # or 'strip'", "hist": "  # or 'kde' or 'ecdf'", "kde": "  # or 'hist' or 'ecdf'",
+               "ecdf": "  # or 'hist' or 'kde'"}  # what follows kind=, naming the other kinds its function draws
 FACETED = set(GRAPH_KINDS)  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
 
@@ -318,6 +323,8 @@ class GraphError(ValueError):
 
 def plot_function(kind: str) -> str:
     """The Seaborn function drawing a kind of graph."""
+    if kind in DISTRIBUTION:
+        return "displot"
     return "catplot" if kind in CATEGORICAL else "lmplot" if kind in REGRESSION else "relplot"
 
 
@@ -336,7 +343,9 @@ class GraphChoice:
     always is; for one of numbers, such as years, it has to be asked for),
     the col column, if any, splitting it into a panel for each of its
     values (categories, or numbers such as years), and for a new chart,
-    what to call its DataFrame (None: the next of df, df2, ...)."""
+    what to call its DataFrame (None: the next of df, df2, ...). For a
+    distribution, ys is empty unless it's of a y column too, and it can have
+    a density curve over a histogram's bars (kde) and a rug of ticks."""
 
     kind: str
     marker: str | None
@@ -346,6 +355,8 @@ class GraphChoice:
     y_categories: bool = False
     col: str | None = None
     frame: str | None = None
+    kde: bool = False
+    rug: bool = False
 
 
 def _is_number(value) -> bool:
@@ -365,11 +376,15 @@ class GraphColumns:
     def of(cls, frame: FrameData) -> "GraphColumns":
         columns = cls(frame.labels, [any(_is_number(v) for v in column) for column in frame.columns],
                       [any(isinstance(v, str) for v in column) for column in frame.columns])
-        if len(columns.labels) < 2:
-            raise GraphError("A chart needs at least two columns: one for x, and another for y.")
         if not any(columns.numbers):
             raise GraphError("There are no numbers to chart.")
         return columns
+
+    @property
+    def only_distribution(self) -> bool:
+        """Whether there's just the one column: a distribution can be of it,
+        but the other charts need one across and another up."""
+        return len(self.labels) < 2
 
     def category(self, label: str) -> bool:
         """Whether a column is just categories: text, without numbers."""
@@ -380,6 +395,8 @@ class GraphColumns:
         """The columns that can go up the y axis against x: those with
         numbers, and for a categorical scatter across a column of numbers,
         columns of categories too (which turn the graph sideways)."""
+        if kind in DISTRIBUTION:  # (as well as x: none, unless it's chosen)
+            return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != x]
         sideways = kind in CATEGORICAL and self.numbers[self.labels.index(x)]
         return [label for label, numbers in zip(self.labels, self.numbers)
                 if label != x and (numbers or sideways and self.category(label))]
@@ -388,7 +405,7 @@ class GraphColumns:
         """The columns that can go across: any, except that with categories
         up a categorical scatter (sideways), only those with numbers; and a
         linear regression needs numbers across too."""
-        if self.sideways([y] if y in self.labels else [], kind, y_categories):
+        if self.sideways([y] if y in self.labels else [], kind, y_categories) or kind in DISTRIBUTION:
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != y]
         if kind in REGRESSION:
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers]
@@ -417,8 +434,14 @@ class GraphColumns:
     def default_x(self, kind: str, col: str | None = None) -> str:
         """The first column that leaves another with numbers for y; for a
         categorical scatter, the first such with text, as its categories,
-        and for a linear regression, with numbers. Not the col splitting
-        the chart into panels, if there's another."""
+        and for a linear regression or a distribution, with numbers. Not
+        the col splitting the chart into panels, if there's another."""
+        if kind in DISTRIBUTION:
+            usable = self.x_options(None, kind)
+            return ([label for label in usable if label != col] or usable)[0]
+        if self.only_distribution:
+            raise GraphError(f"A {'line chart' if kind == 'line' else 'scatter chart'} needs at least two columns: "
+                             "one for x, and another for y.")
         usable = [label for label in self.labels if self.y_options(label)]
         usable = [label for label in usable if label != col] or usable
         if kind in CATEGORICAL:
@@ -430,7 +453,10 @@ class GraphColumns:
     def default_ys(self, x: str, kind: str = "line", col: str | None = None) -> list[str]:
         """For a line chart, all the columns with numbers but x and the col
         splitting it into panels (such as years), a line each; otherwise the
-        first column with numbers after x (but the col), else before it."""
+        first column with numbers after x (but the col), else before it. A
+        distribution is just of x, to start with."""
+        if kind in DISTRIBUTION:
+            return []
         options = self.y_options(x)  # (numbers only: a chart is sideways only if asked for)
         options = [label for label in options if label != col] or options
         if kind in ALL_SERIES:
@@ -452,18 +478,18 @@ def graph_columns(model, cells) -> GraphColumns:
 def graph_code(model, cells, frame_name: str = "df", kind: str = "line", marker: str | None = None,
                x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
                y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True,
-               col: str | None = None) -> str:
+               col: str | None = None, kde: bool = False, rug: bool = False) -> str:
     """Python that graphs the DataFrame `frame_name`, which dataframe_code
     makes of the same cells, with Seaborn (see frame_graph_code). GraphError
     if the cells can't be graphed."""
     return frame_graph_code(_frame(model, cells), frame_name, kind, marker, x, ys, hue, y_categories,
-                            import_pandas, import_seaborn, col)
+                            import_pandas, import_seaborn, col, kde, rug)
 
 
 def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line", marker: str | None = None,
                      x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
                      y_categories: bool = False, import_pandas: bool = True, import_seaborn: bool = True,
-                     col: str | None = None) -> str:
+                     col: str | None = None, kde: bool = False, rug: bool = False) -> str:
     """Python that graphs a DataFrame with Seaborn: column `x` across (text
     gives categories, in the sheet's order) and the `ys` column up (by
     default, the first column across and the next with numbers up, or for a
@@ -483,10 +509,13 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     column: a panel for each of its values (categories, or numbers such as
     years, in order), side by side, COL_WRAP to a row, sharing their axes.
     `import_pandas` and `import_seaborn` false leave out those imports (an
-    earlier cell has them). GraphError if it can't be graphed.
+    earlier cell has them). GraphError if it can't be graphed. For a
+    distribution ("hist", "kde", or "ecdf"), see distribution_code.
     """
     if kind not in GRAPH_KINDS:
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
+    if kind in DISTRIBUTION:
+        return distribution_code(frame, frame_name, kind, x, ys, hue, import_pandas, import_seaborn, col, kde, rug)
     columns = GraphColumns.of(frame)
     x = x if x is not None else columns.default_x(kind)
     ys = list(ys) if ys is not None else columns.default_ys(x, kind, col)
@@ -548,6 +577,68 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         lines.append(f"    kind={kind!r},{OTHER_KINDS[kind]}")
     size = "height=2.5, aspect=1.2" if col is not None else "height=4, aspect=1.5"
     lines += [f"    {marker}{size},", ")"]
+    return "\n".join(lines)
+
+
+def distribution_code(frame: FrameData, frame_name: str = "df", kind: str = "hist", x: str | None = None,
+                      ys: list[str] | None = None, hue: str | None = None, import_pandas: bool = True,
+                      import_seaborn: bool = True, col: str | None = None, kde: bool = False,
+                      rug: bool = False) -> str:
+    """Python that charts how a DataFrame's column `x` is distributed, with
+    Seaborn's displot: a histogram ("hist"), a kernel density estimate's
+    smooth curve ("kde"), or an empirical cumulative distribution ("ecdf").
+    A histogram or KDE can be of a y column too (`ys`, one at most), how the
+    two vary together: a heatmap of counts, or density contours. A
+    histogram of x alone can have its KDE curve drawn over it (`kde`); any
+    can have a `rug`, a tick along the axis for each value. `hue` and `col`
+    are as for frame_graph_code. Text in x or y isn't charted. GraphError
+    if it can't be."""
+    columns = GraphColumns.of(frame)
+    x = x if x is not None else columns.default_x(kind, col)
+    ys = list(ys or [])
+    if (x not in columns.x_options(None, kind) or len(ys) > 1 or ys and kind not in BIVARIATE
+            or any(y not in columns.y_options(x, kind) for y in ys)):
+        raise ValueError(f"can't chart the distribution of {[x, *ys]!r}")
+    if hue is not None and hue not in columns.hue_options(x):
+        raise ValueError(f"can't color the chart by {hue!r}")
+    if col is not None and col not in columns.col_options(x, ys):
+        raise ValueError(f"can't split the chart by {col!r}")
+    if kde and (kind != "hist" or ys):
+        raise ValueError("only a histogram of one column can have a KDE curve over it")
+    values = dict(zip(frame.labels, frame.columns))
+    fixes = []
+    for column in [x, *ys]:
+        if any(isinstance(v, str) for v in values[column]):
+            fixes.append(f"data[{column!r}] = pd.to_numeric(data[{column!r}], errors='coerce')  # text isn't charted")
+    if hue is not None and any(isinstance(v, str) for v in values[hue]) and any(_is_number(v) for v in values[hue]):
+        fixes.append(f"data[{hue!r}] = data[{hue!r}].astype('string')  # numbers and text: all labels")
+    if col is not None and None in values[col] and all(
+            _is_number(v) and float(v).is_integer() for v in values[col] if v is not None):  # years, with gaps
+        fixes += [f"data = data.dropna(subset=[{col!r}])  # rows without a {col!r} have no panel",
+                  f"data[{col!r}] = data[{col!r}].astype(int)  # whole numbers: 2020, not 2020.0"]
+
+    lines = ["import pandas as pd"] if import_pandas and any("pd." in fix for fix in fixes) else []
+    lines += ["import seaborn as sns"] if import_seaborn else []
+    lines += [""] if lines else []
+    of = f"{x!r} and {ys[0]!r}" if ys else repr(x)  # repr: a label can't break out of the comment
+    colored = f", colored by {hue!r}" if hue is not None else ""
+    colored += f", a panel for each {col!r}" if col is not None else ""
+    lines += [f"# {frame_name} as a chart: the distribution of {of}{colored}.", "sns.set_theme(style='whitegrid')"]
+    data = frame_name
+    if fixes:
+        lines += [f"data = {frame_name}.copy()", *fixes]
+        data = "data"
+    plotted = f"data={data}, x={x!r}" + (f", y={ys[0]!r}" if ys else "") + (f", hue={hue!r}" if hue else "")
+    lines += ["chart = sns.displot(", f"    {plotted},"]
+    if col is not None:
+        lines.append(f"    col={col!r}, col_wrap={COL_WRAP},  # a panel for each, {COL_WRAP} to a row")
+    lines.append(f"    kind={kind!r},{OTHER_KINDS[kind]}")
+    if kde:
+        lines.append("    kde=True,  # its density curve over the bars")
+    if rug:
+        lines.append("    rug=True,  # a tick along the axis for each value")
+    size = "height=2.5, aspect=1.2" if col is not None else "height=4, aspect=1.5"
+    lines += [f"    {size},", ")"]
     return "\n".join(lines)
 
 

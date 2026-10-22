@@ -229,7 +229,7 @@ def test_graph_names_dont_clash(pyplot, app):
 
 
 @pytest.mark.parametrize("cells, problem", [
-    (block(0, 0, 3, 0), "at least two columns"),
+    (block(0, 0, 3, 0), "no numbers"),  # Month's text
     (block(0, 0, 3, 0) | block(0, 3, 3, 3), "no numbers"),  # D is empty
 ])
 def test_cells_that_cant_be_graphed(sales, cells, problem):
@@ -1205,10 +1205,10 @@ def test_cancelling_the_graph_dialog(window, dialogs):
 
 
 @pytest.mark.parametrize("selection, problem", [
-    ((0, 2, 3, 3), "at least two columns"),  # C and D, but D is empty
+    ((0, 2, 3, 3), "no numbers"),  # C and D, but D is empty
     ((0, 0, 3, 2), None),  # Sales has numbers, so Note's text just isn't charted
     ((10, 0, 12, 2), "The selection is empty."),
-    ((0, 0, 3, 0), "at least two columns"),  # one column
+    ((0, 0, 3, 0), "no numbers"),  # one column, of text
 ])
 def test_graph_problems(window, dialogs, selection, problem):
     if problem is None:
@@ -1252,7 +1252,6 @@ def test_whole_sheet_when_one_cell_is_selected(window, dialogs):
 @pytest.mark.parametrize("cells, problem", [
     ({}, "The sheet is empty."),
     ({(0, 0): "a", (0, 1): "b"}, "There are no numbers to chart."),
-    ({(0, 0): "x", (1, 0): "1"}, "A chart needs at least two columns: one for x, and another for y."),
 ])
 def test_whole_sheet_that_cant_be_charted(app, dialogs, cells, problem):
     window = MainWindow()

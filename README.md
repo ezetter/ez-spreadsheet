@@ -556,11 +556,19 @@ The Chart dialog has these choices:
   says so. Typing another name goes back to a new DataFrame of the sheet's
   cells. For a chart being changed (see below), it shows that chart's
   DataFrame, and a new name renames it.
-- **Chart type:** Line, Scatter, or Categorical scatter. Line and Scatter are
-  drawn with Seaborn's `relplot`; a categorical scatter, with `catplot`, puts
-  a column of categories (text such as species or months) across and spreads
-  each category's points out a little at random so they don't all sit on one
-  line (a strip plot).
+- **Chart type:** Line, Scatter, Categorical scatter, or Distribution. Line
+  and Scatter are drawn with Seaborn's `relplot`; a categorical scatter, with
+  `catplot`, puts a column of categories (text such as species or months)
+  across and spreads each category's points out a little at random so they
+  don't all sit on one line (a strip plot). A distribution, drawn with
+  `displot`, shows how a column's numbers are spread (see below).
+- **Kind**, shown only for a distribution: **Histogram** (the default: bars
+  counting the values in each range), **KDE** (a kernel density estimate's
+  smooth curve), or **ECDF** (the share of values up to each value, rising
+  from 0 to 1).
+- **KDE curve**, shown only for a histogram: draws the KDE's curve over the
+  bars (`kde=True`). It's unavailable with a Y axis column, as Seaborn
+  draws it only over a histogram of one column.
 - **Swarm plot**, shown only for a categorical scatter: spreads each
   category's points out so that none overlap, showing how they're
   distributed (`kind='swarm'`). With many points, it gets wide.
@@ -572,14 +580,18 @@ The Chart dialog has these choices:
   isn't charted. With a hue, each color gets its own line; with a col, each
   panel does. It's unavailable unless there are two columns with numbers.
 - **X axis:** any of the selected columns. Text in it gives categories, in
-  the sheet's order.
+  the sheet's order. For a distribution, a column with numbers: the one
+  whose spread it shows.
 - **Y axis:** one of the other columns with numbers, or, for a line chart,
   **All**: every other column with numbers, each its own line, named in the
   legend (offered when there are two or more). For a categorical
   scatter with numbers across, it can also be a column of categories (text),
   which turns the chart sideways: the categories run down the side and the
   numbers across. While categories are up, the X axis offers only columns
-  with numbers; and changing to Line or Scatter puts numbers back up.
+  with numbers; and changing to Line or Scatter puts numbers back up. For a
+  distribution it's optional: **None** (the default) or another column with
+  numbers, for a histogram or KDE of how the two vary together (a heatmap
+  of counts, or density contours). An ECDF is of one column, so it has none.
 - **Y axis as categories**, shown only for a categorical scatter: for numbers
   up that are really categories, such as years, check it to turn the chart
   sideways with each year as a category down the side (`orient='h'` in the
@@ -603,11 +615,13 @@ The Chart dialog has these choices:
   are left out. It's unavailable if there's no other column. Changing the
   chart type keeps the panels, and a categorical scatter's X axis starts at
   a column of text other than the Col's.
+- **Rug**, shown only for a distribution: a small tick along the axis for
+  each value (`rug=True`).
 - **Marker**, drawn on each point: None (the default), Circle, Point, Square,
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
   choosing one switches None to Circle, and choosing Line again switches it
-  back.
+  back. A distribution has no points, so no Marker.
 
 The axes start at sensible defaults: the first column across, and up, for a
 line chart, All; for the other types, the next column with numbers (a column
@@ -616,16 +630,24 @@ text goes across instead. The defaults follow the chart type until you choose an
 yourself, and the Y axis follows the X axis until you choose it. Choosing a
 new X axis clears the Hue or Col if it was that column.
 
-The type (including Swarm plot) and marker start from your last choices
-while EZ Sheet is open. Cancel adds nothing. If the cells can't be charted (the
-selection or the sheet is empty, or has just one column, or no numbers), an
-error says why, before the dialog appears. (With charts already in the
+A distribution's Hue colors each of its values' share (a histogram's bars
+are stacked over each other, translucent), and its Col splits it into
+panels, as for the other types. Switching to Distribution starts with no Y
+axis column, and with the X axis at a column with numbers.
+
+The type (including Swarm plot, and a distribution's kind) and marker start
+from your last choices while EZ Sheet is open. Cancel adds nothing. A single
+column of numbers can be charted only as a distribution, so the dialog
+offers just that. If the cells can't be charted (the selection or the sheet
+is empty, or has no numbers), an error says why, before the dialog appears. (With charts already in the
 notebook, the dialog's Chart list says it instead; see below.)
 
 - The choices are in the cell's code too: change `kind='line'` to
-  `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`), or add
-  or change `marker='o'` (any Matplotlib marker; `lmplot` calls it
-  `markers='o'`), and run the cell again (Shift+Return).
+  `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`, or a
+  distribution's `'hist'` to `'kde'` or `'ecdf'`), or add or change
+  `marker='o'` (any Matplotlib marker; `lmplot` calls it `markers='o'`), or a
+  distribution's `kde=True` and `rug=True`, and run the cell again
+  (Shift+Return).
 - Text in the y columns isn't charted, and rows without an x value are left
   out. A line joins the points on either side of a missing value.
 - The chart is a picture of the data when the cell ran, saved with the
@@ -636,7 +658,8 @@ notebook, the dialog's Chart list says it instead; see below.)
 
 Once the notebook has charts, choosing Chart always shows a **Chart** list at
 the top of the Chart dialog: **New chart**, then the notebook's charts, named
-for their DataFrame and columns, such as "df2: Sales and Cost against Month".
+for their DataFrame and columns, such as "df2: Sales and Cost against Month"
+or "df3: the distribution of Tip".
 
 - **New chart** makes a new one, of the selected cells or the whole sheet, as
   above. Above the list, the dialog says what it's of ("A new chart of the
@@ -651,11 +674,16 @@ OK:
 - Changing only the type or marker changes just `kind=`, `marker=`, and
   whether `relplot`, `catplot`, or `lmplot` draws it, so anything else you
   changed in the cell stays. (`lmplot` has no `kind=`, and calls its marker
-  `markers=`; switching to or from it takes out or puts back `kind=`.)
+  `markers=`; switching to or from it takes out or puts back `kind=`.) For a
+  distribution, changing its kind, KDE curve, or rug likewise changes just
+  `kind=`, `kde=`, and `rug=`.
 - Changing the axes, the hue, or the col writes the chart's cell afresh, from
   the data in its DataFrame's cell, so changes you made to the chart's cell by
-  hand are replaced. The columns can be changed only if that cell is found,
-  written as EZ Sheet writes it; otherwise they're shown but greyed out.
+  hand are replaced, as does making a distribution another type of chart or
+  the other way round. The columns can be changed only if that cell is found,
+  written as EZ Sheet writes it; otherwise they're shown but greyed out, and
+  a chart can't switch between a distribution and another type (nor an
+  ECDF be chosen for a distribution of two columns).
 - A chart made before the Y axis took one column may chart several, a series
   each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
   each series has its own color; choosing one column instead redraws it with
@@ -676,8 +704,8 @@ OK:
   Cmd+Z there brings back the old code. The cell runs again to redraw the
   chart. If Python has restarted since its DataFrame was made (or the sheet
   was opened since), the imports cell and the DataFrame's cell run first.
-- Any cell drawing one `sns.relplot(...)`, `sns.catplot(...)`, or
-  `sns.lmplot(...)` chart of a kind the dialog has counts, including ones you
+- Any cell drawing one `sns.relplot(...)`, `sns.catplot(...)`,
+  `sns.lmplot(...)`, or `sns.displot(...)` chart of a kind the dialog has counts, including ones you
   write, as long as its `kind=` and `marker=` (`markers=`), if it has them,
   are written out, such as `kind='line'` and `marker='o'`. (An `lmplot` with
   a list of markers, one per hue, can't be changed.)

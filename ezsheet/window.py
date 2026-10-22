@@ -89,6 +89,7 @@ from .graphs import (
 from .load_data import answer, columns_request, data_request, frame_columns, frames, frames_request, sheet_writes
 from .load_data_dialog import LoadDataDialog
 from .notebook import (
+    DISTRIBUTION,
     IMPORTS_CELL,
     GraphChoice,
     GraphError,
@@ -2816,7 +2817,7 @@ class MainWindow(QMainWindow):
         try:
             code = frame_graph_code(option.data, option.frame.name, choice.kind, choice.marker, choice.x,
                                     choice.ys, choice.hue, choice.y_categories, import_pandas=pandas is None,
-                                    import_seaborn=seaborn is None, col=choice.col)
+                                    import_seaborn=seaborn is None, col=choice.col, kde=choice.kde, rug=choice.rug)
         except (ValueError, GraphError) as e:
             self._show_error(f"Couldn't make a chart of {option.frame.name}.", str(e))
             return None
@@ -2862,7 +2863,7 @@ class MainWindow(QMainWindow):
         pandas, seaborn = importing_cell(self.notebook, "pandas"), importing_cell(self.notebook, "seaborn")
         graph = graph_code(self.model, cells, name, choice.kind, choice.marker, choice.x, choice.ys, choice.hue,
                            choice.y_categories, import_pandas=pandas is None, import_seaborn=seaborn is None,
-                           col=choice.col)
+                           col=choice.col, kde=choice.kde, rug=choice.rug)
         _frame_id, graph_id = self._run_in_notebook(
             [dataframe_code(self.model, cells, name, pandas is None), graph], [pandas, seaborn])
         self.notebook_window.reveal(graph_id)  # so the chart can be seen when it's drawn
@@ -2872,8 +2873,10 @@ class MainWindow(QMainWindow):
     def _change_chart(self, graphs, index: int, chosen: GraphChoice) -> str | None:
         """Redraw one of the notebook's charts with the choices made. New
         columns (across, up, for the hue, or splitting it into panels) mean
-        writing its cell afresh, from its DataFrame's cell; otherwise just its
-        kind and marker change in the code. A new name for its DataFrame
+        writing its cell afresh, from its DataFrame's cell, as does a
+        distribution becoming another kind of chart or the other way round;
+        otherwise just its kind and marker (and a distribution's KDE and rug)
+        change in the code. A new name for its DataFrame
         renames it in its cell and the cells after it that use it. Returns
         its cell id, or None if it couldn't be changed."""
         graph = graphs[index]
@@ -2886,16 +2889,18 @@ class MainWindow(QMainWindow):
                 frame = chosen.frame
             source = renamed.get(graph.cell_id, self.notebook.cell(graph.cell_id).source)
             columns_before = (graph.x_label, graph.y_labels, graph.hue, graph.col, graph.columns is not None
-                              and graph.columns.sideways(graph.y_labels, graph.kind, graph.y_categories))
+                              and graph.columns.sideways(graph.y_labels, graph.kind, graph.y_categories),
+                              graph.kind in DISTRIBUTION)
             columns_after = (chosen.x, chosen.ys, chosen.hue, chosen.col, graph.columns is not None
-                             and graph.columns.sideways(chosen.ys, chosen.kind, chosen.y_categories))
+                             and graph.columns.sideways(chosen.ys, chosen.kind, chosen.y_categories),
+                             chosen.kind in DISTRIBUTION)
             if graph.data is not None and columns_after != columns_before:
                 source = frame_graph_code(graph.data, frame, chosen.kind, chosen.marker, chosen.x,
                                           chosen.ys, chosen.hue, chosen.y_categories,
                                           import_pandas=pandas is None, import_seaborn=seaborn is None,
-                                          col=chosen.col)
+                                          col=chosen.col, kde=chosen.kde, rug=chosen.rug)
             else:
-                source = change_graph(source, chosen.kind, chosen.marker)
+                source = change_graph(source, chosen.kind, chosen.marker, chosen.kde, chosen.rug)
         except (ValueError, GraphError) as e:
             self._show_error("Couldn't change the chart.", str(e))
             return None

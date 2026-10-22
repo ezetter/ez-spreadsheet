@@ -29,8 +29,8 @@ class Dialogs:
         # left out are the defaults (for a new graph) or the graph's own (when changing one).
         self.graph_answer = ("line", None)
         self.graph_prompts = []  # (the column labels, the choices it started with) each time it's shown
-        # With charts in the notebook: (which, kind, marker[, x, ys[, hue[, y_categories]]]), which being
-        # a chart's index or "new"; None cancels.
+        # With charts in the notebook: (which, kind, marker[, x, ys[, hue[, y_categories[, col[, kde[, rug]]]]]]),
+        # which being a chart's index or "new"; None cancels. (graph_answer likewise, without which.)
         self.graph_change_answer = None
         self.chart_prompts = []  # (the new chart's columns, what it's of, why it can't be made) each time
         self.graph_change_prompts = []  # (the graphs offered, the one it started with)
@@ -167,7 +167,8 @@ def dialogs(monkeypatch):
         x = axes[0] if axes else columns.default_x(kind)
         return GraphChoice(kind, marker, x, axes[1] if len(axes) > 1 else columns.default_ys(x, kind),
                            axes[2] if len(axes) > 2 else None, axes[3] if len(axes) > 3 else False,
-                           axes[4] if len(axes) > 4 else None, name)
+                           axes[4] if len(axes) > 4 else None, name, axes[5] if len(axes) > 5 else False,
+                           axes[6] if len(axes) > 6 else False)
 
     def ask_graph_options(window, columns, source, frame, chart_frames=(), problem=None):
         dialogs.graph_prompts.append((list(columns.labels) if columns else [], (window.graph_kind, window.graph_marker)))
@@ -196,7 +197,8 @@ def dialogs(monkeypatch):
                                   axes[2] if len(axes) > 2 else graph.hue,
                                   axes[3] if len(axes) > 3 else graph.y_categories,
                                   axes[4] if len(axes) > 4 else graph.col if kind in FACETED else None,
-                                  dialogs.rename_answer)
+                                  dialogs.rename_answer, axes[5] if len(axes) > 5 else graph.kde,
+                                  axes[6] if len(axes) > 6 else graph.rug)
 
     monkeypatch.setattr(MainWindow, "_ask_chart", ask_chart)
 

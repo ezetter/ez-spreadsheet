@@ -10,8 +10,11 @@ from .frame_name_dialog import FrameNameField
 from .graphs import frame_labels
 from .notebook import (
     ALL_SERIES,
+    BIVARIATE,
     CATEGORICAL,
     COL_WRAP,
+    DISTRIBUTION,
+    DISTRIBUTION_KINDS,
     FACETED,
     GRAPH_TYPES,
     NEEDS_MARKERS,
@@ -32,7 +35,8 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     "*": "★ Star",
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
-TYPE_OF = {"swarm": "strip", "reg": "scatter"}  # the chart type of kinds that are a checkbox of another
+TYPE_OF = {"swarm": "strip", "reg": "scatter", "kde": "hist", "ecdf": "hist"}  # the chart type of kinds
+# that are a checkbox of another, or one of a type's kinds (a distribution's)
 NO_HUE = "None"
 NO_COL = "None"
 NEW_CHART = "New chart"
@@ -46,6 +50,15 @@ NO_COLS_TIP = "There's no column, besides the X and Y axes', to split the chart 
 REGRESSION_TIP = ("Fit a straight line to the points, with a band showing its 95% confidence interval "
                   "(Seaborn's lmplot). It needs numbers across, so the X axis offers only columns with numbers.")
 NO_REGRESSION_TIP = "A linear regression needs two columns with numbers: one across, and one up."
+NO_Y = "None"  # a distribution's Y: none, just X's
+DISTRIBUTION_TIP = ("How the X axis column's numbers are spread: a histogram's bars, a KDE's smooth curve, "
+                    "or an ECDF's running share of them (Seaborn's displot)")
+DISTRIBUTION_Y_TIP = ("Optional: a histogram or KDE of two columns shows how they vary together, as a "
+                      "heatmap of counts or density contours")
+ECDF_Y_TIP = "An ECDF is of one column, the X axis's."
+KDE_TIP = "Draw a kernel density estimate's smooth curve over the histogram's bars"
+NO_KDE_TIP = "A KDE curve goes over a histogram of one column: choose None for the Y axis."
+RUG_TIP = "Draw a tick along the axis for each value"
 _CURRENT = object()  # (for _set_axes: the Col chosen now)
 
 
@@ -59,7 +72,10 @@ def graph_labels(graphs) -> list[str]:
 
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, which can have a linear regression
-    line fitted to it, or Categorical scatter, which can be a swarm plot),
+    line fitted to it, Categorical scatter, which can be a swarm plot, or
+    Distribution, a histogram, KDE, or ECDF of the X axis column's numbers,
+    and optionally the Y axis's, with a KDE curve over a histogram and a
+    rug, and no marker),
     the X axis column, the Y axis column, the Hue column whose values color
     the points (None by default), the Col column splitting it into a panel
     for each of its values (None by default; a column of numbers, such as
@@ -126,6 +142,14 @@ class GraphDialog(QDialog):
         for key, name in GRAPH_TYPES.items():
             self.kind_box.addItem(name, key)
         form.addRow("Chart type:", self.kind_box)
+        self.distribution_box = QComboBox()  # a distribution's kind
+        for key, name in DISTRIBUTION_KINDS.items():
+            self.distribution_box.addItem(name, key)
+        self.distribution_box.setToolTip(DISTRIBUTION_TIP)
+        form.addRow("Kind:", self.distribution_box)
+        self.kde_box = QCheckBox("KDE curve")
+        self.kde_box.setToolTip(KDE_TIP)
+        form.addRow("", self.kde_box)
         self.swarm_box = QCheckBox("Swarm plot")
         self.swarm_box.setToolTip("Spread each category's points out so none overlap, "
                                   "instead of scattering them a little at random")
@@ -146,6 +170,9 @@ class GraphDialog(QDialog):
         self.col_box = QComboBox()
         self.col_box.setToolTip(COL_TIP)
         form.addRow("Col:", self.col_box)
+        self.rug_box = QCheckBox("Rug")
+        self.rug_box.setToolTip(RUG_TIP)
+        form.addRow("", self.rug_box)
         self.marker_box = QComboBox()
         for code, label in MARKERS.items():
             self.marker_box.addItem(label, code)
@@ -163,9 +190,11 @@ class GraphDialog(QDialog):
         self._older_ys = None  # the series of a chart being changed that has several (they stay)
         self._every = []  # what All takes up now
         self._none_replaced = False  # a scatter graph swapped None for circles, to undo on Line
+        self._distribution = False  # whether the type's Distribution, as last shown
         self._x_chosen = bool(self.graphs)  # a graph's own columns stay; a new one's follow the type
         self._y_chosen = bool(self.graphs)  # likewise, the y follows the x until chosen
         self.kind_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
+        self.distribution_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.swarm_box.toggled.connect(lambda _checked: self._kind_changed())
         self.regression_box.toggled.connect(lambda _checked: self._kind_changed())
         self.categories_box.toggled.connect(lambda _checked: self._categories_toggled())
@@ -191,6 +220,8 @@ class GraphDialog(QDialog):
 
     def kind(self) -> str:
         kind = self.kind_box.currentData()
+        if kind == "hist":
+            return self.distribution_box.currentData()
         if kind in CATEGORICAL and self.swarm_box.isChecked():
             return "swarm"
         if kind == TYPE_OF["reg"] and self.regression_box.isChecked():
@@ -198,7 +229,14 @@ class GraphDialog(QDialog):
         return kind
 
     def marker(self) -> str | None:
-        return self.marker_box.currentData()
+        return None if self.kind() in DISTRIBUTION else self.marker_box.currentData()
+
+    def kde(self) -> bool:
+        """Whether a histogram of one column has its KDE curve over it."""
+        return self.kind() == "hist" and not self.ys() and self.kde_box.isChecked()
+
+    def rug(self) -> bool:
+        return self.kind() in DISTRIBUTION and self.rug_box.isChecked()
 
     def x(self) -> str | None:
         return self.x_box.currentData()
@@ -224,7 +262,7 @@ class GraphDialog(QDialog):
 
     def choice(self) -> GraphChoice:
         return GraphChoice(self.kind(), self.marker(), self.x(), self.ys(), self.hue(), self.y_categories(),
-                           self.col(), self.frame())
+                           self.col(), self.frame(), self.kde(), self.rug())
 
     # --- Showing settings ---
 
@@ -256,12 +294,14 @@ class GraphDialog(QDialog):
         self.columns = columns
         self._x_chosen = self._y_chosen = False
         self._older_ys = None
+        if columns is not None and columns.only_distribution and kind not in DISTRIBUTION:
+            kind = "hist"  # (one column: there's just its distribution)
         if problem is not None:
             self._say(f"A new chart of {source} can't be made. {problem}", error=True)
         else:
             self._say(f"A new chart of {source}." if source else "")
         self._allow(problem is None)
-        self._show(kind, marker, None, None, None, False, None)
+        self._show(kind, marker, None, None, None, False, None, False, False)
 
     def _show_graph(self, index: int) -> None:
         graph = self.graphs[index]
@@ -277,11 +317,15 @@ class GraphDialog(QDialog):
         if graph.columns is not None and graph.x_label not in graph.columns.labels:
             self.columns = None  # its x isn't one of its DataFrame's columns: changed by hand
         self._show(graph.kind, graph.marker, graph.x_label, graph.y_labels, graph.hue, graph.y_categories,
-                   graph.col)
+                   graph.col, graph.kde, graph.rug)
 
     def _show(self, kind: str, marker: str | None, x: str | None, ys: list[str] | None, hue: str | None,
-              y_categories: bool, col: str | None) -> None:
+              y_categories: bool, col: str | None, kde: bool, rug: bool) -> None:
         self._loading = True
+        self.distribution_box.setCurrentIndex(max(0, self.distribution_box.findData(kind)))
+        self.kde_box.setChecked(kde)
+        self.rug_box.setChecked(rug)
+        self._limit_types(kind, ys or [])
         if marker is not None and self.marker_box.findData(marker) < 0:
             self.marker_box.addItem(marker, marker)  # one set in the code that the list doesn't have
         self._none_replaced = False
@@ -305,7 +349,7 @@ class GraphDialog(QDialog):
             self.x_box.clear()
             self.x_box.addItem(x or "?", x)
             self.y_box.clear()
-            self.y_box.addItem(", ".join(ys or []) or "?", list(ys or []))
+            self.y_box.addItem(", ".join(ys or []) or (NO_Y if kind in DISTRIBUTION else "?"), list(ys or []))
             self._loading = False
             self._fill_cols(col)
         self._fill_hues(hue)
@@ -321,9 +365,11 @@ class GraphDialog(QDialog):
         kind = self.kind()
         col = self.col_box.currentData() if col is _CURRENT else col
         splitting = col if kind in FACETED else None
+        if kind not in DISTRIBUTION and ys is not None and not ys:
+            ys = None  # (a distribution's None: the type's default instead)
         if x not in self.columns.x_options(None, kind):  # a linear regression's x has to have numbers
             x = self.columns.default_x(kind, splitting)
-        options = self.columns.y_options(x, kind)
+        options = self.columns.y_options(x, kind) if kind not in DISTRIBUTION or kind in BIVARIATE else []
         every = [y for y in self.columns.y_options(x) if y != splitting] if kind in ALL_SERIES else []
         if ys is not None and len(ys) > 1 and ys == self._every and len(every) > 1:
             ys = every  # All still, though what it takes may have changed
@@ -338,6 +384,8 @@ class GraphDialog(QDialog):
             self.x_box.addItem(label, label)
         self.x_box.setCurrentIndex(max(0, self.x_box.findData(x)))
         self.y_box.clear()
+        if kind in DISTRIBUTION:
+            self.y_box.addItem(NO_Y, [])
         if len(every) > 1:
             self.y_box.addItem(ALL_YS, every)
         for label in options:
@@ -410,9 +458,32 @@ class GraphDialog(QDialog):
         """Whether the type and marker can be chosen, and OK clicked. (The
         DataFrame can always be: another may be chartable.)"""
         self._allowed = allowed
-        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box):
+        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box,
+                       self.distribution_box, self.kde_box, self.rug_box):
             widget.setEnabled(allowed)
         self._update_ok()
+
+    def _limit_types(self, kind: str, ys: list[str]) -> None:
+        """The types a chart can be: of one column, just Distribution; and
+        one whose columns aren't known (so it can't be written afresh) can
+        change only to its own sort, a distribution or another (and an
+        ECDF has no y)."""
+        model = self.kind_box.model()
+        for i in range(self.kind_box.count()):
+            distribution = self.kind_box.itemData(i) == "hist"
+            if self.columns is None:
+                usable = distribution == (kind in DISTRIBUTION)
+                tip = "Its DataFrame's cell wasn't found, so it can't become this kind of chart."
+            elif self.columns.only_distribution:
+                usable, tip = distribution, "With one column, there's just its distribution to chart."
+            else:
+                usable, tip = True, ""
+            model.item(i).setEnabled(usable)
+            model.item(i).setToolTip("" if usable else tip)
+        ecdf = self.distribution_box.model().item(self.distribution_box.findData("ecdf"))
+        usable = not (self.columns is None and ys)
+        ecdf.setEnabled(usable)
+        ecdf.setToolTip("" if usable else ECDF_Y_TIP)
 
     def _update_ok(self) -> None:
         """OK, unless a new chart can't be made, or its DataFrame's name won't do."""
@@ -434,6 +505,18 @@ class GraphDialog(QDialog):
         if self._loading:
             return
         kind = self.kind()
+        distribution = kind in DISTRIBUTION
+        self.form.setRowVisible(self.distribution_box, distribution)
+        self.form.setRowVisible(self.kde_box, kind == "hist")
+        self.form.setRowVisible(self.rug_box, distribution)
+        self.form.setRowVisible(self.marker_box, not distribution)
+        if distribution != self._distribution and self.columns is not None and not self._loading:
+            self._distribution = distribution  # (a distribution starts with no y; others, with theirs)
+            x, hue = self.x(), self.hue_box.currentData()
+            self._set_axes(x, [] if distribution else None)
+            if self.x() != x:  # (a distribution's across has numbers)
+                self._fill_hues(hue if hue != self.x() else None)
+        self._distribution = distribution
         self.form.setRowVisible(self.swarm_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.categories_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.col_box, kind in FACETED)
@@ -461,8 +544,9 @@ class GraphDialog(QDialog):
         # What works across and up depends on the type; and a new chart's y follows it until chosen.
         x, hue = self.x(), self.hue_box.currentData()
         self._set_axes(x, self.ys() if self._y_chosen else None)
-        if self.x() != x:  # numbers across, for a linear regression
+        if self.x() != x:  # numbers across, for a linear regression or a distribution
             self._fill_hues(hue if hue != self.x() else None)
+        self._show_distribution()
 
     def _categories_toggled(self) -> None:
         if not self._loading and self.columns is not None:
@@ -498,6 +582,23 @@ class GraphDialog(QDialog):
         several = len(ys) > 1
         self.hue_box.setEnabled(not several)
         self.hue_box.setToolTip("Each column is its own series, in its own color." if several else HUE_TIP)
+        self._show_distribution()
+
+    def _show_distribution(self) -> None:
+        """A distribution's Y is optional, but an ECDF has none; and a KDE
+        curve goes over a histogram of one column."""
+        kind, ys = self.kind(), self.ys()
+        if kind not in DISTRIBUTION:
+            if self.columns is not None:
+                self.y_box.setEnabled(True)  # (from an ECDF's)
+                self.y_box.setToolTip("")
+            return
+        bivariate = kind in BIVARIATE
+        self.y_box.setEnabled(bivariate and self.columns is not None)
+        self.y_box.setToolTip(DISTRIBUTION_Y_TIP if bivariate else ECDF_Y_TIP)
+        alone = not ys
+        self.kde_box.setEnabled(self._allowed and alone)
+        self.kde_box.setToolTip(KDE_TIP if alone else NO_KDE_TIP)
 
     def _col_changed(self) -> None:
         """A column of numbers splitting a line chart isn't one of All's lines."""

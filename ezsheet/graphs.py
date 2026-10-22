@@ -1,10 +1,12 @@
 """The notebook's charts (graphs, in the code's names): finding cells that
-draw a Seaborn chart (one sns.relplot, sns.catplot, or sns.lmplot call),
-reading what they draw, and changing it, for the Chart dialog.
+draw a Seaborn chart (one sns.relplot, sns.catplot, sns.lmplot, or
+sns.displot call), reading what they draw, and changing it, for the Chart
+dialog.
 
 Changing a graph's type or marker touches only kind=, marker= (lmplot's
-markers=), and which of relplot, catplot, and lmplot draws it, so anything
-else changed by hand in its cell stays. Changing its columns writes the cell afresh, from the data in the
+markers=), and which of relplot, catplot, and lmplot draws it (and for a
+distribution, its kde= and rug=), so anything else changed by hand in its
+cell stays. Changing its columns writes the cell afresh, from the data in the
 DataFrame's own cell. Renaming its DataFrame renames it in that cell, and
 in the cells after it that use it.
 """
@@ -15,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 
 from .notebook import (
+    DISTRIBUTION,
     FRAME_COMMENT,
     GRAPH_KINDS,
     OTHER_KINDS,
@@ -28,10 +31,11 @@ from .notebook import (
     plot_function,
 )
 
-FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm"), "lmplot": ("reg",)}  # here
-DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg"}  # their kind when none is given
+FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm"), "lmplot": ("reg",),
+                  "displot": ("hist", "kde", "ecdf")}  # the kinds each draws, here
+DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg", "displot": "hist"}  # with no kind=
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a (?:chart|graph)\b", re.M)  # as graph_code writes it (or did)
-_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm)\1[^\n]*")  # "# or 'scatter'"
+_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|hist|kde|ecdf)\1[^\n]*")  # "# or 'line'"
 _NOT_LITERAL = object()
 
 
@@ -49,6 +53,8 @@ class GraphCell:
     y_categories: bool = False  # orient='h': sideways, with the y column as categories
     col: str | None = None  # the column splitting it into panels, one for each of its values, if any
     frame_cell: str | None = None  # the id of the cell making its DataFrame, if found
+    kde: bool = False  # a distribution's: a density curve over its histogram
+    rug: bool = False  # a distribution's: a tick for each value along the axis
 
     @property
     def renamable(self) -> bool:
@@ -57,7 +63,9 @@ class GraphCell:
 
     @property
     def title(self) -> str:
-        """What it graphs: "Sales and Cost against Month"."""
+        """What it graphs: "Sales and Cost against Month", or "the distribution of Tip"."""
+        if self.kind in DISTRIBUTION and self.x_label:
+            return f"the distribution of {' and '.join([self.x_label, *self.y_labels])}"
         if not self.x_label or not self.y_labels:
             return f"a chart of {self.frame}" if self.frame else "a chart"
         ys = self.y_labels
@@ -104,10 +112,12 @@ def read_graph(source: str) -> GraphCell | None:
     if kind not in FUNCTION_KINDS[function]:
         return None
     key = marker_keyword(kind)
-    marker = _literal(keywords[key]) if key in keywords else None
+    marker = _literal(keywords[key]) if key in keywords and kind not in DISTRIBUTION else None
     if not (marker is None or isinstance(marker, str) and marker):  # (not a list of them, one per hue)
         return None
     graph = GraphCell("", kind, marker, frame=_frame_name(source, tree))
+    if kind in DISTRIBUTION:
+        graph.kde, graph.rug = _literal(keywords.get("kde")) is True, _literal(keywords.get("rug")) is True
     x, y = _literal(keywords.get("x")), _literal(keywords.get("y"))
     graph.x_label = x if isinstance(x, str) else None
     melted = _melted_columns(tree)
@@ -123,14 +133,23 @@ def read_graph(source: str) -> GraphCell | None:
     return graph
 
 
-def change_graph(source: str, kind: str, marker: str | None) -> str:
+def change_graph(source: str, kind: str, marker: str | None, kde: bool = False, rug: bool = False) -> str:
     """The cell's code with its graph's kind and marker changed (no marker:
     marker= is taken out), switching between relplot, catplot, and lmplot as
-    the kind needs. lmplot has no kind=, and calls its marker markers=."""
+    the kind needs. lmplot has no kind=, and calls its marker markers=. A
+    distribution (displot) has no marker, but can have kde= and rug=; it
+    can't become another kind of chart, nor another one of it, this way
+    (its cell has to be written afresh)."""
     if kind not in GRAPH_KINDS:  # (for a hue or new columns, the cell is written afresh)
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
-    if read_graph(source) is None:
+    graph = read_graph(source)
+    if graph is None:
         raise ValueError("the code doesn't draw a chart that can be changed")
+    if (graph.kind in DISTRIBUTION) != (kind in DISTRIBUTION):
+        raise ValueError("a chart can't become a distribution, or a distribution another chart, without its "
+                         "DataFrame's data, from its cell")
+    if kind in DISTRIBUTION:
+        return _change_distribution(source, graph, kind, kde, rug)
     _tree, call = _plot_call(source)
     at = _Positions(source)
     keywords = {k.arg: k for k in call.keywords if k.arg}
@@ -207,6 +226,73 @@ def change_graph(source: str, kind: str, marker: str | None) -> str:
     if changed is None or (changed.kind, changed.marker) != (kind, marker or None):
         raise ValueError("the chart's code couldn't be changed")
     return source
+
+
+def _change_distribution(source: str, graph: GraphCell, kind: str, kde: bool, rug: bool) -> str:
+    """A displot's kind, kde=, and rug= changed (see change_graph)."""
+    if graph.y_labels and kind not in ("hist", "kde"):
+        raise ValueError("an ECDF is of one column, not two")
+    if kde and (kind != "hist" or graph.y_labels):
+        raise ValueError("only a histogram of one column can have a KDE curve over it")
+    _tree, call = _plot_call(source)
+    at = _Positions(source)
+    keywords = {k.arg: k for k in call.keywords if k.arg}
+    edits, added = [], []  # (start, end, new text); keywords to add: (text, comment)
+    if "kind" in keywords:
+        value = keywords["kind"].value
+        start, end = at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset)
+        edits.append((start, end, repr(kind)))
+        comment = _OTHER_KIND.search(source, end, _line_end(source, end))
+        if comment:
+            edits.append((comment.start(), comment.end(), OTHER_KINDS[kind]))
+    elif kind != "hist":  # (displot's own kind)
+        added.append((f"kind={kind!r},", OTHER_KINDS[kind]))
+    for name, on, note in (("kde", kde, "  # its density curve over the bars"),
+                           ("rug", rug, "  # a tick along the axis for each value")):
+        if name in keywords and _literal(keywords[name].value) is on:
+            continue
+        if name in keywords and on:  # there as False
+            value = keywords[name].value
+            edits.append((at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset), "True"))
+        elif name in keywords:
+            edits.append((*_keyword_and_comment(source, at, keywords[name]), ""))
+        elif on:
+            added.append((f"{name}=True,", note))
+    indent = _line_indent(source, at, call, keywords.get("height"))
+    for text, note in added:
+        if indent:  # graph_code's layout: a line of its own, before "height=4, ..."
+            spot = at(keywords["height"].lineno, 0)
+            edits.append((spot, spot, f"{indent}{text}{note}\n"))
+        else:
+            paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
+            edits.append((paren + 1, paren + 1, f"{text} "))
+    merged = []  # (two keywords taken out can share a comma)
+    for start, end, text in sorted(edits, key=lambda edit: edit[0]):
+        if merged and not text and not merged[-1][2] and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]), "")
+        else:
+            merged.append((start, end, text))
+    for start, end, text in reversed(merged):
+        source = source[:start] + text + source[end:]
+    changed = read_graph(source)
+    if changed is None or (changed.kind, changed.kde, changed.rug) != (kind, kde, rug):
+        raise ValueError("the chart's code couldn't be changed")
+    return source
+
+
+def _keyword_and_comment(source: str, at, keyword) -> tuple[int, int]:
+    """Where `keyword=value,` is, with the comment after it, and its whole
+    line if that leaves the line empty."""
+    start, end = _keyword_span(source, at, keyword)
+    if source[end - 1:end] == "\n":
+        return start, end  # (its whole line already)
+    comment = re.compile(r"[ \t]*#[^\n]*").match(source, end)
+    if comment:
+        end = comment.end()
+    line_start, line_end = source.rfind("\n", 0, start) + 1, _line_end(source, end)
+    if not source[line_start:start].strip() and not source[end:line_end].strip():
+        return line_start, min(line_end + 1, len(source))
+    return start, end
 
 
 def frame_cell(notebook, graph_cell_id: str, frame: str | None) -> str | None:
