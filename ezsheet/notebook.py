@@ -301,23 +301,30 @@ def dataframe_parts(model, cells, name: str) -> tuple[str, str]:
 
 GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical",
                "hist": "Distribution"}  # the Chart dialog's
-GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "box", "violin", "reg", "hist", "kde", "ecdf")  # Seaborn's
-# kinds: swarm, box, and violin are categorical too, reg a scatter with a linear regression line, and kde
-# and ecdf distributions
-CATEGORICAL = {"strip", "swarm", "box", "violin"}  # drawn with catplot, x being categories
-CATEGORICAL_KINDS = {"strip": "Strip", "swarm": "Swarm", "box": "Box", "violin": "Violin"}  # the dialog's Kind
+GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "box", "violin", "bar", "point", "reg", "hist", "kde",
+               "ecdf")  # Seaborn's kinds: swarm, box, violin, bar, and point are categorical too, reg a
+# scatter with a linear regression line, and kde and ecdf distributions
+CATEGORICAL_KINDS = {"strip": "Strip", "swarm": "Swarm", "box": "Box", "violin": "Violin", "bar": "Bar",
+                     "point": "Point"}  # the dialog's Kind for a categorical chart
+CATEGORICAL = set(CATEGORICAL_KINDS)  # drawn with catplot, x being categories
 REGRESSION = {"reg"}  # drawn with lmplot, which fits a line to numbers both ways
 DISTRIBUTION = {"hist", "kde", "ecdf"}  # drawn with displot, of x's numbers (and y's); the rest with relplot
 DISTRIBUTION_KINDS = {"hist": "Histogram", "kde": "KDE", "ecdf": "ECDF"}  # the Chart dialog's Kind
 BIVARIATE = {"hist", "kde"}  # distributions that can be of a y column too, as well as x
 NEEDS_MARKERS = {"scatter", "strip", "swarm", "reg"}  # their points are nothing but markers
-NO_MARKERS = {"box", "violin", *DISTRIBUTION}  # no points to mark: their shapes sum the values up
+NO_MARKERS = {"box", "violin", "bar", *DISTRIBUTION}  # no points to mark: their shapes sum the values up
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
+def _the_others(kinds, kind: str) -> str:
+    """What follows kind= in a chart's code: "  # or 'kde' or 'ecdf'", the
+    other kinds its function draws (a, b, or c for more than two)."""
+    others = [repr(other) for other in kinds if other != kind]
+    listed = " or ".join(others) if len(others) <= 2 else f"{', '.join(others[:-1])}, or {others[-1]}"
+    return f"  # or {listed}"
+
+
 OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'",
-               "strip": "  # or 'swarm', 'box', or 'violin'", "swarm": "  # or 'strip', 'box', or 'violin'",
-               "box": "  # or 'violin', 'strip', or 'swarm'", "violin": "  # or 'box', 'strip', or 'swarm'",
-               "hist": "  # or 'kde' or 'ecdf'", "kde": "  # or 'hist' or 'ecdf'",
-               "ecdf": "  # or 'hist' or 'kde'"}  # what follows kind=, naming the other kinds its function draws
+               **{kind: _the_others(CATEGORICAL_KINDS, kind) for kind in CATEGORICAL_KINDS},
+               **{kind: _the_others(DISTRIBUTION_KINDS, kind) for kind in DISTRIBUTION_KINDS}}
 FACETED = set(GRAPH_KINDS)  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
 
@@ -505,7 +512,9 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     overlap, "box" draws a box from its values' first quartile to their
     third, with the median across it and whiskers out to the rest, and
     "violin" the shape of their spread (a KDE, mirrored), with a box
-    inside; or "reg" (lmplot), a scatter with a linear regression line
+    inside, "bar" a bar to their mean, with an error bar showing its 95%
+    confidence interval, and "point" that mean as a point, joined to the
+    next category's by a line; or "reg" (lmplot), a scatter with a linear regression line
     fitted to its points, and the line's 95% confidence band, which needs
     numbers across too. A categorical chart can have its categories up the y axis
     instead, with numbers across, turning it sideways: as a y column of text

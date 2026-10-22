@@ -32,11 +32,11 @@ from .notebook import (
     plot_function,
 )
 
-FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm", "box", "violin"), "lmplot": ("reg",),
+FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm", "box", "violin", "bar", "point"), "lmplot": ("reg",),
                   "displot": ("hist", "kde", "ecdf")}  # the kinds each draws, here
 DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg", "displot": "hist"}  # with no kind=
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a (?:chart|graph)\b", re.M)  # as graph_code writes it (or did)
-_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|box|violin|hist|kde|ecdf)\1[^\n]*")  # "# or 'line'"
+_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|box|violin|bar|point|hist|kde|ecdf)\1[^\n]*")  # "# or 'line'"
 _NOT_LITERAL = object()
 
 

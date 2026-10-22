@@ -566,9 +566,13 @@ The Chart dialog has these choices:
   sit on one line), **Swarm** (spread out so that none overlap, showing how
   they're distributed; with many points, it gets wide), **Box** (a box from
   the values' first quartile to their third, with the median across it and
-  whiskers out to the rest, and outliers as dots), or **Violin** (the shape
+  whiskers out to the rest, and outliers as dots), **Violin** (the shape
   of the values' spread, a KDE mirrored on each side, with a small box
-  inside). Box and Violin have no points, so no Marker.
+  inside), **Bar** (a bar up to the values' mean, with an error bar showing
+  its 95% confidence interval), or **Point** (that mean and error bar, as a
+  point joined to the next category's by a line; with a hue, a line for
+  each color). Box, Violin, and Bar have no points, so no Marker; Point's
+  marker is optional (None draws Seaborn's dots).
 - **Kind**, shown only for a distribution: **Histogram** (the default: bars
   counting the values in each range), **KDE** (a kernel density estimate's
   smooth curve), or **ECDF** (the share of values up to each value, rising
@@ -625,8 +629,8 @@ The Chart dialog has these choices:
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
   choosing one switches None to Circle, and choosing Line again switches it
-  back. A distribution, a box plot, and a violin plot have no points, so no
-  Marker.
+  back. A distribution, a box plot, a violin plot, and a bar plot have no
+  points, so no Marker.
 
 The axes start at sensible defaults: the first column across, and up, for a
 line chart, All; for the other types, the next column with numbers (a column
@@ -648,7 +652,8 @@ is empty, or has no numbers), an error says why, before the dialog appears. (Wit
 notebook, the dialog's Chart list says it instead; see below.)
 
 - The choices are in the cell's code too: change `kind='line'` to
-  `kind='scatter'` (or a categorical chart's `'strip'` to `'swarm'`, `'box'`, or `'violin'`, or a
+  `kind='scatter'` (or a categorical chart's `'strip'` to `'swarm'`, `'box'`,
+  `'violin'`, `'bar'`, or `'point'`, or a
   distribution's `'hist'` to `'kde'` or `'ecdf'`), or add or change
   `marker='o'` (any Matplotlib marker; `lmplot` calls it `markers='o'`), or a
   distribution's `kde=True` and `rug=True`, and run the cell again

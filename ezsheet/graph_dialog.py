@@ -56,7 +56,9 @@ NO_REGRESSION_TIP = "A linear regression needs two columns with numbers: one acr
 NO_Y = "None"  # a distribution's Y: none, just X's
 CATEGORICAL_TIP = ("Each category's values: as points scattered a little at random (Strip), spread out so "
                    "none overlap (Swarm), a box from the first quartile to the third with the median across "
-                   "it (Box), or the shape of their spread, with a box inside (Violin)")
+                   "it (Box), the shape of their spread, with a box inside (Violin), or their mean, with an "
+                   "error bar for its 95% confidence interval, as a bar (Bar) or a point joined to the next "
+                   "(Point)")
 DISTRIBUTION_TIP = ("How the X axis column's numbers are spread: a histogram's bars, a KDE's smooth curve, "
                     "or an ECDF's running share of them (Seaborn's displot)")
 DISTRIBUTION_Y_TIP = ("Optional: a histogram or KDE of two columns shows how they vary together, as a "
@@ -78,7 +80,8 @@ def graph_labels(graphs) -> list[str]:
 
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, which can have a linear regression
-    line fitted to it, Categorical, a strip, swarm, box, or violin plot, or
+    line fitted to it, Categorical, a strip, swarm, box, violin, bar, or
+    point plot, or
     Distribution, a histogram, KDE, or ECDF of the X axis column's numbers,
     and optionally the Y axis's, with a KDE curve over a histogram and a
     rug, and no marker),

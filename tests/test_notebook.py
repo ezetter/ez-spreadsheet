@@ -199,7 +199,7 @@ def test_scatter(sales, pyplot):
 
 def test_line_or_scatter_only(sales):
     with pytest.raises(ValueError):
-        graph_code(sales, block(0, 0, 3, 2), "df", "bar")
+        graph_code(sales, block(0, 0, 3, 2), "df", "pie")  # not a kind there is
 
 
 def test_numeric_x(pyplot, app):
