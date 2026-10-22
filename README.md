@@ -556,12 +556,19 @@ The Chart dialog has these choices:
   says so. Typing another name goes back to a new DataFrame of the sheet's
   cells. For a chart being changed (see below), it shows that chart's
   DataFrame, and a new name renames it.
-- **Chart type:** Line, Scatter, Categorical scatter, or Distribution. Line
-  and Scatter are drawn with Seaborn's `relplot`; a categorical scatter, with
+- **Chart type:** Line, Scatter, Categorical, or Distribution. Line and
+  Scatter are drawn with Seaborn's `relplot`; a categorical chart, with
   `catplot`, puts a column of categories (text such as species or months)
-  across and spreads each category's points out a little at random so they
-  don't all sit on one line (a strip plot). A distribution, drawn with
-  `displot`, shows how a column's numbers are spread (see below).
+  across and shows each category's values (see Kind). A distribution, drawn
+  with `displot`, shows how a column's numbers are spread (see below).
+- **Kind**, shown only for a categorical chart: **Strip** (the default:
+  each category's points, spread out a little at random so they don't all
+  sit on one line), **Swarm** (spread out so that none overlap, showing how
+  they're distributed; with many points, it gets wide), **Box** (a box from
+  the values' first quartile to their third, with the median across it and
+  whiskers out to the rest, and outliers as dots), or **Violin** (the shape
+  of the values' spread, a KDE mirrored on each side, with a small box
+  inside). Box and Violin have no points, so no Marker.
 - **Kind**, shown only for a distribution: **Histogram** (the default: bars
   counting the values in each range), **KDE** (a kernel density estimate's
   smooth curve), or **ECDF** (the share of values up to each value, rising
@@ -569,9 +576,6 @@ The Chart dialog has these choices:
 - **KDE curve**, shown only for a histogram: draws the KDE's curve over the
   bars (`kde=True`). It's unavailable with a Y axis column, as Seaborn
   draws it only over a histogram of one column.
-- **Swarm plot**, shown only for a categorical scatter: spreads each
-  category's points out so that none overlap, showing how they're
-  distributed (`kind='swarm'`). With many points, it gets wide.
 - **Linear regression**, shown only for Scatter: fits a straight line to the
   points, with a shaded band showing its 95% confidence interval, drawn with
   Seaborn's `lmplot` instead of `relplot`. A line needs numbers both ways, so
@@ -585,14 +589,14 @@ The Chart dialog has these choices:
 - **Y axis:** one of the other columns with numbers, or, for a line chart,
   **All**: every other column with numbers, each its own line, named in the
   legend (offered when there are two or more). For a categorical
-  scatter with numbers across, it can also be a column of categories (text),
+  chart with numbers across, it can also be a column of categories (text),
   which turns the chart sideways: the categories run down the side and the
   numbers across. While categories are up, the X axis offers only columns
   with numbers; and changing to Line or Scatter puts numbers back up. For a
   distribution it's optional: **None** (the default) or another column with
   numbers, for a histogram or KDE of how the two vary together (a heatmap
   of counts, or density contours). An ECDF is of one column, so it has none.
-- **Y axis as categories**, shown only for a categorical scatter: for numbers
+- **Y axis as categories**, shown only for a categorical chart: for numbers
   up that are really categories, such as years, check it to turn the chart
   sideways with each year as a category down the side (`orient='h'` in the
   code). Unchecked, numbers up are values, and the X axis column gives the
@@ -613,7 +617,7 @@ The Chart dialog has these choices:
   of years, and a scatter's Y axis starts at another column; choosing it for
   the Y axis clears the Col instead. Rows without a value in the Col column
   are left out. It's unavailable if there's no other column. Changing the
-  chart type keeps the panels, and a categorical scatter's X axis starts at
+  chart type keeps the panels, and a categorical chart's X axis starts at
   a column of text other than the Col's.
 - **Rug**, shown only for a distribution: a small tick along the axis for
   each value (`rug=True`).
@@ -621,11 +625,12 @@ The Chart dialog has these choices:
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
   choosing one switches None to Circle, and choosing Line again switches it
-  back. A distribution has no points, so no Marker.
+  back. A distribution, a box plot, and a violin plot have no points, so no
+  Marker.
 
 The axes start at sensible defaults: the first column across, and up, for a
 line chart, All; for the other types, the next column with numbers (a column
-of text alone can't go up). For a categorical scatter, the first column with
+of text alone can't go up). For a categorical chart, the first column with
 text goes across instead. The defaults follow the chart type until you choose an X axis
 yourself, and the Y axis follows the X axis until you choose it. Choosing a
 new X axis clears the Hue or Col if it was that column.
@@ -635,7 +640,7 @@ are stacked over each other, translucent), and its Col splits it into
 panels, as for the other types. Switching to Distribution starts with no Y
 axis column, and with the X axis at a column with numbers.
 
-The type (including Swarm plot, and a distribution's kind) and marker start
+The type (including a categorical chart's or a distribution's kind) and marker start
 from your last choices while EZ Sheet is open. Cancel adds nothing. A single
 column of numbers can be charted only as a distribution, so the dialog
 offers just that. If the cells can't be charted (the selection or the sheet
@@ -643,7 +648,7 @@ is empty, or has no numbers), an error says why, before the dialog appears. (Wit
 notebook, the dialog's Chart list says it instead; see below.)
 
 - The choices are in the cell's code too: change `kind='line'` to
-  `kind='scatter'` (or a categorical scatter's `'strip'` to `'swarm'`, or a
+  `kind='scatter'` (or a categorical chart's `'strip'` to `'swarm'`, `'box'`, or `'violin'`, or a
   distribution's `'hist'` to `'kde'` or `'ecdf'`), or add or change
   `marker='o'` (any Matplotlib marker; `lmplot` calls it `markers='o'`), or a
   distribution's `kde=True` and `rug=True`, and run the cell again

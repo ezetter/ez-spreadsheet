@@ -473,14 +473,14 @@ def dialog_state(dialog):
 def test_dialog_starts_with_defaults(app):
     dialog = GraphDialog(None, sales_columns())
     assert dialog_state(dialog) == ("line", "Month", ["Sales", "Cost"], None, None)  # All: a line each
-    assert [dialog.kind_box.itemText(i) for i in range(3)] == ["Line", "Scatter", "Categorical scatter"]
+    assert [dialog.kind_box.itemText(i) for i in range(3)] == ["Line", "Scatter", "Categorical"]
     assert [dialog.marker_box.itemData(i) for i in range(dialog.marker_box.count())] == list(MARKERS)
     assert [dialog.x_box.itemText(i) for i in range(4)] == ["Month", "Sales", "Cost", "Note"]
     assert [dialog.y_box.itemText(i) for i in range(dialog.y_box.count())] == ["All", "Sales", "Cost"]
     assert not dialog.hue_box.isEnabled()  # each line has its own color
     assert [dialog.hue_box.itemText(i) for i in range(dialog.hue_box.count())] == [
         "None", "Sales", "Cost", "Note"]  # any column but x
-    assert not dialog.form.isRowVisible(dialog.swarm_box)  # just for categorical scatters
+    assert not dialog.form.isRowVisible(dialog.categorical_box)  # just for categorical charts
 
 
 def test_dialog_starts_with_the_last_choices(app):
@@ -596,13 +596,13 @@ def test_no_all_with_one_column_of_numbers(app):
 def test_swarm_plots(app):
     dialog = GraphDialog(None, sales_columns())
     dialog.kind_box.setCurrentIndex(2)
-    assert dialog.form.isRowVisible(dialog.swarm_box) and dialog.kind() == "strip"
-    dialog.swarm_box.setChecked(True)
+    assert dialog.form.isRowVisible(dialog.categorical_box) and dialog.kind() == "strip"
+    dialog.categorical_box.setCurrentIndex(dialog.categorical_box.findData("swarm"))
     assert dialog.kind() == "swarm" and dialog.marker() == "o"
     dialog.kind_box.setCurrentIndex(1)
-    assert not dialog.form.isRowVisible(dialog.swarm_box) and dialog.kind() == "scatter"
+    assert not dialog.form.isRowVisible(dialog.categorical_box) and dialog.kind() == "scatter"
     swarm = GraphDialog(None, sales_columns(), "swarm", "D")  # the last choice was a swarm plot
-    assert swarm.kind_box.currentText() == "Categorical scatter" and swarm.swarm_box.isChecked()
+    assert swarm.kind_box.currentText() == "Categorical" and swarm.categorical_box.currentText() == "Swarm"
 
 
 def test_scatter_needs_a_marker(app):

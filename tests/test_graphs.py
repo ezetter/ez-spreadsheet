@@ -183,12 +183,12 @@ def test_new_graphs_have_no_graph_list(app):
 
 def test_reads_categorical_scatters(sales):
     code = graph_code(sales, cells(3), "df", "strip", "D", x="Month", ys=["Sales"])
-    assert "chart = sns.catplot(" in code and "    kind='strip',  # or 'swarm'\n" in code
+    assert "chart = sns.catplot(" in code and "    kind='strip',  # or 'swarm', 'box', or 'violin'\n" in code
     graph = read_graph(code)
     assert (graph.kind, graph.marker, graph.x_label, graph.y_labels) == ("strip", "D", "Month", ["Sales"])
     assert read_graph("sns.catplot(data=d, x='a', y='b')").kind == "strip"  # catplot's default
     assert read_graph(change_graph(code, "swarm", None)).kind == "swarm"
-    assert read_graph("sns.catplot(data=d, x='a', y='b', kind='box')") is None  # not one the dialog has
+    assert read_graph("sns.catplot(data=d, x='a', y='b', kind='boxen')") is None  # not one the dialog has
 
 
 def test_switches_between_relplot_and_catplot(sales):
@@ -196,7 +196,7 @@ def test_switches_between_relplot_and_catplot(sales):
     strip = change_graph(line, "strip", "o")
     assert strip == graph_code(sales, cells(3), "df", "strip", "o", ys=["Sales"])
     assert change_graph(strip, "line", None) == line
-    older = strip.replace("  # or 'swarm'", "")  # a categorical scatter made before swarm plots
+    older = strip.replace("  # or 'swarm', 'box', or 'violin'", "")  # one made before swarm plots
     assert change_graph(older, "scatter", "o") == graph_code(sales, cells(3), "df", "scatter", "o", ys=["Sales"])
 
 

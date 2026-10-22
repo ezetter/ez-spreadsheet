@@ -299,19 +299,24 @@ def dataframe_parts(model, cells, name: str) -> tuple[str, str]:
 
 # --- Graphing them with Seaborn ---
 
-GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical scatter",
+GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical",
                "hist": "Distribution"}  # the Chart dialog's
-GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "reg", "hist", "kde", "ecdf")  # Seaborn's kinds: swarm
-# is a categorical scatter too, reg a scatter with a linear regression line, and kde and ecdf distributions
-CATEGORICAL = {"strip", "swarm"}  # drawn with catplot, x being categories
+GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "box", "violin", "reg", "hist", "kde", "ecdf")  # Seaborn's
+# kinds: swarm, box, and violin are categorical too, reg a scatter with a linear regression line, and kde
+# and ecdf distributions
+CATEGORICAL = {"strip", "swarm", "box", "violin"}  # drawn with catplot, x being categories
+CATEGORICAL_KINDS = {"strip": "Strip", "swarm": "Swarm", "box": "Box", "violin": "Violin"}  # the dialog's Kind
 REGRESSION = {"reg"}  # drawn with lmplot, which fits a line to numbers both ways
 DISTRIBUTION = {"hist", "kde", "ecdf"}  # drawn with displot, of x's numbers (and y's); the rest with relplot
 DISTRIBUTION_KINDS = {"hist": "Histogram", "kde": "KDE", "ecdf": "ECDF"}  # the Chart dialog's Kind
 BIVARIATE = {"hist", "kde"}  # distributions that can be of a y column too, as well as x
 NEEDS_MARKERS = {"scatter", "strip", "swarm", "reg"}  # their points are nothing but markers
+NO_MARKERS = {"box", "violin", *DISTRIBUTION}  # no points to mark: their shapes sum the values up
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
-OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'", "strip": "  # or 'swarm'",
-               "swarm": "  # or 'strip'", "hist": "  # or 'kde' or 'ecdf'", "kde": "  # or 'hist' or 'ecdf'",
+OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'",
+               "strip": "  # or 'swarm', 'box', or 'violin'", "swarm": "  # or 'strip', 'box', or 'violin'",
+               "box": "  # or 'violin', 'strip', or 'swarm'", "violin": "  # or 'box', 'strip', or 'swarm'",
+               "hist": "  # or 'kde' or 'ecdf'", "kde": "  # or 'hist' or 'ecdf'",
                "ecdf": "  # or 'hist' or 'kde'"}  # what follows kind=, naming the other kinds its function draws
 FACETED = set(GRAPH_KINDS)  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
@@ -338,7 +343,7 @@ class GraphChoice:
     """What the Chart dialog chose: the kind of chart, its marker, the x
     column, the y column (in a list; graphs made before the y was a single
     column could have several, a series each), the hue column, if any,
-    coloring the points by its values, and whether a categorical scatter's
+    coloring the points by its values, and whether a categorical chart's
     y column is its categories, turning it sideways (as a column of text
     always is; for one of numbers, such as years, it has to be asked for),
     the col column, if any, splitting it into a panel for each of its
@@ -393,7 +398,7 @@ class GraphColumns:
 
     def y_options(self, x: str, kind: str = "line") -> list[str]:
         """The columns that can go up the y axis against x: those with
-        numbers, and for a categorical scatter across a column of numbers,
+        numbers, and for a categorical chart across a column of numbers,
         columns of categories too (which turn the graph sideways)."""
         if kind in DISTRIBUTION:  # (as well as x: none, unless it's chosen)
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != x]
@@ -403,7 +408,7 @@ class GraphColumns:
 
     def x_options(self, y: str | None, kind: str = "line", y_categories: bool = False) -> list[str]:
         """The columns that can go across: any, except that with categories
-        up a categorical scatter (sideways), only those with numbers; and a
+        up a categorical chart (sideways), only those with numbers; and a
         linear regression needs numbers across too."""
         if self.sideways([y] if y in self.labels else [], kind, y_categories) or kind in DISTRIBUTION:
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != y]
@@ -417,7 +422,7 @@ class GraphColumns:
         return sum(self.numbers) >= 2
 
     def sideways(self, ys: list[str], kind: str, y_categories: bool = False) -> bool:
-        """Whether a categorical scatter has its categories up the y axis: a
+        """Whether a categorical chart has its categories up the y axis: a
         column of text, or one of numbers (such as years) taken as categories."""
         return kind in CATEGORICAL and len(ys) == 1 and (y_categories or self.category(ys[0]))
 
@@ -433,7 +438,7 @@ class GraphColumns:
 
     def default_x(self, kind: str, col: str | None = None) -> str:
         """The first column that leaves another with numbers for y; for a
-        categorical scatter, the first such with text, as its categories,
+        categorical chart, the first such with text, as its categories,
         and for a linear regression or a distribution, with numbers. Not
         the col splitting the chart into panels, if there's another."""
         if kind in DISTRIBUTION:
@@ -495,11 +500,14 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
     default, the first column across and the next with numbers up, or for a
     line chart all the others with numbers, a line each), with
     the points colored by the `hue` column's values, if given. `kind` is
-    "line" or "scatter" (relplot), or a categorical scatter (catplot):
+    "line" or "scatter" (relplot), or a categorical chart (catplot):
     "strip" jitters each category's points, "swarm" spreads them so none
-    overlap; or "reg" (lmplot), a scatter with a linear regression line
+    overlap, "box" draws a box from its values' first quartile to their
+    third, with the median across it and whiskers out to the rest, and
+    "violin" the shape of their spread (a KDE, mirrored), with a box
+    inside; or "reg" (lmplot), a scatter with a linear regression line
     fitted to its points, and the line's 95% confidence band, which needs
-    numbers across too. A categorical scatter can have its categories up the y axis
+    numbers across too. A categorical chart can have its categories up the y axis
     instead, with numbers across, turning it sideways: as a y column of text
     does, or one of numbers (such as years) with `y_categories`. `marker` is a Matplotlib marker such as "o" for each point
     (None: none on a line, Seaborn's dots otherwise). Text in the y column
@@ -516,6 +524,8 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     if kind in DISTRIBUTION:
         return distribution_code(frame, frame_name, kind, x, ys, hue, import_pandas, import_seaborn, col, kde, rug)
+    if marker and kind in NO_MARKERS:
+        raise ValueError(f"a {kind} chart has no markers")
     columns = GraphColumns.of(frame)
     x = x if x is not None else columns.default_x(kind)
     ys = list(ys) if ys is not None else columns.default_ys(x, kind, col)

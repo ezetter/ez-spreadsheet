@@ -171,7 +171,7 @@ def visible(dialog, widget):
 
 def test_dialog(app):
     dialog = GraphDialog(None, GraphColumns.of(TIPS), "scatter", "o")
-    assert [dialog.kind_box.itemText(i) for i in range(4)] == ["Line", "Scatter", "Categorical scatter", "Distribution"]
+    assert [dialog.kind_box.itemText(i) for i in range(4)] == ["Line", "Scatter", "Categorical", "Distribution"]
     assert not visible(dialog, dialog.distribution_box) and not visible(dialog, dialog.rug_box)
     dialog.kind_box.setCurrentIndex(3)
     assert state(dialog) == ("hist", "Tip", [], None, None, False, False)

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from .notebook import (
     DISTRIBUTION,
+    NO_MARKERS,
     FRAME_COMMENT,
     GRAPH_KINDS,
     OTHER_KINDS,
@@ -31,11 +32,11 @@ from .notebook import (
     plot_function,
 )
 
-FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm"), "lmplot": ("reg",),
+FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm", "box", "violin"), "lmplot": ("reg",),
                   "displot": ("hist", "kde", "ecdf")}  # the kinds each draws, here
 DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg", "displot": "hist"}  # with no kind=
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a (?:chart|graph)\b", re.M)  # as graph_code writes it (or did)
-_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|hist|kde|ecdf)\1[^\n]*")  # "# or 'line'"
+_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|box|violin|hist|kde|ecdf)\1[^\n]*")  # "# or 'line'"
 _NOT_LITERAL = object()
 
 
@@ -112,7 +113,7 @@ def read_graph(source: str) -> GraphCell | None:
     if kind not in FUNCTION_KINDS[function]:
         return None
     key = marker_keyword(kind)
-    marker = _literal(keywords[key]) if key in keywords and kind not in DISTRIBUTION else None
+    marker = _literal(keywords[key]) if key in keywords and kind not in NO_MARKERS else None
     if not (marker is None or isinstance(marker, str) and marker):  # (not a list of them, one per hue)
         return None
     graph = GraphCell("", kind, marker, frame=_frame_name(source, tree))

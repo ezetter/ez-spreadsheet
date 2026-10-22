@@ -12,12 +12,14 @@ from .notebook import (
     ALL_SERIES,
     BIVARIATE,
     CATEGORICAL,
+    CATEGORICAL_KINDS,
     COL_WRAP,
     DISTRIBUTION,
     DISTRIBUTION_KINDS,
     FACETED,
     GRAPH_TYPES,
     NEEDS_MARKERS,
+    NO_MARKERS,
     REGRESSION,
     GraphChoice,
 )
@@ -35,7 +37,8 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     "*": "★ Star",
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
-TYPE_OF = {"swarm": "strip", "reg": "scatter", "kde": "hist", "ecdf": "hist"}  # the chart type of kinds
+TYPE_OF = {"swarm": "strip", "box": "strip", "violin": "strip", "reg": "scatter", "kde": "hist",
+           "ecdf": "hist"}  # the chart type of kinds
 # that are a checkbox of another, or one of a type's kinds (a distribution's)
 NO_HUE = "None"
 NO_COL = "None"
@@ -51,6 +54,9 @@ REGRESSION_TIP = ("Fit a straight line to the points, with a band showing its 95
                   "(Seaborn's lmplot). It needs numbers across, so the X axis offers only columns with numbers.")
 NO_REGRESSION_TIP = "A linear regression needs two columns with numbers: one across, and one up."
 NO_Y = "None"  # a distribution's Y: none, just X's
+CATEGORICAL_TIP = ("Each category's values: as points scattered a little at random (Strip), spread out so "
+                   "none overlap (Swarm), a box from the first quartile to the third with the median across "
+                   "it (Box), or the shape of their spread, with a box inside (Violin)")
 DISTRIBUTION_TIP = ("How the X axis column's numbers are spread: a histogram's bars, a KDE's smooth curve, "
                     "or an ECDF's running share of them (Seaborn's displot)")
 DISTRIBUTION_Y_TIP = ("Optional: a histogram or KDE of two columns shows how they vary together, as a "
@@ -72,7 +78,7 @@ def graph_labels(graphs) -> list[str]:
 
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, which can have a linear regression
-    line fitted to it, Categorical scatter, which can be a swarm plot, or
+    line fitted to it, Categorical, a strip, swarm, box, or violin plot, or
     Distribution, a histogram, KDE, or ECDF of the X axis column's numbers,
     and optionally the Y axis's, with a KDE curve over a histogram and a
     rug, and no marker),
@@ -80,7 +86,7 @@ class GraphDialog(QDialog):
     the points (None by default), the Col column splitting it into a panel
     for each of its values (None by default; a column of numbers, such as
     years, isn't one of All's lines then), and a marker (None by default).
-    Up takes a column with numbers, except that a categorical scatter
+    Up takes a column with numbers, except that a categorical chart
     across a column of numbers can have its categories up, turning it
     sideways: a column of text, or one of numbers (such as years) with "Y
     axis as categories" checked. Across then takes only columns with
@@ -150,10 +156,11 @@ class GraphDialog(QDialog):
         self.kde_box = QCheckBox("KDE curve")
         self.kde_box.setToolTip(KDE_TIP)
         form.addRow("", self.kde_box)
-        self.swarm_box = QCheckBox("Swarm plot")
-        self.swarm_box.setToolTip("Spread each category's points out so none overlap, "
-                                  "instead of scattering them a little at random")
-        form.addRow("", self.swarm_box)
+        self.categorical_box = QComboBox()  # a categorical chart's kind
+        for key, name in CATEGORICAL_KINDS.items():
+            self.categorical_box.addItem(name, key)
+        self.categorical_box.setToolTip(CATEGORICAL_TIP)
+        form.addRow("Kind:", self.categorical_box)
         self.categories_box = QCheckBox("Y axis as categories")
         self.categories_box.setToolTip(CATEGORIES_TIP)
         form.addRow("", self.categories_box)
@@ -195,7 +202,7 @@ class GraphDialog(QDialog):
         self._y_chosen = bool(self.graphs)  # likewise, the y follows the x until chosen
         self.kind_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.distribution_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
-        self.swarm_box.toggled.connect(lambda _checked: self._kind_changed())
+        self.categorical_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.regression_box.toggled.connect(lambda _checked: self._kind_changed())
         self.categories_box.toggled.connect(lambda _checked: self._categories_toggled())
         self.x_box.activated.connect(self._x_picked)
@@ -222,14 +229,14 @@ class GraphDialog(QDialog):
         kind = self.kind_box.currentData()
         if kind == "hist":
             return self.distribution_box.currentData()
-        if kind in CATEGORICAL and self.swarm_box.isChecked():
-            return "swarm"
+        if kind in CATEGORICAL:
+            return self.categorical_box.currentData()
         if kind == TYPE_OF["reg"] and self.regression_box.isChecked():
             return "reg"
         return kind
 
     def marker(self) -> str | None:
-        return None if self.kind() in DISTRIBUTION else self.marker_box.currentData()
+        return None if self.kind() in NO_MARKERS else self.marker_box.currentData()
 
     def kde(self) -> bool:
         """Whether a histogram of one column has its KDE curve over it."""
@@ -252,7 +259,7 @@ class GraphDialog(QDialog):
         return self.col_box.currentData() if self.kind() in FACETED else None
 
     def y_categories(self) -> bool:
-        """Whether a categorical scatter is sideways, with the y column its categories."""
+        """Whether a categorical chart is sideways, with the y column its categories."""
         return self.kind() in CATEGORICAL and self.categories_box.isChecked()
 
     def frame(self) -> str | None:
@@ -331,7 +338,7 @@ class GraphDialog(QDialog):
         self._none_replaced = False
         self.marker_box.setCurrentIndex(max(0, self.marker_box.findData(marker)))
         self.kind_box.setCurrentIndex(max(0, self.kind_box.findData(TYPE_OF.get(kind, kind))))
-        self.swarm_box.setChecked(kind == "swarm")
+        self.categorical_box.setCurrentIndex(max(0, self.categorical_box.findData(kind)))
         self.regression_box.setChecked(kind in REGRESSION and (self.columns is None or self.columns.can_regress))
         self.categories_box.setChecked(y_categories)
         known = self.columns is not None
@@ -359,7 +366,7 @@ class GraphDialog(QDialog):
         """Fill the X and Y axis choices, which depend on the type and each
         other, and the Col choices, which depend on both, selecting `x`,
         `ys`, and `col` where they still work (else the defaults). A
-        categorical scatter can have categories up, with numbers across;
+        categorical chart can have categories up, with numbers across;
         otherwise up takes numbers. All, for a line chart, takes every
         column with numbers but x and the col."""
         kind = self.kind()
@@ -458,7 +465,7 @@ class GraphDialog(QDialog):
         """Whether the type and marker can be chosen, and OK clicked. (The
         DataFrame can always be: another may be chartable.)"""
         self._allowed = allowed
-        for widget in (self.kind_box, self.swarm_box, self.regression_box, self.marker_box,
+        for widget in (self.kind_box, self.categorical_box, self.regression_box, self.marker_box,
                        self.distribution_box, self.kde_box, self.rug_box):
             widget.setEnabled(allowed)
         self._update_ok()
@@ -509,7 +516,7 @@ class GraphDialog(QDialog):
         self.form.setRowVisible(self.distribution_box, distribution)
         self.form.setRowVisible(self.kde_box, kind == "hist")
         self.form.setRowVisible(self.rug_box, distribution)
-        self.form.setRowVisible(self.marker_box, not distribution)
+        self.form.setRowVisible(self.marker_box, kind not in NO_MARKERS)
         if distribution != self._distribution and self.columns is not None and not self._loading:
             self._distribution = distribution  # (a distribution starts with no y; others, with theirs)
             x, hue = self.x(), self.hue_box.currentData()
@@ -517,7 +524,7 @@ class GraphDialog(QDialog):
             if self.x() != x:  # (a distribution's across has numbers)
                 self._fill_hues(hue if hue != self.x() else None)
         self._distribution = distribution
-        self.form.setRowVisible(self.swarm_box, kind in CATEGORICAL)
+        self.form.setRowVisible(self.categorical_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.categories_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.col_box, kind in FACETED)
         self.form.setRowVisible(self.regression_box, self.kind_box.currentData() == TYPE_OF["reg"])
