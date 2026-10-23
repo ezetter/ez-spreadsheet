@@ -556,11 +556,22 @@ The Chart dialog has these choices:
   says so. Typing another name goes back to a new DataFrame of the sheet's
   cells. For a chart being changed (see below), it shows that chart's
   DataFrame, and a new name renames it.
-- **Chart type:** Line, Scatter, Categorical, or Distribution. Line and
+- **Chart type:** Line, Scatter, Categorical, Distribution, or Joint. Line and
   Scatter are drawn with Seaborn's `relplot`; a categorical chart, with
   `catplot`, puts a column of categories (text such as species or months)
   across and shows each category's values (see Kind). A distribution, drawn
-  with `displot`, shows how a column's numbers are spread (see below).
+  with `displot`, shows how a column's numbers are spread (see below). A
+  joint chart, drawn with `jointplot`, charts one column of numbers against
+  another, with each one's distribution along the top and right sides.
+- **Kind**, shown only for a joint chart: **Scatter** (the default),
+  **KDE** (density contours), **Histogram** (a heatmap of counts), **Hex**
+  (hexagons shaded by how many points are in each), **Regression** (a
+  scatter with a linear regression line and its confidence band), or
+  **Residuals** (each point's distance from that line). Its X and Y axes
+  take columns with numbers, so it needs two of them. Only Scatter, KDE,
+  and Histogram can have a Hue (Seaborn doesn't color the others), only
+  Scatter and Regression a Marker (optional), and none a Col: a joint chart
+  is one panel.
 - **Kind**, shown only for a categorical chart: **Strip** (the default:
   each category's points, spread out a little at random so they don't all
   sit on one line), **Swarm** (spread out so that none overlap, showing how
@@ -629,8 +640,8 @@ The Chart dialog has these choices:
   Diamond, Triangle up, Triangle down, Plus, Cross, or Star. Scatter charts
   need markers to show their points, so None isn't available for them:
   choosing one switches None to Circle, and choosing Line again switches it
-  back. A distribution, a box plot, a violin plot, and a bar plot have no
-  points, so no Marker.
+  back. A distribution, a box plot, a violin plot, a bar plot, and a joint
+  chart other than a scatter or regression have no points, so no Marker.
 
 The axes start at sensible defaults: the first column across, and up, for a
 line chart, All; for the other types, the next column with numbers (a column
@@ -653,7 +664,8 @@ notebook, the dialog's Chart list says it instead; see below.)
 
 - The choices are in the cell's code too: change `kind='line'` to
   `kind='scatter'` (or a categorical chart's `'strip'` to `'swarm'`, `'box'`,
-  `'violin'`, `'bar'`, or `'point'`, or a
+  `'violin'`, `'bar'`, or `'point'`, a joint chart's `'scatter'` to
+  `'kde'`, `'hist'`, `'hex'`, `'reg'`, or `'resid'`, or a
   distribution's `'hist'` to `'kde'` or `'ecdf'`), or add or change
   `marker='o'` (any Matplotlib marker; `lmplot` calls it `markers='o'`), or a
   distribution's `kde=True` and `rug=True`, and run the cell again
@@ -689,10 +701,10 @@ OK:
   `kind=`, `kde=`, and `rug=`.
 - Changing the axes, the hue, or the col writes the chart's cell afresh, from
   the data in its DataFrame's cell, so changes you made to the chart's cell by
-  hand are replaced, as does making a distribution another type of chart or
-  the other way round. The columns can be changed only if that cell is found,
+  hand are replaced, as does making a distribution or a joint chart another
+  type of chart or the other way round. The columns can be changed only if that cell is found,
   written as EZ Sheet writes it; otherwise they're shown but greyed out, and
-  a chart can't switch between a distribution and another type (nor an
+  a chart can't switch between a distribution or a joint chart and another type (nor an
   ECDF be chosen for a distribution of two columns).
 - A chart made before the Y axis took one column may chart several, a series
   each. Its Y axis shows them all (such as "Sales, Cost"), with no hue, since
@@ -715,7 +727,7 @@ OK:
   chart. If Python has restarted since its DataFrame was made (or the sheet
   was opened since), the imports cell and the DataFrame's cell run first.
 - Any cell drawing one `sns.relplot(...)`, `sns.catplot(...)`,
-  `sns.lmplot(...)`, or `sns.displot(...)` chart of a kind the dialog has counts, including ones you
+  `sns.lmplot(...)`, `sns.displot(...)`, or `sns.jointplot(...)` chart of a kind the dialog has counts, including ones you
   write, as long as its `kind=` and `marker=` (`markers=`), if it has them,
   are written out, such as `kind='line'` and `marker='o'`. (An `lmplot` with
   a list of markers, one per hue, can't be changed.)

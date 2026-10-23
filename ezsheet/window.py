@@ -91,6 +91,7 @@ from .load_data_dialog import LoadDataDialog
 from .notebook import (
     DISTRIBUTION,
     IMPORTS_CELL,
+    JOINT,
     GraphChoice,
     GraphError,
     Notebook,
@@ -2874,7 +2875,8 @@ class MainWindow(QMainWindow):
         """Redraw one of the notebook's charts with the choices made. New
         columns (across, up, for the hue, or splitting it into panels) mean
         writing its cell afresh, from its DataFrame's cell, as does a
-        distribution becoming another kind of chart or the other way round;
+        distribution or joint chart becoming another kind of chart or the
+        other way round;
         otherwise just its kind and marker (and a distribution's KDE and rug)
         change in the code. A new name for its DataFrame
         renames it in its cell and the cells after it that use it. Returns
@@ -2890,10 +2892,10 @@ class MainWindow(QMainWindow):
             source = renamed.get(graph.cell_id, self.notebook.cell(graph.cell_id).source)
             columns_before = (graph.x_label, graph.y_labels, graph.hue, graph.col, graph.columns is not None
                               and graph.columns.sideways(graph.y_labels, graph.kind, graph.y_categories),
-                              graph.kind in DISTRIBUTION)
+                              graph.kind in DISTRIBUTION, graph.kind in JOINT)
             columns_after = (chosen.x, chosen.ys, chosen.hue, chosen.col, graph.columns is not None
                              and graph.columns.sideways(chosen.ys, chosen.kind, chosen.y_categories),
-                             chosen.kind in DISTRIBUTION)
+                             chosen.kind in DISTRIBUTION, chosen.kind in JOINT)
             if graph.data is not None and columns_after != columns_before:
                 source = frame_graph_code(graph.data, frame, chosen.kind, chosen.marker, chosen.x,
                                           chosen.ys, chosen.hue, chosen.y_categories,

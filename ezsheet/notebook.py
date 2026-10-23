@@ -300,10 +300,12 @@ def dataframe_parts(model, cells, name: str) -> tuple[str, str]:
 # --- Graphing them with Seaborn ---
 
 GRAPH_TYPES = {"line": "Line", "scatter": "Scatter", "strip": "Categorical",
-               "hist": "Distribution"}  # the Chart dialog's
+               "hist": "Distribution", "joint-scatter": "Joint"}  # the Chart dialog's
 GRAPH_KINDS = ("line", "scatter", "strip", "swarm", "box", "violin", "bar", "point", "reg", "hist", "kde",
-               "ecdf")  # Seaborn's kinds: swarm, box, violin, bar, and point are categorical too, reg a
-# scatter with a linear regression line, and kde and ecdf distributions
+               "ecdf", "joint-scatter", "joint-kde", "joint-hist", "joint-hex", "joint-reg",
+               "joint-resid")  # Seaborn's kinds: swarm, box, violin, bar, and point are categorical too,
+# reg a scatter with a linear regression line, kde and ecdf distributions, and the joint- ones jointplot's
+# (scatter, kde, ... there: joint- tells them from relplot's and displot's)
 CATEGORICAL_KINDS = {"strip": "Strip", "swarm": "Swarm", "box": "Box", "violin": "Violin", "bar": "Bar",
                      "point": "Point"}  # the dialog's Kind for a categorical chart
 CATEGORICAL = set(CATEGORICAL_KINDS)  # drawn with catplot, x being categories
@@ -311,8 +313,13 @@ REGRESSION = {"reg"}  # drawn with lmplot, which fits a line to numbers both way
 DISTRIBUTION = {"hist", "kde", "ecdf"}  # drawn with displot, of x's numbers (and y's); the rest with relplot
 DISTRIBUTION_KINDS = {"hist": "Histogram", "kde": "KDE", "ecdf": "ECDF"}  # the Chart dialog's Kind
 BIVARIATE = {"hist", "kde"}  # distributions that can be of a y column too, as well as x
+JOINT_KINDS = {"joint-scatter": "Scatter", "joint-kde": "KDE", "joint-hist": "Histogram", "joint-hex": "Hex",
+               "joint-reg": "Regression", "joint-resid": "Residuals"}  # jointplot's, and the dialog's Kind
+JOINT = set(JOINT_KINDS)  # drawn with jointplot: x against y, with each one's distribution along its side
+JOINT_HUES = {"joint-scatter", "joint-kde", "joint-hist"}  # the joint kinds that can have a hue
 NEEDS_MARKERS = {"scatter", "strip", "swarm", "reg"}  # their points are nothing but markers
-NO_MARKERS = {"box", "violin", "bar", *DISTRIBUTION}  # no points to mark: their shapes sum the values up
+NO_MARKERS = {"box", "violin", "bar", *DISTRIBUTION, "joint-kde", "joint-hist", "joint-hex", "joint-resid"}
+# (no points to mark: their shapes sum the values up)
 ALL_SERIES = {"line"}  # kinds whose y can be all the other columns with numbers, a series (line) each
 def _the_others(kinds, kind: str) -> str:
     """What follows kind= in a chart's code: "  # or 'kde' or 'ecdf'", the
@@ -322,10 +329,16 @@ def _the_others(kinds, kind: str) -> str:
     return f"  # or {listed}"
 
 
+def seaborn_kind(kind: str) -> str:
+    """A kind as Seaborn's function takes it: joint-kde is jointplot's kind='kde'."""
+    return kind.removeprefix("joint-")
+
+
 OTHER_KINDS = {"line": "  # or 'scatter'", "scatter": "  # or 'line'",
                **{kind: _the_others(CATEGORICAL_KINDS, kind) for kind in CATEGORICAL_KINDS},
-               **{kind: _the_others(DISTRIBUTION_KINDS, kind) for kind in DISTRIBUTION_KINDS}}
-FACETED = set(GRAPH_KINDS)  # kinds that can be split by a column's values (col=), a panel for each
+               **{kind: _the_others(DISTRIBUTION_KINDS, kind) for kind in DISTRIBUTION_KINDS},
+               **{kind: _the_others(map(seaborn_kind, JOINT_KINDS), seaborn_kind(kind)) for kind in JOINT_KINDS}}
+FACETED = set(GRAPH_KINDS) - JOINT  # kinds that can be split by a column's values (col=), a panel for each
 COL_WRAP = 2  # panels to a row
 
 
@@ -337,6 +350,8 @@ def plot_function(kind: str) -> str:
     """The Seaborn function drawing a kind of graph."""
     if kind in DISTRIBUTION:
         return "displot"
+    if kind in JOINT:
+        return "jointplot"
     return "catplot" if kind in CATEGORICAL else "lmplot" if kind in REGRESSION else "relplot"
 
 
@@ -407,7 +422,7 @@ class GraphColumns:
         """The columns that can go up the y axis against x: those with
         numbers, and for a categorical chart across a column of numbers,
         columns of categories too (which turn the graph sideways)."""
-        if kind in DISTRIBUTION:  # (as well as x: none, unless it's chosen)
+        if kind in DISTRIBUTION | JOINT:  # (as well as x: for a distribution, none unless it's chosen)
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != x]
         sideways = kind in CATEGORICAL and self.numbers[self.labels.index(x)]
         return [label for label, numbers in zip(self.labels, self.numbers)
@@ -417,7 +432,7 @@ class GraphColumns:
         """The columns that can go across: any, except that with categories
         up a categorical chart (sideways), only those with numbers; and a
         linear regression needs numbers across too."""
-        if self.sideways([y] if y in self.labels else [], kind, y_categories) or kind in DISTRIBUTION:
+        if self.sideways([y] if y in self.labels else [], kind, y_categories) or kind in DISTRIBUTION | JOINT:
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers and label != y]
         if kind in REGRESSION:
             return [label for label, numbers in zip(self.labels, self.numbers) if numbers]
@@ -451,6 +466,10 @@ class GraphColumns:
         if kind in DISTRIBUTION:
             usable = self.x_options(None, kind)
             return ([label for label in usable if label != col] or usable)[0]
+        if kind in JOINT:
+            if not self.can_regress:
+                raise GraphError("A joint chart needs two columns with numbers: one across, and one up.")
+            return self.x_options(None, kind)[0]
         if self.only_distribution:
             raise GraphError(f"A {'line chart' if kind == 'line' else 'scatter chart'} needs at least two columns: "
                              "one for x, and another for y.")
@@ -533,6 +552,10 @@ def frame_graph_code(frame: FrameData, frame_name: str = "df", kind: str = "line
         raise ValueError(f"kind must be one of {', '.join(GRAPH_KINDS)}, not {kind!r}")
     if kind in DISTRIBUTION:
         return distribution_code(frame, frame_name, kind, x, ys, hue, import_pandas, import_seaborn, col, kde, rug)
+    if kind in JOINT:
+        if col is not None:
+            raise ValueError("a joint chart can't be split into panels")
+        return joint_code(frame, frame_name, kind, marker, x, ys, hue, import_pandas, import_seaborn)
     if marker and kind in NO_MARKERS:
         raise ValueError(f"a {kind} chart has no markers")
     columns = GraphColumns.of(frame)
@@ -658,6 +681,48 @@ def distribution_code(frame: FrameData, frame_name: str = "df", kind: str = "his
         lines.append("    rug=True,  # a tick along the axis for each value")
     size = "height=2.5, aspect=1.2" if col is not None else "height=4, aspect=1.5"
     lines += [f"    {size},", ")"]
+    return "\n".join(lines)
+
+
+def joint_code(frame: FrameData, frame_name: str = "df", kind: str = "joint-scatter", marker: str | None = None,
+               x: str | None = None, ys: list[str] | None = None, hue: str | None = None,
+               import_pandas: bool = True, import_seaborn: bool = True) -> str:
+    """Python that charts a DataFrame's column `x` against `ys[0]`, both
+    numbers, with Seaborn's jointplot: in the middle a scatter (joint-
+    scatter), a KDE's contours, a histogram's heatmap, hexagons counting the
+    points in them, a scatter with a linear regression line, or that line's
+    residuals; and along the top and right, each column's own distribution.
+    A scatter or regression can have a `marker`; a scatter, KDE, or
+    histogram, a `hue`. Text in x or y isn't charted. GraphError if it can't be."""
+    columns = GraphColumns.of(frame)
+    x = x if x is not None else columns.default_x(kind)
+    ys = list(ys) if ys is not None else columns.default_ys(x, kind)
+    if x not in columns.x_options(None, kind) or len(ys) != 1 or ys[0] not in columns.y_options(x, kind):
+        raise ValueError(f"can't chart {ys!r} against {x!r}")
+    if hue is not None and (kind not in JOINT_HUES or hue not in columns.hue_options(x)):
+        raise ValueError(f"can't color the chart by {hue!r}")
+    if marker and kind in NO_MARKERS:
+        raise ValueError(f"a {seaborn_kind(kind)} joint chart has no markers")
+    y = ys[0]
+    values = dict(zip(frame.labels, frame.columns))
+    fixes = [f"data[{column!r}] = pd.to_numeric(data[{column!r}], errors='coerce')  # text isn't charted"
+             for column in (x, y) if any(isinstance(v, str) for v in values[column])]
+    if hue is not None and any(isinstance(v, str) for v in values[hue]) and any(_is_number(v) for v in values[hue]):
+        fixes.append(f"data[{hue!r}] = data[{hue!r}].astype('string')  # numbers and text: all labels")
+    lines = ["import pandas as pd"] if import_pandas and fixes else []
+    lines += ["import seaborn as sns"] if import_seaborn else []
+    lines += [""] if lines else []
+    colored = f", colored by {hue!r}" if hue is not None else ""
+    lines += [f"# {frame_name} as a chart: {y!r} against {x!r}{colored}, with each one's distribution.",
+              "sns.set_theme(style='whitegrid')"]
+    data = frame_name
+    if fixes:
+        lines += [f"data = {frame_name}.copy()", *fixes]
+        data = "data"
+    plotted = f"data={data}, x={x!r}, y={y!r}" + (f", hue={hue!r}" if hue is not None else "")
+    marked = f"marker={marker!r}, " if marker else ""
+    lines += ["chart = sns.jointplot(", f"    {plotted},", f"    kind={seaborn_kind(kind)!r},{OTHER_KINDS[kind]}",
+              f"    {marked}height=6,", ")"]
     return "\n".join(lines)
 
 

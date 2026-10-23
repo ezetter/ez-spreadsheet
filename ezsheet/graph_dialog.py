@@ -18,6 +18,9 @@ from .notebook import (
     DISTRIBUTION_KINDS,
     FACETED,
     GRAPH_TYPES,
+    JOINT,
+    JOINT_HUES,
+    JOINT_KINDS,
     NEEDS_MARKERS,
     NO_MARKERS,
     REGRESSION,
@@ -37,8 +40,9 @@ MARKERS = {  # Matplotlib's marker code -> its name in the dialog
     "*": "★ Star",
 }
 SCATTER_DEFAULT = "o"  # what a graph needing markers gets in place of None
-TYPE_OF = {"swarm": "strip", "box": "strip", "violin": "strip", "reg": "scatter", "kde": "hist",
-           "ecdf": "hist"}  # the chart type of kinds
+TYPE_OF = {"swarm": "strip", "box": "strip", "violin": "strip", "bar": "strip", "point": "strip",
+           "reg": "scatter", "kde": "hist", "ecdf": "hist",
+           **{kind: "joint-scatter" for kind in JOINT_KINDS}}  # the chart type of kinds
 # that are a checkbox of another, or one of a type's kinds (a distribution's)
 NO_HUE = "None"
 NO_COL = "None"
@@ -59,6 +63,11 @@ CATEGORICAL_TIP = ("Each category's values: as points scattered a little at rand
                    "it (Box), the shape of their spread, with a box inside (Violin), or their mean, with an "
                    "error bar for its 95% confidence interval, as a bar (Bar) or a point joined to the next "
                    "(Point)")
+JOINT_TIP = ("The X axis column against the Y axis's, with each one's distribution along the top and "
+             "right: a scatter, a KDE's contours, a histogram's heatmap, hexagons counting the points in them, "
+             "a scatter with a linear regression line, or that line's residuals (Seaborn's jointplot)")
+JOINT_HUE_TIP = "A hex, regression, or residuals joint chart can't be colored by a hue."
+NO_JOINT_TIP = "A joint chart needs two columns with numbers: one across, and one up."
 DISTRIBUTION_TIP = ("How the X axis column's numbers are spread: a histogram's bars, a KDE's smooth curve, "
                     "or an ECDF's running share of them (Seaborn's displot)")
 DISTRIBUTION_Y_TIP = ("Optional: a histogram or KDE of two columns shows how they vary together, as a "
@@ -68,6 +77,11 @@ KDE_TIP = "Draw a kernel density estimate's smooth curve over the histogram's ba
 NO_KDE_TIP = "A KDE curve goes over a histogram of one column: choose None for the Y axis."
 RUG_TIP = "Draw a tick along the axis for each value"
 _CURRENT = object()  # (for _set_axes: the Col chosen now)
+
+
+def _family(kind: str) -> str:
+    """Which sort of chart a kind is: a distribution, a joint chart, or another (which can become each other)."""
+    return "distribution" if kind in DISTRIBUTION else "joint" if kind in JOINT else "other"
 
 
 def graph_labels(graphs) -> list[str]:
@@ -81,7 +95,8 @@ def graph_labels(graphs) -> list[str]:
 class GraphDialog(QDialog):
     """The chart type (Line, Scatter, which can have a linear regression
     line fitted to it, Categorical, a strip, swarm, box, violin, bar, or
-    point plot, or
+    point plot, Joint, x against y with each one's distribution along the
+    sides, or
     Distribution, a histogram, KDE, or ECDF of the X axis column's numbers,
     and optionally the Y axis's, with a KDE curve over a histogram and a
     rug, and no marker),
@@ -164,6 +179,11 @@ class GraphDialog(QDialog):
             self.categorical_box.addItem(name, key)
         self.categorical_box.setToolTip(CATEGORICAL_TIP)
         form.addRow("Kind:", self.categorical_box)
+        self.joint_box = QComboBox()  # a joint chart's kind
+        for key, name in JOINT_KINDS.items():
+            self.joint_box.addItem(name, key)
+        self.joint_box.setToolTip(JOINT_TIP)
+        form.addRow("Kind:", self.joint_box)
         self.categories_box = QCheckBox("Y axis as categories")
         self.categories_box.setToolTip(CATEGORIES_TIP)
         form.addRow("", self.categories_box)
@@ -206,6 +226,7 @@ class GraphDialog(QDialog):
         self.kind_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.distribution_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.categorical_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
+        self.joint_box.currentIndexChanged.connect(lambda _index: self._kind_changed())
         self.regression_box.toggled.connect(lambda _checked: self._kind_changed())
         self.categories_box.toggled.connect(lambda _checked: self._categories_toggled())
         self.x_box.activated.connect(self._x_picked)
@@ -232,6 +253,8 @@ class GraphDialog(QDialog):
         kind = self.kind_box.currentData()
         if kind == "hist":
             return self.distribution_box.currentData()
+        if kind in JOINT:
+            return self.joint_box.currentData()
         if kind in CATEGORICAL:
             return self.categorical_box.currentData()
         if kind == TYPE_OF["reg"] and self.regression_box.isChecked():
@@ -255,7 +278,9 @@ class GraphDialog(QDialog):
         return list(self.y_box.currentData() or [])
 
     def hue(self) -> str | None:
-        return None if len(self.ys()) > 1 else self.hue_box.currentData()  # several ys: a series each
+        if len(self.ys()) > 1 or self.kind() in JOINT - JOINT_HUES:
+            return None  # several ys: a series each; and some joint charts can't have one
+        return self.hue_box.currentData()
 
     def col(self) -> str | None:
         """The column splitting the chart into panels, if any."""
@@ -342,6 +367,7 @@ class GraphDialog(QDialog):
         self.marker_box.setCurrentIndex(max(0, self.marker_box.findData(marker)))
         self.kind_box.setCurrentIndex(max(0, self.kind_box.findData(TYPE_OF.get(kind, kind))))
         self.categorical_box.setCurrentIndex(max(0, self.categorical_box.findData(kind)))
+        self.joint_box.setCurrentIndex(max(0, self.joint_box.findData(kind)))
         self.regression_box.setChecked(kind in REGRESSION and (self.columns is None or self.columns.can_regress))
         self.categories_box.setChecked(y_categories)
         known = self.columns is not None
@@ -468,7 +494,7 @@ class GraphDialog(QDialog):
         """Whether the type and marker can be chosen, and OK clicked. (The
         DataFrame can always be: another may be chartable.)"""
         self._allowed = allowed
-        for widget in (self.kind_box, self.categorical_box, self.regression_box, self.marker_box,
+        for widget in (self.kind_box, self.categorical_box, self.joint_box, self.regression_box, self.marker_box,
                        self.distribution_box, self.kde_box, self.rug_box):
             widget.setEnabled(allowed)
         self._update_ok()
@@ -480,12 +506,15 @@ class GraphDialog(QDialog):
         ECDF has no y)."""
         model = self.kind_box.model()
         for i in range(self.kind_box.count()):
-            distribution = self.kind_box.itemData(i) == "hist"
+            key = self.kind_box.itemData(i)
+            distribution = key == "hist"
             if self.columns is None:
-                usable = distribution == (kind in DISTRIBUTION)
+                usable = _family(key) == _family(kind)
                 tip = "Its DataFrame's cell wasn't found, so it can't become this kind of chart."
             elif self.columns.only_distribution:
                 usable, tip = distribution, "With one column, there's just its distribution to chart."
+            elif key in JOINT and not self.columns.can_regress:
+                usable, tip = False, NO_JOINT_TIP
             else:
                 usable, tip = True, ""
             model.item(i).setEnabled(usable)
@@ -528,6 +557,7 @@ class GraphDialog(QDialog):
                 self._fill_hues(hue if hue != self.x() else None)
         self._distribution = distribution
         self.form.setRowVisible(self.categorical_box, kind in CATEGORICAL)
+        self.form.setRowVisible(self.joint_box, kind in JOINT)
         self.form.setRowVisible(self.categories_box, kind in CATEGORICAL)
         self.form.setRowVisible(self.col_box, kind in FACETED)
         self.form.setRowVisible(self.regression_box, self.kind_box.currentData() == TYPE_OF["reg"])
@@ -589,9 +619,10 @@ class GraphDialog(QDialog):
         if self.col_box.currentData() not in (None, *self.columns.col_options(self.x(), self._col_ys())):
             self._set_axes(self.x(), ys, None)  # it took the col's column: no panels, and All takes it again
             return
-        several = len(ys) > 1
-        self.hue_box.setEnabled(not several)
-        self.hue_box.setToolTip("Each column is its own series, in its own color." if several else HUE_TIP)
+        several, uncolored = len(ys) > 1, self.kind() in JOINT - JOINT_HUES
+        self.hue_box.setEnabled(not several and not uncolored)
+        self.hue_box.setToolTip("Each column is its own series, in its own color." if several
+                                else JOINT_HUE_TIP if uncolored else HUE_TIP)
         self._show_distribution()
 
     def _show_distribution(self) -> None:

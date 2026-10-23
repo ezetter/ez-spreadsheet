@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 
 from .notebook import (
     DISTRIBUTION,
+    JOINT,
+    JOINT_HUES,
     NO_MARKERS,
     FRAME_COMMENT,
     GRAPH_KINDS,
@@ -30,13 +32,15 @@ from .notebook import (
     frame_name_problem,
     marker_keyword,
     plot_function,
+    seaborn_kind,
 )
 
 FUNCTION_KINDS = {"relplot": ("line", "scatter"), "catplot": ("strip", "swarm", "box", "violin", "bar", "point"), "lmplot": ("reg",),
-                  "displot": ("hist", "kde", "ecdf")}  # the kinds each draws, here
-DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg", "displot": "hist"}  # with no kind=
+                  "displot": ("hist", "kde", "ecdf"), "jointplot": tuple(sorted(JOINT))}  # the kinds each draws, here
+DEFAULT_KINDS = {"relplot": "scatter", "catplot": "strip", "lmplot": "reg", "displot": "hist",
+                 "jointplot": "scatter"}  # with no kind= (as Seaborn calls them)
 _FRAME_COMMENT = re.compile(r"^#\s*(\w+) as a (?:chart|graph)\b", re.M)  # as graph_code writes it (or did)
-_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|box|violin|bar|point|hist|kde|ecdf)\1[^\n]*")  # "# or 'line'"
+_OTHER_KIND = re.compile(r"[ \t]*#\s*or\s*(['\"])(line|scatter|strip|swarm|box|violin|bar|point|hist|kde|ecdf|hex|resid|reg)\1[^\n]*")  # "# or 'line'"
 _NOT_LITERAL = object()
 
 
@@ -110,6 +114,8 @@ def read_graph(source: str) -> GraphCell | None:
     function = call.func.attr
     keywords = {k.arg: k.value for k in call.keywords if k.arg}
     kind = _literal(keywords["kind"]) if "kind" in keywords else DEFAULT_KINDS[function]
+    if function == "jointplot" and isinstance(kind, str):
+        kind = f"joint-{kind}"  # (jointplot's scatter, kde, ...: not relplot's or displot's)
     if kind not in FUNCTION_KINDS[function]:
         return None
     key = marker_keyword(kind)
@@ -146,9 +152,13 @@ def change_graph(source: str, kind: str, marker: str | None, kde: bool = False, 
     graph = read_graph(source)
     if graph is None:
         raise ValueError("the code doesn't draw a chart that can be changed")
-    if (graph.kind in DISTRIBUTION) != (kind in DISTRIBUTION):
-        raise ValueError("a chart can't become a distribution, or a distribution another chart, without its "
-                         "DataFrame's data, from its cell")
+    if (graph.kind in DISTRIBUTION) != (kind in DISTRIBUTION) or (graph.kind in JOINT) != (kind in JOINT):
+        raise ValueError("a chart can't become a distribution or a joint chart, or one of those another kind "
+                         "of chart, without its DataFrame's data, from its cell")
+    if kind in JOINT and graph.hue is not None and kind not in JOINT_HUES:
+        raise ValueError(f"a {seaborn_kind(kind)} joint chart can't have a hue")
+    if marker and kind in NO_MARKERS:
+        raise ValueError(f"a {seaborn_kind(kind)} chart has no markers")
     if kind in DISTRIBUTION:
         return _change_distribution(source, graph, kind, kde, rug)
     _tree, call = _plot_call(source)
@@ -175,7 +185,7 @@ def change_graph(source: str, kind: str, marker: str | None, kde: bool = False, 
     elif "kind" in keywords:
         value = keywords["kind"].value
         start, end = at(value.lineno, value.col_offset), at(value.end_lineno, value.end_col_offset)
-        edits.append((start, end, repr(kind)))
+        edits.append((start, end, repr(seaborn_kind(kind))))
         line_end = _line_end(source, end)
         comment = _OTHER_KIND.search(source, end, line_end)
         if comment:  # "# or 'scatter'" names the other kind
@@ -186,10 +196,10 @@ def change_graph(source: str, kind: str, marker: str | None, kde: bool = False, 
         indent = _line_indent(source, at, call, keywords.get("height"))
         if indent:  # graph_code's layout: a line of its own, before "marker='o', height=4, ..."
             spot = at(keywords["height"].lineno, 0)
-            edits.append((spot, spot, f"{indent}kind={kind!r},{other}\n"))
+            edits.append((spot, spot, f"{indent}kind={seaborn_kind(kind)!r},{other}\n"))
         else:
             paren = source.index("(", at(call.func.end_lineno, call.func.end_col_offset))
-            edits.append((paren + 1, paren + 1, f"kind={kind!r}, "))
+            edits.append((paren + 1, paren + 1, f"kind={seaborn_kind(kind)!r}, "))
 
     had, key = ("markers" if call.func.attr == "lmplot" else "marker"), marker_keyword(kind)
     if had in keywords:
